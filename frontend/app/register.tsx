@@ -50,15 +50,18 @@ export default function Register() {
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
-            <View style={styles.brand}>
-              <Text style={styles.logo}>AURA</Text>
-              <Text style={styles.caption}>ALWAYS LISTENING</Text>
+          <View style={styles.brand}>
+            <View style={styles.brandLogoRing}>
+              <View style={styles.brandLogoDot} />
             </View>
+            <Text style={styles.logo}>AURA</Text>
+            <Text style={styles.caption}>Create account.</Text>
+          </View>
 
-            <View style={styles.header}>
-              <Text style={styles.title}>Create{"\n"}account.</Text>
-              <Text style={styles.subtitle}>Your private voice assistant.</Text>
-            </View>
+          <View style={styles.header}>
+            <Text style={styles.title}>Hello there.</Text>
+            <Text style={styles.subtitle}>Your private voice assistant.</Text>
+          </View>
 
             <View style={styles.form}>
               <View style={styles.field}>
@@ -137,12 +140,19 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   container: { flex: 1, paddingHorizontal: spacing.lg, justifyContent: "space-between", paddingVertical: spacing.xl },
-  brand: { alignItems: "flex-start" },
-  logo: { color: colors.text, fontSize: 28, fontWeight: "900", letterSpacing: 6 },
+  brand: { alignItems: "center" },
+  brandLogoRing: {
+    width: 52, height: 52, borderRadius: 26,
+    borderWidth: 1, borderColor: colors.borderStrong,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.sm,
+  },
+  brandLogoDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.text },
+  logo: { color: colors.text, fontSize: 22, fontWeight: "900", letterSpacing: 8 },
   caption: { color: colors.textMuted, fontSize: 10, letterSpacing: 4, marginTop: 4 },
-  header: { marginVertical: spacing.xl },
-  title: { color: colors.text, fontSize: 48, fontWeight: "900", letterSpacing: -2, lineHeight: 52 },
-  subtitle: { color: colors.textSecondary, fontSize: 16, marginTop: spacing.md },
+  header: { marginVertical: spacing.xl, alignItems: "center" },
+  title: { color: colors.text, fontSize: 44, fontWeight: "900", letterSpacing: -2, lineHeight: 48, textAlign: "center" },
+  subtitle: { color: colors.textSecondary, fontSize: 16, marginTop: spacing.md, textAlign: "center" },
   form: { gap: spacing.md },
   field: { gap: spacing.xs },
   label: { color: colors.textMuted, fontSize: 10, letterSpacing: 3, fontWeight: "700" },
