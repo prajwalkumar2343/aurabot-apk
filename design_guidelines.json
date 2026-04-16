@@ -1,0 +1,104 @@
+{
+  "theme_and_archetype": {
+    "domain": "Productivity / AI Assistant",
+    "theme": "Dark",
+    "archetype": "Archetype 4 (Swiss & High-Contrast)",
+    "description": "Strictly black and white, extreme minimalism, raw wireframe-inspired aesthetic echoing Linear and Raycast. Focus on density, clarity, and bold typography. No gradients, no color accents."
+  },
+  "typography": {
+    "heading_font": "Cabinet Grotesk",
+    "body_font": "IBM Plex Sans",
+    "scales": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter leading-none font-black",
+      "h2": "text-2xl sm:text-3xl tracking-tight leading-none font-bold",
+      "h3": "text-xl font-medium tracking-tight",
+      "body_large": "text-lg leading-relaxed text-white/80",
+      "body": "text-base leading-relaxed text-white/70",
+      "caption": "text-xs tracking-[0.2em] uppercase text-white/50"
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#000000",
+      "secondary": "#0A0A0A",
+      "surface": "#121212"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "rgba(255, 255, 255, 0.6)",
+      "muted": "rgba(255, 255, 255, 0.3)"
+    },
+    "border": {
+      "default": "rgba(255, 255, 255, 0.1)",
+      "focus": "#FFFFFF"
+    },
+    "accent": {
+      "primary": "#FFFFFF",
+      "primary_foreground": "#000000"
+    }
+  },
+  "layout_and_spacing": {
+    "container_padding": "p-6 sm:p-8",
+    "gap_system": "gap-6 sm:gap-8",
+    "border_radius": {
+      "cards": "rounded-lg",
+      "buttons": "rounded-full",
+      "inputs": "rounded-md"
+    },
+    "surface_strategy": "Flat Solid (Pitch Black) with 1px solid white/10 borders. No glassmorphism, no drop shadows. Strictly brutalist clarity."
+  },
+  "components": {
+    "assistant_home": {
+      "description": "The core of the app. A massive centered white record button. Above it, the live transcription text in massive Cabinet Grotesk font.",
+      "record_button": "w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-white text-black flex items-center justify-center active:scale-95 transition-transform",
+      "visualizer": "Use stark geometric CSS animations (1px white lines expanding/contracting) rather than liquid gradients. Keep it architectural."
+    },
+    "memory_section": {
+      "layout": "List layout. Cardless. Each item has a 1px solid bottom border (border-white/10).",
+      "item": "py-4 flex flex-col gap-2",
+      "timestamp": "text-xs uppercase tracking-widest text-white/40"
+    },
+    "todo_section": {
+      "layout": "List layout.",
+      "checkbox": "w-6 h-6 border border-white/20 rounded-sm flex items-center justify-center data-[state=checked]:bg-white data-[state=checked]:text-black transition-all",
+      "text_checked": "text-white/40 line-through"
+    },
+    "permissions_onboarding": {
+      "layout": "Full screen modal layout. Center aligned content.",
+      "heading": "Massive text 'We need access.'",
+      "action_button": "w-full bg-white text-black py-4 rounded-full font-bold text-lg text-center active:bg-white/90"
+    },
+    "bottom_navigation": {
+      "style": "Floating pill at the bottom or a stark black bottom bar. 1px border top (border-white/10).",
+      "icons": "lucide-react icons, stroke-width 1.5. Active tab is pure white. Inactive is white/40. No text labels."
+    }
+  },
+  "motion_and_interactions": {
+    "buttons": "active:scale-[0.97] transition-all duration-200 ease-out",
+    "page_transitions": "Instant or very subtle fade. Minimal motion to feel like a high-performance tool.",
+    "hover_states": "hover:bg-white/5 for list items."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "stroke_width": 1.5,
+    "style": "Sharp, geometric, unmodified."
+  },
+  "accessibility": {
+    "contrast": "Strictly adheres to maximum contrast (Black and White).",
+    "focus_states": "focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black outline-none",
+    "testing": "All interactive elements must have data-testid attributes."
+  },
+  "media_and_images": {
+    "strategy": "No raster images. Pure UI. If an empty state requires an illustration, use an ASCII art graphic or a geometric SVG path.",
+    "urls": {}
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette: pure black, pure white, and opacity levels of white (e.g. white/10, white/60). NO OTHER COLORS ALLOWED.",
+    "Implement the UI using Tailwind CSS utility classes. Since the environment specifies mobile_web_app (Expo React Native Android), if you are building actual React Native code, map these Tailwind concepts to NativeWind or StyleSheet (e.g., bg-black -> backgroundColor: '#000', text-white -> color: '#FFF'). If building for web, use Tailwind directly.",
+    "For the Assistant screen, the record button must be the primary focal point. The real-time transcription should appear immediately above it.",
+    "The Memory and To-Do lists must be cardless. Rely on generous padding and thin 1px white/10 borders to separate items.",
+    "Ensure the bottom navigation feels native: either a floating pill with a blur (if achievable in pure black and white) or a solid black bar with a top border.",
+    "Add 'data-testid' to every button, link, and input as required.",
+    "For the background process requirements, ensure the UI accurately reflects background states without adding color indicators (use text or stark shape changes instead)."
+  ]
+}
