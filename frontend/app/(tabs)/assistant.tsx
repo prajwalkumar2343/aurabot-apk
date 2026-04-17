@@ -24,6 +24,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { api, formatError } from "../../src/api/client";
 import { useAuth } from "../../src/context/AuthContext";
+import { AuraListening } from "../../src/native/AuraListening";
 import { colors, spacing, radius } from "../../src/theme";
 
 type ChatItem = { role: "user" | "assistant"; text: string };
@@ -63,6 +64,14 @@ export default function Assistant() {
     };
   }, []);
 
+  const refreshAlwaysOn = useCallback(() => {
+    if (Platform.OS !== "android") return;
+
+    AuraListening.isRunning()
+      .then(setAlwaysOn)
+      .catch(() => {});
+  }, []);
+
   const loadStats = useCallback(async () => {
     try {
       const [m, t] = await Promise.all([
@@ -81,7 +90,8 @@ export default function Assistant() {
   useFocusEffect(
     useCallback(() => {
       loadStats();
-    }, [loadStats])
+      refreshAlwaysOn();
+    }, [loadStats, refreshAlwaysOn])
   );
 
   useEffect(() => {
@@ -211,15 +221,30 @@ export default function Assistant() {
 
   const toggleAlwaysOn = async () => {
     const next = !alwaysOn;
-    setAlwaysOn(next);
-    if (next) {
-      try {
+    setError(null);
+
+    try {
+      if (Platform.OS === "android") {
+        if (next) {
+          const perm = await Audio.requestPermissionsAsync();
+          if (!perm.granted) {
+            setError("Microphone permission denied");
+            return;
+          }
+          await AuraListening.start();
+        } else {
+          await AuraListening.stop();
+        }
+      } else if (next) {
         await activateKeepAwakeAsync("aura-assistant");
-      } catch {}
-    } else {
-      try {
+      } else {
         deactivateKeepAwake("aura-assistant");
-      } catch {}
+      }
+
+      setAlwaysOn(next);
+    } catch (e: any) {
+      setAlwaysOn(!next);
+      setError(e?.message || "Could not update always listening");
     }
   };
 

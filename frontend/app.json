@@ -12,10 +12,15 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Aura listens to your voice commands",
-        "UIBackgroundModes": ["audio", "fetch", "processing"]
+        "UIBackgroundModes": [
+          "audio",
+          "fetch",
+          "processing"
+        ]
       }
     },
     "android": {
+      "package": "com.aura.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
@@ -29,7 +34,9 @@
         "FOREGROUND_SERVICE_MICROPHONE",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
-        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -64,6 +71,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d6eb2f18-30f3-4a29-9bd9-2d4b279b5bf9"
+      }
+    },
+    "owner": "prajwalkumar3673"
   }
 }
