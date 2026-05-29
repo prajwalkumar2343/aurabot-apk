@@ -42,6 +42,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -102,11 +103,46 @@ fun AuraLauncherApp(
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var showHomePrompt by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.error) {
         val error = state.error ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(error)
         viewModel.clearError()
+    }
+
+    LaunchedEffect(state.session.homeSettingsPrompted) {
+        if (!state.session.homeSettingsPrompted) {
+            showHomePrompt = true
+        }
+    }
+
+    if (showHomePrompt) {
+        AlertDialog(
+            onDismissRequest = {
+                showHomePrompt = false
+                viewModel.markHomeSettingsPrompted()
+            },
+            title = { Text("Set Aura as Home app?") },
+            text = { Text("Aura is ready to run locally. Open Android Home app settings so you can make it your default launcher?") },
+            confirmButton = {
+                Button(onClick = {
+                    showHomePrompt = false
+                    viewModel.markHomeSettingsPrompted()
+                    onOpenHomeSettings()
+                }) {
+                    Text("Open settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showHomePrompt = false
+                    viewModel.markHomeSettingsPrompted()
+                }) {
+                    Text("Not now")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -182,10 +218,10 @@ fun AuraLauncherApp(
             composable(Route.Settings.name) {
                 SettingsScreen(
                     state = state,
-                    onLogin = viewModel::login,
-                    onLogout = viewModel::logout,
                     onRequestVoicePermissions = onRequestVoicePermissions,
-                    onOpenHomeSettings = onOpenHomeSettings,
+                    onOpenHomeSettings = {
+                        showHomePrompt = true
+                    },
                     onBackgroundListening = viewModel::setBackgroundListening
                 )
             }
@@ -217,7 +253,7 @@ private fun HomeScreen(
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            text = if (state.session.isLoggedIn) "Aura is synced and ready." else "Guest mode. Launcher basics are ready.",
+            text = "Aura is local-first and ready.",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -291,7 +327,7 @@ private fun AssistantScreen(
     onSend: () -> Unit
 ) {
     ScreenShell {
-        Header("Assistant", if (state.session.isLoggedIn) "Cloud chat is active." else "Sign in to unlock chat.")
+        Header("Assistant", "Local assistant responses are active.")
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -318,7 +354,7 @@ private fun AssistantScreen(
 private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
     var title by remember { mutableStateOf("") }
     ScreenShell {
-        Header("Tasks", if (state.session.isLoggedIn) "${state.openTodos} still open." else "Sign in to sync tasks.")
+        Header("Tasks", "${state.openTodos} still open on this device.")
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
@@ -354,7 +390,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
     ScreenShell {
-        Header("Memory", if (state.session.isLoggedIn) "${state.memories.size} notes saved." else "Sign in to sync memory.")
+        Header("Memory", "${state.memories.size} notes saved locally.")
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
@@ -392,33 +428,19 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
 @Composable
 private fun SettingsScreen(
     state: LauncherUiState,
-    onLogin: (String, String) -> Unit,
-    onLogout: () -> Unit,
     onRequestVoicePermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
     onBackgroundListening: (Boolean) -> Unit
 ) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
     ScreenShell {
-        Header("Settings", "Launcher, account, and voice controls.")
+        Header("Settings", "Launcher and voice controls.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (state.session.isLoggedIn) "Signed in" else "Guest mode", fontWeight = FontWeight.SemiBold)
-                if (!state.session.isLoggedIn) {
-                    OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), placeholder = { Text("Email") }, singleLine = true)
-                    OutlinedTextField(
-                        password,
-                        { password = it },
-                        Modifier.fillMaxWidth(),
-                        placeholder = { Text("Password") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true
-                    )
-                    Button(onClick = { onLogin(email, password) }, enabled = !state.loading) { Text("Sign in") }
-                } else {
-                    TextButton(onClick = onLogout) { Text("Sign out") }
-                }
+                Text("Local-first mode", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Tasks, memories, and assistant context stay on this device right now.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         Spacer(Modifier.height(12.dp))

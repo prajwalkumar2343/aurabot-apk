@@ -8,13 +8,15 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class GuestFeatureException(feature: String) : IllegalStateException("$feature requires login")
 
 class AssistantRepository(
     baseUrl: String,
-    private val sessionStore: SessionStore
+    private val sessionStore: SessionStore,
+    private val localAssistantStore: LocalAssistantStore
 ) {
     private val api: AuraApi
 
@@ -57,21 +59,32 @@ class AssistantRepository(
 
     suspend fun me(): UserResponse = requireLogin("Account") { api.me() }
 
-    suspend fun memories(): List<MemoryResponse> = requireLogin("Memories") { api.memories() }
+    suspend fun memories(): List<MemoryResponse> = localAssistantStore.memories()
 
-    suspend fun createMemory(title: String, content: String): MemoryResponse =
-        requireLogin("Memories") { api.createMemory(MemoryCreateRequest(title, content)) }
+    suspend fun createMemory(title: String, content: String): MemoryResponse = localAssistantStore.createMemory(title, content)
 
-    suspend fun todos(): List<TodoResponse> = requireLogin("Tasks") { api.todos() }
+    suspend fun todos(): List<TodoResponse> = localAssistantStore.todos()
 
-    suspend fun createTodo(title: String): TodoResponse =
-        requireLogin("Tasks") { api.createTodo(TodoCreateRequest(title)) }
+    suspend fun createTodo(title: String): TodoResponse = localAssistantStore.createTodo(title)
 
-    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse =
-        requireLogin("Tasks") { api.updateTodo(id, TodoUpdateRequest(done = done)) }
+    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse = localAssistantStore.updateTodoDone(id, done)
 
-    suspend fun chat(message: String, sessionId: String?): ChatResponse =
-        requireLogin("Assistant") { api.chat(ChatRequest(message = message, session_id = sessionId)) }
+    suspend fun chat(message: String, sessionId: String?): ChatResponse = withContext(Dispatchers.IO) {
+        val todos = localAssistantStore.todos()
+        val memories = localAssistantStore.memories()
+        val reply = buildString {
+            append("Working locally. ")
+            when {
+                "task" in message.lowercase() || "todo" in message.lowercase() ->
+                    append("You have ${todos.count { !it.done }} open tasks on this device.")
+                "memory" in message.lowercase() || "remember" in message.lowercase() ->
+                    append("I can see ${memories.size} saved memories locally.")
+                else ->
+                    append("Ask me about apps, tasks, memories, or use push-to-talk.")
+            }
+        }
+        ChatResponse(reply = reply, session_id = sessionId ?: UUID.randomUUID().toString())
+    }
 
     private suspend fun <T> requireLogin(feature: String, block: suspend () -> T): T =
         withContext(Dispatchers.IO) {

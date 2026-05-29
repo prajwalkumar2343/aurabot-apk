@@ -7,7 +7,6 @@ import androidx.lifecycle.viewModelScope
 import com.aura.app.AppContainer
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.AssistantMessage
-import com.aura.app.assistant.GuestFeatureException
 import com.aura.app.assistant.MemoryResponse
 import com.aura.app.assistant.MessageRole
 import com.aura.app.assistant.TodoResponse
@@ -28,7 +27,7 @@ data class LauncherUiState(
     val assistantInput: String = "",
     val assistantSessionId: String? = null,
     val messages: List<AssistantMessage> = listOf(
-        AssistantMessage(MessageRole.Assistant, "I can help from here once you sign in.")
+        AssistantMessage(MessageRole.Assistant, "Aura is running locally. Ask about apps, tasks, or memories.")
     ),
     val memories: List<MemoryResponse> = emptyList(),
     val todos: List<TodoResponse> = emptyList(),
@@ -101,32 +100,8 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         messages = it.messages + AssistantMessage(MessageRole.Assistant, response.reply)
                     )
                 }
-            } catch (error: GuestFeatureException) {
-                localState.update {
-                    it.copy(
-                        loading = false,
-                        error = error.message,
-                        messages = it.messages + AssistantMessage(
-                            MessageRole.Assistant,
-                            "Sign in to use cloud assistant memory and chat."
-                        )
-                    )
-                }
             } catch (error: Exception) {
                 localState.update { it.copy(loading = false, error = error.message ?: "Assistant failed") }
-            }
-        }
-    }
-
-    fun login(email: String, password: String) {
-        viewModelScope.launch {
-            localState.update { it.copy(loading = true, error = null) }
-            try {
-                container.assistantRepository.login(email, password)
-                localState.update { it.copy(loading = false, error = null) }
-                refreshCloud()
-            } catch (error: Exception) {
-                localState.update { it.copy(loading = false, error = error.message ?: "Login failed") }
             }
         }
     }
@@ -139,7 +114,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     memories = emptyList(),
                     todos = emptyList(),
                     assistantSessionId = null,
-                    messages = listOf(AssistantMessage(MessageRole.Assistant, "Guest mode is ready."))
+                    messages = listOf(AssistantMessage(MessageRole.Assistant, "Aura is back in local mode."))
                 )
             }
         }
@@ -151,8 +126,6 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 val memories = container.assistantRepository.memories()
                 val todos = container.assistantRepository.todos()
                 localState.update { it.copy(memories = memories, todos = todos, error = null) }
-            } catch (_: GuestFeatureException) {
-                localState.update { it.copy(memories = emptyList(), todos = emptyList()) }
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message) }
             }
@@ -202,6 +175,12 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearError() {
         localState.update { it.copy(error = null) }
+    }
+
+    fun markHomeSettingsPrompted() {
+        viewModelScope.launch {
+            container.sessionStore.setHomeSettingsPrompted(true)
+        }
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

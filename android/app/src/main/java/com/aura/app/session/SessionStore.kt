@@ -16,7 +16,8 @@ data class SessionState(
     val accessToken: String? = null,
     val guestMode: Boolean = true,
     val onboardingComplete: Boolean = false,
-    val backgroundListeningEnabled: Boolean = BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT
+    val backgroundListeningEnabled: Boolean = BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
+    val homeSettingsPrompted: Boolean = false
 ) {
     val isLoggedIn: Boolean = !accessToken.isNullOrBlank()
 }
@@ -26,6 +27,7 @@ class SessionStore(private val context: Context) {
     private val guestModeKey = booleanPreferencesKey("guest_mode")
     private val onboardingKey = booleanPreferencesKey("onboarding_complete")
     private val backgroundListeningKey = booleanPreferencesKey("background_listening_enabled")
+    private val homeSettingsPromptedKey = booleanPreferencesKey("home_settings_prompted")
 
     val state: Flow<SessionState> = context.sessionDataStore.data.map { prefs ->
         val token = prefs[tokenKey]
@@ -34,7 +36,8 @@ class SessionStore(private val context: Context) {
             guestMode = prefs[guestModeKey] ?: token.isNullOrBlank(),
             onboardingComplete = prefs[onboardingKey] ?: false,
             backgroundListeningEnabled = prefs[backgroundListeningKey]
-                ?: BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT
+                ?: BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
+            homeSettingsPrompted = prefs[homeSettingsPromptedKey] ?: false
         )
     }
 
@@ -56,6 +59,15 @@ class SessionStore(private val context: Context) {
     suspend fun setBackgroundListeningEnabled(enabled: Boolean) {
         context.sessionDataStore.edit { prefs ->
             prefs[backgroundListeningKey] = enabled
+        }
+    }
+
+    suspend fun setHomeSettingsPrompted(prompted: Boolean) {
+        context.sessionDataStore.edit { prefs ->
+            prefs[homeSettingsPromptedKey] = prompted
+            if (prompted) {
+                prefs[onboardingKey] = true
+            }
         }
     }
 }
