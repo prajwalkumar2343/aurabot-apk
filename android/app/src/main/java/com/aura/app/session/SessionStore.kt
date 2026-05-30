@@ -17,7 +17,9 @@ data class SessionState(
     val guestMode: Boolean = true,
     val onboardingComplete: Boolean = false,
     val backgroundListeningEnabled: Boolean = BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
-    val homeSettingsPrompted: Boolean = false
+    val homeSettingsPrompted: Boolean = false,
+    val wallpaperUri: String? = null,
+    val interactionMode: String = "eyes"
 ) {
     val isLoggedIn: Boolean = !accessToken.isNullOrBlank()
 }
@@ -28,6 +30,8 @@ class SessionStore(private val context: Context) {
     private val onboardingKey = booleanPreferencesKey("onboarding_complete")
     private val backgroundListeningKey = booleanPreferencesKey("background_listening_enabled")
     private val homeSettingsPromptedKey = booleanPreferencesKey("home_settings_prompted")
+    private val wallpaperUriKey = stringPreferencesKey("wallpaper_uri")
+    private val interactionModeKey = stringPreferencesKey("interaction_mode")
 
     val state: Flow<SessionState> = context.sessionDataStore.data.map { prefs ->
         val token = prefs[tokenKey]
@@ -37,7 +41,9 @@ class SessionStore(private val context: Context) {
             onboardingComplete = prefs[onboardingKey] ?: false,
             backgroundListeningEnabled = prefs[backgroundListeningKey]
                 ?: BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
-            homeSettingsPrompted = prefs[homeSettingsPromptedKey] ?: false
+            homeSettingsPrompted = prefs[homeSettingsPromptedKey] ?: false,
+            wallpaperUri = prefs[wallpaperUriKey],
+            interactionMode = prefs[interactionModeKey] ?: "eyes"
         )
     }
 
@@ -68,6 +74,22 @@ class SessionStore(private val context: Context) {
             if (prompted) {
                 prefs[onboardingKey] = true
             }
+        }
+    }
+
+    suspend fun setWallpaperUri(uri: String?) {
+        context.sessionDataStore.edit { prefs ->
+            if (uri == null) {
+                prefs.remove(wallpaperUriKey)
+            } else {
+                prefs[wallpaperUriKey] = uri
+            }
+        }
+    }
+
+    suspend fun setInteractionMode(mode: String) {
+        context.sessionDataStore.edit { prefs ->
+            prefs[interactionModeKey] = mode
         }
     }
 }
