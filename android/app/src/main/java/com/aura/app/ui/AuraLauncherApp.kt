@@ -332,7 +332,6 @@ fun AuraLauncherApp(
                         onStopVoice = viewModel::stopVoice,
                         onOpenApps = { navController.navigate(Route.Apps.name) },
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
-                        onQuitApp = onQuitApp,
                         onLaunchApp = { app ->
                             viewModel.launchIntent(app)?.let { context.startActivity(it) }
                         }
@@ -372,7 +371,8 @@ fun AuraLauncherApp(
                         onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
                         onClearWallpaper = { viewModel.setWallpaper(null) },
                         onSetInteractionMode = viewModel::setInteractionMode,
-                        onConfigureModels = { navController.navigate(Route.Models.name) }
+                        onConfigureModels = { navController.navigate(Route.Models.name) },
+                        onQuitApp = onQuitApp
                     )
                 }
                 composable(Route.Models.name) {
@@ -403,7 +403,6 @@ private fun HomeScreen(
     onStopVoice: () -> Unit,
     onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
-    onQuitApp: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit
 ) {
     val presenceMode = when {
@@ -414,28 +413,6 @@ private fun HomeScreen(
         else -> AuraPresenceMode.Idle
     }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Text(
-            text = SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date()).uppercase(),
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = FontWeight.Bold,
-                letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
-            ),
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-        )
-        Text(
-            text = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()),
-            style = MaterialTheme.typography.displayLarge,
-            fontWeight = FontWeight.Black
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "AURA IS DRIVEN BY ${state.llmSettings.provider.label.uppercase()} ON ${state.llmSettings.currentModel.ifBlank { "NO MODEL SELECTED" }.uppercase()}",
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(20.dp))
         AuraEyes(
             mode = presenceMode,
             voiceLevel = state.status.rmsLevel,
@@ -477,21 +454,6 @@ private fun HomeScreen(
                     Text("APPS")
                 }
             }
-        }
-        Spacer(Modifier.height(10.dp))
-        FilledTonalButton(
-            onClick = onQuitApp,
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-            colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Outlined.PowerSettingsNew, null)
-            Spacer(Modifier.width(8.dp))
-            Text("QUIT SYSTEM")
         }
         if (state.isDefaultLauncher) {
             Spacer(Modifier.height(24.dp))
@@ -1558,7 +1520,8 @@ private fun SettingsScreen(
     onSelectWallpaper: () -> Unit,
     onClearWallpaper: () -> Unit,
     onSetInteractionMode: (String) -> Unit,
-    onConfigureModels: () -> Unit
+    onConfigureModels: () -> Unit,
+    onQuitApp: () -> Unit
 ) {
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("SETTINGS", "System, model, and voice configuration.")
@@ -1630,6 +1593,11 @@ private fun SettingsScreen(
                     )
                 }
             }
+            SettingsRow(
+                title = "Quit system",
+                subtitle = "Exit the launcher activity and move system task to back.",
+                onClick = onQuitApp
+            )
         }
     }
 }
