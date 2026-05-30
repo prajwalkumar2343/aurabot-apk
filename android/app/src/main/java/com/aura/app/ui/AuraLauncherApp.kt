@@ -105,6 +105,23 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.sin
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.content.Intent
+import android.graphics.drawable.Drawable
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
+import android.widget.ImageView
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.ui.text.style.TextAlign
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -125,17 +142,32 @@ private enum class AuraPresenceMode {
 
 @Composable
 fun AuraLauncherApp(
-    container: AppContainer,
+    viewModel: LauncherViewModel,
     onRequestVoicePermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
     onQuitApp: () -> Unit
 ) {
-    val viewModel: LauncherViewModel = viewModel(factory = LauncherViewModel.Factory(container))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showHomePrompt by remember { mutableStateOf(false) }
+
+    val wallpaperLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            viewModel.setWallpaper(uri.toString())
+        }
+    }
 
     LaunchedEffect(state.error) {
         val error = state.error ?: return@LaunchedEffect
@@ -195,30 +227,34 @@ fun AuraLauncherApp(
                     )
                 }
             ) {
-                listOf(Route.Home, Route.Apps, Route.Settings)
-                    .forEach { route ->
-                        NavigationBarItem(
-                            selected = current == route.name,
-                            onClick = {
-                                navController.navigate(route.name) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
+                val routes = if (state.isDefaultLauncher) {
+                    listOf(Route.Home, Route.Apps, Route.Settings)
+                } else {
+                    listOf(Route.Home, Route.Settings)
+                }
+                routes.forEach { route ->
+                    NavigationBarItem(
+                        selected = current == route.name,
+                        onClick = {
+                            navController.navigate(route.name) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
                                 }
-                            },
-                            icon = { Icon(routeIcon(route), contentDescription = route.title) },
-                            label = { Text(route.title) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                                selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                indicatorColor = Color.Transparent
-                            )
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = { Icon(routeIcon(route), contentDescription = route.title) },
+                        label = { Text(route.title) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                            selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                            unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                            unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                            indicatorColor = Color.Transparent
                         )
-                    }
+                    )
+                }
             }
         }
     ) { padding ->
@@ -283,7 +319,10 @@ fun AuraLauncherApp(
                     onOpenHomeSettings = {
                         showHomePrompt = true
                     },
-                    onBackgroundListening = viewModel::setBackgroundListening
+                    onBackgroundListening = viewModel::setBackgroundListening,
+                    onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                    onClearWallpaper = { viewModel.setWallpaper(null) },
+                    onSetInteractionMode = viewModel::setInteractionMode
                 )
             }
         }
@@ -309,7 +348,7 @@ private fun HomeScreen(
         state.assistantInput.isNotBlank() -> AuraPresenceMode.Focused
         else -> AuraPresenceMode.Idle
     }
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Text(
             text = SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date()).uppercase(),
             style = MaterialTheme.typography.labelLarge.copy(
@@ -338,6 +377,7 @@ private fun HomeScreen(
             commandText = state.assistantInput,
             emotion = state.currentEmotion,
             isSpeaking = state.isSpeaking,
+            interactionMode = state.session.interactionMode,
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(16.dp))
@@ -356,19 +396,21 @@ private fun HomeScreen(
                 Spacer(Modifier.width(8.dp))
                 Text(if (state.status.running) "STOP" else "TALK")
             }
-            FilledTonalButton(
-                onClick = onOpenApps,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Outlined.Apps, null)
-                Spacer(Modifier.width(8.dp))
-                Text("APPS")
+            if (state.isDefaultLauncher) {
+                FilledTonalButton(
+                    onClick = onOpenApps,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Outlined.Apps, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("APPS")
+                }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -386,12 +428,14 @@ private fun HomeScreen(
             Spacer(Modifier.width(8.dp))
             Text("QUIT SYSTEM")
         }
-        Spacer(Modifier.height(24.dp))
-        Text("PINNED APPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            state.pinnedApps.forEach { app ->
-                AppInitial(app, Modifier.weight(1f), onLaunchApp)
+        if (state.isDefaultLauncher) {
+            Spacer(Modifier.height(24.dp))
+            Text("PINNED APPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                state.pinnedApps.forEach { app ->
+                    AppInitial(app, Modifier.weight(1f), onLaunchApp)
+                }
             }
         }
     }
@@ -451,6 +495,7 @@ private fun AuraEyes(
     commandText: String,
     emotion: String,
     isSpeaking: Boolean,
+    interactionMode: String,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "aura_eyes")
@@ -476,6 +521,17 @@ private fun AuraEyes(
         ),
         label = "blink"
     )
+    val dotBreathe by infiniteTransition.animateFloat(
+        initialValue = 0.82f,
+        targetValue = 1.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot_breathe"
+    )
+    val dotAlphaTarget = if (isSpeaking || mode != AuraPresenceMode.Idle) 1f else 0f
+    val dotAlpha by animateFloatAsState(dotAlphaTarget, tween(420), label = "dot_alpha")
 
     // Setup speech wave transition to pulse the height of the eyes when TTS is speaking
     val speechWave by if (isSpeaking) {
@@ -610,8 +666,25 @@ private fun AuraEyes(
                     }
                 }
 
-                drawEye(leftEyeX, -1f)
-                drawEye(rightEyeX, 1f)
+                if (interactionMode == "dot") {
+                    if (dotAlpha > 0.01f) {
+                        val baseDotRadius = size.height * 0.08f
+                        val dotScale = when {
+                            isSpeaking -> speechWave
+                            mode == AuraPresenceMode.Thinking -> dotBreathe
+                            mode == AuraPresenceMode.Hearing -> 1f + (voiceLevel.coerceIn(0, 12) / 12f) * 0.45f
+                            else -> 1f
+                        }
+                        drawCircle(
+                            color = Color.White.copy(alpha = dotAlpha),
+                            radius = baseDotRadius * dotScale,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
+                    }
+                } else {
+                    drawEye(leftEyeX, -1f)
+                    drawEye(rightEyeX, 1f)
+                }
             }
             Spacer(Modifier.height(12.dp))
             Text(
@@ -627,13 +700,65 @@ private fun AuraEyes(
 }
 
 @Composable
+private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onLaunchApp(app) }
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isDark) Color(0xFF1E1E1E) else Color(0xFFF2F2F7))
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                    RoundedCornerShape(12.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (app.icon != null) {
+                AppIcon(
+                    drawable = app.icon,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .padding(2.dp)
+                )
+            } else {
+                Text(
+                    text = app.label.take(1).uppercase(),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = app.label.uppercase(),
+            maxLines = 2,
+            minLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
 private fun AppsScreen(
     state: LauncherUiState,
     onQuery: (String) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
     onRefresh: () -> Unit
 ) {
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("APPS", "Search and open installed applications.")
         OutlinedTextField(
             value = state.appQuery,
@@ -651,16 +776,22 @@ private fun AppsScreen(
             ),
             shape = RoundedCornerShape(8.dp)
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         TextButton(
             onClick = onRefresh,
             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
         ) {
             Text("REFRESH APP LIST", fontWeight = FontWeight.Bold)
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(Modifier.height(8.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(4),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.weight(1f)
+        ) {
             items(state.filteredApps, key = { it.componentName.flattenToString() }) { app ->
-                AppRow(app, onLaunchApp)
+                AppGridItem(app, onLaunchApp)
             }
         }
     }
@@ -672,7 +803,7 @@ private fun AssistantScreen(
     onAssistantInput: (String) -> Unit,
     onSend: () -> Unit
 ) {
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("ASSISTANT", "Local assistant interface active.")
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -705,7 +836,7 @@ private fun AssistantScreen(
 @Composable
 private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
     var title by remember { mutableStateOf("") }
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("TASKS", "${state.openTodos} open items on this device.")
         OutlinedTextField(
             value = title,
@@ -779,7 +910,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
 private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -> Unit) {
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("MEMORY", "${state.memories.size} local memories stored.")
         OutlinedTextField(
             value = title,
@@ -875,9 +1006,12 @@ private fun SettingsScreen(
     onLoadOpenRouterModels: () -> Unit,
     onRequestVoicePermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
-    onBackgroundListening: (Boolean) -> Unit
+    onBackgroundListening: (Boolean) -> Unit,
+    onSelectWallpaper: () -> Unit,
+    onClearWallpaper: () -> Unit,
+    onSetInteractionMode: (String) -> Unit
 ) {
-    ScreenShell {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("SETTINGS", "System, model, and voice configuration.")
         Column(
             modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1105,6 +1239,26 @@ private fun SettingsScreen(
             }
             SettingsRow("Default launcher", "Open Android Home app settings.", onOpenHomeSettings)
             SettingsRow("Voice permissions", "Microphone and notification access.", onRequestVoicePermissions)
+            SettingsRow(
+                title = "Interaction visualizer",
+                subtitle = "Active: ${state.session.interactionMode.uppercase()}",
+                onClick = {
+                    val nextMode = if (state.session.interactionMode == "dot") "eyes" else "dot"
+                    onSetInteractionMode(nextMode)
+                }
+            )
+            SettingsRow(
+                title = "Set custom wallpaper",
+                subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
+                onClick = onSelectWallpaper
+            )
+            if (state.session.wallpaperUri != null) {
+                SettingsRow(
+                    title = "Clear custom wallpaper",
+                    subtitle = "Reset to solid black/white background.",
+                    onClick = onClearWallpaper
+                )
+            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -1133,12 +1287,64 @@ private fun SettingsScreen(
 }
 
 @Composable
-private fun ScreenShell(content: @Composable ColumnScope.() -> Unit) {
+private fun AppIcon(drawable: Drawable?, modifier: Modifier = Modifier) {
+    if (drawable != null) {
+        AndroidView(
+            factory = { context ->
+                ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+            },
+            update = { imageView ->
+                imageView.setImageDrawable(drawable)
+            },
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun rememberWallpaperPainter(uriString: String?): ImageBitmap? {
+    if (uriString.isNullOrBlank()) return null
+    val context = LocalContext.current
+    return remember(uriString) {
+        try {
+            val uri = Uri.parse(uriString)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+}
+
+@Composable
+private fun ScreenShell(
+    wallpaperUri: String? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
+        if (wallpaperBitmap != null) {
+            Image(
+                bitmap = wallpaperBitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            val isDark = isSystemInDarkTheme()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
