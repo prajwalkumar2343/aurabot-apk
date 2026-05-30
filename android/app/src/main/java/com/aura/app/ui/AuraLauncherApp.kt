@@ -1073,7 +1073,7 @@ private fun AppsScreen(
             )
         }
     ) {
-        Header("APPS", "Search and open installed applications.")
+
         
         Row(
             modifier = Modifier.fillMaxWidth(),
