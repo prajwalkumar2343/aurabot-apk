@@ -337,6 +337,12 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setOnboardingComplete(complete: Boolean) {
+        viewModelScope.launch {
+            container.sessionStore.setOnboardingComplete(complete)
+        }
+    }
+
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
