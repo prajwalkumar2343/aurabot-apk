@@ -38,6 +38,9 @@ interface AuraApi {
     @POST("assistant/chat")
     suspend fun chat(@Body request: ChatRequest): ChatResponse
 
+    @POST("providers/openrouter/models")
+    suspend fun openRouterModels(@Body request: OpenRouterModelsRequest): OpenRouterModelsResponse
+
     @POST("transcribe")
     suspend fun transcribe(@Body request: TranscribeRequest): TranscribeResponse
 }

@@ -1,7 +1,9 @@
 package com.aura.app.assistant
 
 import com.aura.app.session.SessionStore
+import com.aura.app.apps.AppInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -16,7 +18,8 @@ class GuestFeatureException(feature: String) : IllegalStateException("$feature r
 class AssistantRepository(
     baseUrl: String,
     private val sessionStore: SessionStore,
-    private val localAssistantStore: LocalAssistantStore
+    private val localAssistantStore: LocalAssistantStore,
+    private val llmSettingsStore: LlmSettingsStore
 ) {
     private val api: AuraApi
 
@@ -69,22 +72,54 @@ class AssistantRepository(
 
     suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse = localAssistantStore.updateTodoDone(id, done)
 
-    suspend fun chat(message: String, sessionId: String?): ChatResponse = withContext(Dispatchers.IO) {
-        val todos = localAssistantStore.todos()
-        val memories = localAssistantStore.memories()
-        val reply = buildString {
-            append("Working locally. ")
-            when {
-                "task" in message.lowercase() || "todo" in message.lowercase() ->
-                    append("You have ${todos.count { !it.done }} open tasks on this device.")
-                "memory" in message.lowercase() || "remember" in message.lowercase() ->
-                    append("I can see ${memories.size} saved memories locally.")
-                else ->
-                    append("Ask me about apps, tasks, memories, or use push-to-talk.")
-            }
+    suspend fun chat(message: String, sessionId: String?, apps: List<AppInfo>): ChatResponse = withContext(Dispatchers.IO) {
+        val settings = llmSettingsStore.state.first()
+        val apiKey = settings.currentApiKey
+        val model = settings.currentModel
+        if (apiKey.isBlank()) {
+            throw IllegalStateException("Add a ${settings.provider.label} API key in Settings")
         }
-        ChatResponse(reply = reply, session_id = sessionId ?: UUID.randomUUID().toString())
+        if (model.isBlank()) {
+            throw IllegalStateException("Choose a ${settings.provider.label} model in Settings")
+        }
+        val memories = localAssistantStore.memories()
+        val todos = localAssistantStore.todos()
+        api.chat(
+            ChatRequest(
+                message = message,
+                session_id = sessionId ?: UUID.randomUUID().toString(),
+                provider = settings.provider.wireValue,
+                api_key = apiKey,
+                model = model,
+                memories = memories.map { ChatMemoryItem(title = it.title, content = it.content) },
+                todos = todos.map { ChatTodoItem(title = it.title, done = it.done) },
+                apps = apps.map { ChatAppItem(label = it.label, package_name = it.packageName) }
+            )
+        )
     }
+
+    suspend fun openRouterModels(): List<OpenRouterModelInfo> = withContext(Dispatchers.IO) {
+        val settings = llmSettingsStore.state.first()
+        val apiKey = settings.openRouterApiKey.trim()
+        if (apiKey.isBlank()) {
+            throw IllegalStateException("Add an OpenRouter API key in Settings")
+        }
+        api.openRouterModels(OpenRouterModelsRequest(api_key = apiKey)).data
+    }
+
+    suspend fun setProvider(provider: LlmProvider) = llmSettingsStore.setProvider(provider)
+
+    suspend fun setGoogleApiKey(value: String) = llmSettingsStore.setGoogleApiKey(value)
+
+    suspend fun setGoogleModel(value: String) = llmSettingsStore.setGoogleModel(value)
+
+    suspend fun setOpenAiApiKey(value: String) = llmSettingsStore.setOpenAiApiKey(value)
+
+    suspend fun setOpenAiModel(value: String) = llmSettingsStore.setOpenAiModel(value)
+
+    suspend fun setOpenRouterApiKey(value: String) = llmSettingsStore.setOpenRouterApiKey(value)
+
+    suspend fun setOpenRouterModel(value: String) = llmSettingsStore.setOpenRouterModel(value)
 
     private suspend fun <T> requireLogin(feature: String, block: suspend () -> T): T =
         withContext(Dispatchers.IO) {

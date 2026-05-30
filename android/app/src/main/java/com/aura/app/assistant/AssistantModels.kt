@@ -11,8 +11,45 @@ data class LoginResponse(
 
 data class UserResponse(val id: String, val email: String, val name: String?, val role: String?)
 
-data class ChatRequest(val message: String, val session_id: String? = null)
-data class ChatResponse(val reply: String, val session_id: String)
+enum class LlmProvider(val wireValue: String, val label: String) {
+    Gemini("gemini", "Google"),
+    OpenAI("openai", "OpenAI"),
+    OpenRouter("openrouter", "OpenRouter");
+
+    companion object {
+        fun fromWireValue(value: String?): LlmProvider =
+            entries.firstOrNull { it.wireValue == value } ?: Gemini
+    }
+}
+
+data class ChatMemoryItem(val title: String, val content: String)
+data class ChatTodoItem(val title: String, val done: Boolean)
+data class ChatAppItem(val label: String, val package_name: String)
+
+data class ChatRequest(
+    val message: String,
+    val session_id: String? = null,
+    val provider: String,
+    val api_key: String,
+    val model: String,
+    val memories: List<ChatMemoryItem> = emptyList(),
+    val todos: List<ChatTodoItem> = emptyList(),
+    val apps: List<ChatAppItem> = emptyList()
+)
+data class ChatAction(
+    val type: String,
+    val package_name: String? = null,
+    val app_query: String? = null,
+    val duration_minutes: Int? = null
+)
+data class ChatResponse(
+    val reply: String,
+    val session_id: String,
+    val actions: List<ChatAction> = emptyList()
+)
+
+data class OpenRouterModelsRequest(val api_key: String)
+data class OpenRouterModelsResponse(val data: List<OpenRouterModelInfo>)
 
 data class MemoryCreateRequest(val title: String, val content: String)
 data class MemoryResponse(val id: String, val title: String, val content: String, val created_at: String)
