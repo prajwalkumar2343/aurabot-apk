@@ -86,7 +86,18 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshApps() {
         viewModelScope.launch {
-            val apps = container.appsRepository.loadLaunchableApps()
+            val apps = container.appsRepository.loadLaunchableApps().toMutableList()
+            if (uiState.value.isDefaultLauncher) {
+                apps.add(
+                    AppInfo(
+                        label = "Aurabot Settings",
+                        packageName = "com.aura.app.settings",
+                        componentName = android.content.ComponentName("com.aura.app", "com.aura.app.SettingsActivity"),
+                        icon = null
+                    )
+                )
+            }
+            apps.sortBy { it.label.lowercase() }
             localState.update { it.copy(apps = apps) }
         }
     }
@@ -323,6 +334,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setIsDefaultLauncher(isDefault: Boolean) {
         localState.update { it.copy(isDefaultLauncher = isDefault) }
+        refreshApps()
     }
 
     fun setWallpaper(uri: String?) {
