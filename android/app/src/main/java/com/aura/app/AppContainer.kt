@@ -10,7 +10,7 @@ import com.aura.app.session.SessionStore
 import com.aura.app.voice.VoiceServiceController
 
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext = context.applicationContext
 
     val sessionStore = SessionStore(appContext)
     val appsRepository = AppsRepository(appContext.packageManager)
