@@ -79,6 +79,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -335,6 +336,8 @@ private fun HomeScreen(
             mode = presenceMode,
             voiceLevel = state.status.rmsLevel,
             commandText = state.assistantInput,
+            emotion = state.currentEmotion,
+            isSpeaking = state.isSpeaking,
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(16.dp))
@@ -446,6 +449,8 @@ private fun AuraEyes(
     mode: AuraPresenceMode,
     voiceLevel: Int,
     commandText: String,
+    emotion: String,
+    isSpeaking: Boolean,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "aura_eyes")
@@ -472,6 +477,58 @@ private fun AuraEyes(
         label = "blink"
     )
 
+    // Setup speech wave transition to pulse the height of the eyes when TTS is speaking
+    val speechWave by if (isSpeaking) {
+        val speechTransition = rememberInfiniteTransition(label = "speech_eyes")
+        speechTransition.animateFloat(
+            initialValue = 0.78f,
+            targetValue = 1.22f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(120, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "speech_wave"
+        )
+    } else {
+        remember { mutableStateOf(1f) }
+    }
+
+    // Map emotions to target scales, offsets, and slant tilts
+    val baseWidthScale = when (emotion) {
+        "thinking" -> 1.15f
+        "excited" -> 1.1f
+        else -> 1.0f
+    }
+    val baseHeightScale = when (emotion) {
+        "happy" -> 0.52f
+        "thinking" -> 0.45f
+        "sad" -> 0.62f
+        "angry" -> 0.72f
+        "excited" -> 1.2f
+        else -> 1.0f
+    }
+    val targetYOffset = when (emotion) {
+        "happy" -> -12f
+        "excited" -> -5f
+        "sad" -> 12f
+        else -> 0f
+    }
+    val targetXOffset = when (emotion) {
+        "thinking" -> 8f
+        else -> 0f
+    }
+    val targetTilt = when (emotion) {
+        "angry" -> 14f
+        else -> 0f
+    }
+
+    // Smoothly animate all transitions over 320ms to morph between emotions
+    val widthScale by animateFloatAsState(baseWidthScale, tween(320), label = "width_scale")
+    val heightScale by animateFloatAsState(baseHeightScale, tween(320), label = "height_scale")
+    val yOffset by animateFloatAsState(targetYOffset, tween(320), label = "y_offset")
+    val xOffset by animateFloatAsState(targetXOffset, tween(320), label = "x_offset")
+    val tiltDegrees by animateFloatAsState(targetTilt, tween(320), label = "tilt_degrees")
+
     val eyeOpenTarget = when (mode) {
         AuraPresenceMode.Thinking -> 0.72f
         AuraPresenceMode.Hearing -> 1f
@@ -490,12 +547,13 @@ private fun AuraEyes(
     val eyeOpen by animateFloatAsState(eyeOpenTarget * blink, tween(420), label = "eye_open")
     val focusAmount by animateFloatAsState(focusAmountTarget, tween(420), label = "focus_amount")
 
-    val statusText = when (mode) {
-        AuraPresenceMode.Thinking -> "THINKING"
-        AuraPresenceMode.Hearing -> "HEARING"
-        AuraPresenceMode.Listening -> "LISTENING"
-        AuraPresenceMode.Focused -> "READY"
-        AuraPresenceMode.Idle -> "STANDBY"
+    val statusText = when {
+        isSpeaking -> emotion.uppercase()
+        mode == AuraPresenceMode.Thinking -> "THINKING"
+        mode == AuraPresenceMode.Hearing -> "HEARING"
+        mode == AuraPresenceMode.Listening -> "LISTENING"
+        mode == AuraPresenceMode.Focused -> "READY"
+        else -> "STANDBY"
     }
 
     Box(
@@ -523,23 +581,33 @@ private fun AuraEyes(
                 val wave = sin(phase)
                 val commandBias = (commandText.length.coerceAtMost(32) / 32f) * focusAmount
                 val voiceBias = voiceLevel.coerceIn(0, 12) / 12f
-                val eyeWidth = size.width * 0.28f
+                val baseEyeWidth = size.width * 0.28f
                 val baseEyeHeight = size.height * 0.32f
-                val eyeHeight = baseEyeHeight * (0.22f + eyeOpen * 0.78f)
-                val eyeY = (size.height - eyeHeight) / 2f
-                val leftEyeX = size.width * 0.18f
-                val rightEyeX = size.width - leftEyeX - eyeWidth
+                
+                val eyeWidth = baseEyeWidth * widthScale
+                val eyeHeight = baseEyeHeight * (0.22f + eyeOpen * 0.78f) * heightScale * speechWave
+                
+                val eyeY = (size.height - eyeHeight) / 2f + yOffset
+                val leftEyeX = size.width * 0.18f + xOffset
+                val rightEyeX = size.width - size.width * 0.18f - eyeWidth - xOffset
 
                 fun drawEye(originX: Float, direction: Float) {
                     val travelX = (wave * 0.025f + commandBias * direction) * size.width
                     val travelY = ((sin(phase * 1.7f + direction) * 0.012f) + voiceBias * 0.016f) * size.height
 
-                    // Draw extremely modern sharp white rectangle eyes
-                    drawRect(
-                        color = Color.White,
-                        topLeft = Offset(originX + travelX, eyeY + travelY),
-                        size = Size(eyeWidth, eyeHeight)
-                    )
+                    val pivotX = originX + travelX + eyeWidth / 2f
+                    val pivotY = eyeY + travelY + eyeHeight / 2f
+                    
+                    // Tilt left eye positive, right eye negative (slants inward)
+                    val tilt = tiltDegrees * direction
+
+                    rotate(degrees = tilt, pivot = Offset(pivotX, pivotY)) {
+                        drawRect(
+                            color = Color.White,
+                            topLeft = Offset(originX + travelX, eyeY + travelY),
+                            size = Size(eyeWidth, eyeHeight)
+                        )
+                    }
                 }
 
                 drawEye(leftEyeX, -1f)
