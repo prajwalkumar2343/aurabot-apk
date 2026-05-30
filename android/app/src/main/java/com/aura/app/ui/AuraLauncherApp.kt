@@ -291,6 +291,9 @@ fun AuraLauncherApp(
                 modifier = Modifier.padding(padding)
             ) {
                 composable(Route.Home.name) {
+                    BackHandler(enabled = state.isDefaultLauncher) {
+                        // Do absolutely nothing. Prevents finishing/exiting the launcher activity and avoids screen jitter.
+                    }
                     HomeScreen(
                         state = state,
                         onAssistantInput = viewModel::setAssistantInput,
