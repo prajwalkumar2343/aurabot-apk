@@ -194,7 +194,7 @@ fun AuraLauncherApp(
                     )
                 }
             ) {
-                listOf(Route.Home, Route.Apps, Route.Assistant, Route.Tasks, Route.Memory, Route.Settings)
+                listOf(Route.Home, Route.Apps, Route.Settings)
                     .forEach { route ->
                         NavigationBarItem(
                             selected = current == route.name,
@@ -338,10 +338,6 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(16.dp))
-        HomeChatLayer(state = state)
-        Spacer(Modifier.height(12.dp))
-        AssistantComposer(state.assistantInput, onAssistantInput, onSend)
-        Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             FilledTonalButton(
                 onClick = if (state.status.running) onStopVoice else onTalk,
@@ -356,20 +352,6 @@ private fun HomeScreen(
                 Icon(if (state.status.running) Icons.Outlined.Stop else Icons.Outlined.Mic, null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (state.status.running) "STOP" else "TALK")
-            }
-            FilledTonalButton(
-                onClick = onOpenAssistant,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Outlined.GraphicEq, null)
-                Spacer(Modifier.width(8.dp))
-                Text("CHAT")
             }
             FilledTonalButton(
                 onClick = onOpenApps,
@@ -400,11 +382,6 @@ private fun HomeScreen(
             Icon(Icons.Outlined.PowerSettingsNew, null)
             Spacer(Modifier.width(8.dp))
             Text("QUIT SYSTEM")
-        }
-        Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            StatTile("OPEN TASKS", state.openTodos.toString(), Modifier.weight(1f))
-            StatTile("BLOCKED APPS", state.appBlocks.size.toString(), Modifier.weight(1f))
         }
         Spacer(Modifier.height(24.dp))
         Text("PINNED APPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
