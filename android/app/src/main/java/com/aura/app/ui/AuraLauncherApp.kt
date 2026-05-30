@@ -123,6 +123,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -288,7 +291,31 @@ fun AuraLauncherApp(
             NavHost(
                 navController = navController,
                 startDestination = Route.Home.name,
-                modifier = Modifier.padding(padding)
+                modifier = Modifier.padding(padding),
+                enterTransition = {
+                    slideIntoContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Left,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(400))
+                },
+                exitTransition = {
+                    slideOutOfContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Left,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(400))
+                },
+                popEnterTransition = {
+                    slideIntoContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Right,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(400))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Right,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(400))
+                }
             ) {
                 composable(Route.Home.name) {
                     BackHandler(enabled = state.isDefaultLauncher) {
