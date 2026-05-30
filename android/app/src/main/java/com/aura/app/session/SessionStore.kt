@@ -77,6 +77,12 @@ class SessionStore(private val context: Context) {
         }
     }
 
+    suspend fun setOnboardingComplete(complete: Boolean) {
+        context.sessionDataStore.edit { prefs ->
+            prefs[onboardingKey] = complete
+        }
+    }
+
     suspend fun setWallpaperUri(uri: String?) {
         context.sessionDataStore.edit { prefs ->
             if (uri == null) {
