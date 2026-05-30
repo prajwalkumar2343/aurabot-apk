@@ -9,33 +9,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkScheme = darkColorScheme(
-    primary = Color(0xFF95D5B2),
-    onPrimary = Color(0xFF062218),
-    secondary = Color(0xFFFFD166),
-    onSecondary = Color(0xFF261900),
-    tertiary = Color(0xFF74C0FC),
-    background = Color(0xFF07110E),
-    onBackground = Color(0xFFE7F4EC),
-    surface = Color(0xFF10201A),
-    onSurface = Color(0xFFE7F4EC),
-    surfaceVariant = Color(0xFF21352D),
-    onSurfaceVariant = Color(0xFFC2D5CB),
-    error = Color(0xFFFFB4AB)
+    primary = Color.White,
+    onPrimary = Color.Black,
+    secondary = Color.White,
+    onSecondary = Color.Black,
+    tertiary = Color.White,
+    background = Color.Black,
+    onBackground = Color.White,
+    surface = Color(0xFF121212),
+    onSurface = Color.White,
+    surfaceVariant = Color(0xFF1C1C1E),
+    onSurfaceVariant = Color(0xFF8E8E93),
+    error = Color.White
 )
 
 private val LightScheme = lightColorScheme(
-    primary = Color(0xFF1B6B4A),
+    primary = Color.Black,
     onPrimary = Color.White,
-    secondary = Color(0xFF8A5A00),
+    secondary = Color.Black,
     onSecondary = Color.White,
-    tertiary = Color(0xFF0E5E91),
-    background = Color(0xFFF4FBF6),
-    onBackground = Color(0xFF102018),
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF102018),
-    surfaceVariant = Color(0xFFDDEBE2),
-    onSurfaceVariant = Color(0xFF41564B),
-    error = Color(0xFFBA1A1A)
+    tertiary = Color.Black,
+    background = Color.White,
+    onBackground = Color.Black,
+    surface = Color(0xFFF2F2F7),
+    onSurface = Color.Black,
+    surfaceVariant = Color(0xFFE5E5EA),
+    onSurfaceVariant = Color(0xFF8E8E93),
+    error = Color.Black
 )
 
 @Composable
