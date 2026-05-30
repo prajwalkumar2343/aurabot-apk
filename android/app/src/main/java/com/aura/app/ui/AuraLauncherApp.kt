@@ -129,7 +129,8 @@ private enum class Route(val title: String) {
     Assistant("Assistant"),
     Tasks("Tasks"),
     Memory("Memory"),
-    Settings("Settings")
+    Settings("Settings"),
+    Models("Models")
 }
 
 private enum class AuraPresenceMode {
@@ -209,121 +210,154 @@ fun AuraLauncherApp(
         )
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            val current = navController.currentBackStackEntryAsState().value?.destination?.route
-            val isDark = isSystemInDarkTheme()
-            val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.background,
-                tonalElevation = 0.dp,
-                modifier = Modifier.drawBehind {
-                    drawLine(
-                        color = borderColor,
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, 0f),
-                        strokeWidth = 1.dp.toPx()
-                    )
+    val onboardingComplete = state.session.onboardingComplete
+    if (!onboardingComplete) {
+        OnboardingScreen(
+            state = state,
+            onGoogleLogin = { key ->
+                viewModel.setGoogleApiKey(key)
+                viewModel.setLlmProvider(LlmProvider.Gemini)
+                viewModel.setOnboardingComplete(true)
+            },
+            onOpenAiLogin = { key ->
+                viewModel.setOpenAiApiKey(key)
+                viewModel.setLlmProvider(LlmProvider.OpenAI)
+                viewModel.setOnboardingComplete(true)
+            },
+            onLocalSetup = { provider, key ->
+                viewModel.setLlmProvider(provider)
+                if (provider == LlmProvider.Gemini) {
+                    viewModel.setGoogleApiKey(key)
+                } else if (provider == LlmProvider.OpenRouter) {
+                    viewModel.setOpenRouterApiKey(key)
                 }
-            ) {
-                val routes = if (state.isDefaultLauncher) {
-                    listOf(Route.Home, Route.Apps, Route.Settings)
-                } else {
-                    listOf(Route.Home, Route.Settings)
-                }
-                routes.forEach { route ->
-                    NavigationBarItem(
-                        selected = current == route.name,
-                        onClick = {
-                            navController.navigate(route.name) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(routeIcon(route), contentDescription = route.title) },
-                        label = { Text(route.title) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                            selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                            unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                            unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                            indicatorColor = Color.Transparent
+                viewModel.setOnboardingComplete(true)
+            }
+        )
+    } else {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                val current = navController.currentBackStackEntryAsState().value?.destination?.route
+                val isDark = isSystemInDarkTheme()
+                val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.drawBehind {
+                        drawLine(
+                            color = borderColor,
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = 1.dp.toPx()
                         )
-                    )
+                    }
+                ) {
+                    val routes = if (state.isDefaultLauncher) {
+                        listOf(Route.Home, Route.Apps, Route.Settings)
+                    } else {
+                        listOf(Route.Home, Route.Settings)
+                    }
+                    routes.forEach { route ->
+                        NavigationBarItem(
+                            selected = current == route.name,
+                            onClick = {
+                                navController.navigate(route.name) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(routeIcon(route), contentDescription = route.title) },
+                            label = { Text(route.title) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                                selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                                unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                indicatorColor = Color.Transparent
+                            )
+                        )
+                    }
                 }
             }
-        }
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Route.Home.name,
-            modifier = Modifier.padding(padding)
-        ) {
-            composable(Route.Home.name) {
-                HomeScreen(
-                    state = state,
-                    onAssistantInput = viewModel::setAssistantInput,
-                    onSend = viewModel::sendAssistantMessage,
-                    onTalk = {
-                        onRequestVoicePermissions()
-                        viewModel.startPushToTalk()
-                    },
-                    onStopVoice = viewModel::stopVoice,
-                    onOpenApps = { navController.navigate(Route.Apps.name) },
-                    onOpenAssistant = { navController.navigate(Route.Assistant.name) },
-                    onQuitApp = onQuitApp,
-                    onLaunchApp = { app ->
-                        viewModel.launchIntent(app)?.let { context.startActivity(it) }
-                    }
-                )
-            }
-            composable(Route.Apps.name) {
-                AppsScreen(
-                    state = state,
-                    onQuery = viewModel::setAppQuery,
-                    onLaunchApp = { app ->
-                        viewModel.launchIntent(app)?.let { context.startActivity(it) }
-                    },
-                    onRefresh = viewModel::refreshApps
-                )
-            }
-            composable(Route.Assistant.name) {
-                AssistantScreen(
-                    state = state,
-                    onAssistantInput = viewModel::setAssistantInput,
-                    onSend = viewModel::sendAssistantMessage
-                )
-            }
-            composable(Route.Tasks.name) {
-                TasksScreen(state = state, onAddTodo = viewModel::addTodo)
-            }
-            composable(Route.Memory.name) {
-                MemoryScreen(state = state, onAddMemory = viewModel::addMemory)
-            }
-            composable(Route.Settings.name) {
-                SettingsScreen(
-                    state = state,
-                    onProviderSelected = viewModel::setLlmProvider,
-                    onGoogleApiKeyChanged = viewModel::setGoogleApiKey,
-                    onGoogleModelChanged = viewModel::setGoogleModel,
-                    onOpenAiApiKeyChanged = viewModel::setOpenAiApiKey,
-                    onOpenAiModelChanged = viewModel::setOpenAiModel,
-                    onOpenRouterApiKeyChanged = viewModel::setOpenRouterApiKey,
-                    onOpenRouterModelChanged = viewModel::setOpenRouterModel,
-                    onLoadOpenRouterModels = viewModel::loadOpenRouterModels,
-                    onRequestVoicePermissions = onRequestVoicePermissions,
-                    onOpenHomeSettings = {
-                        showHomePrompt = true
-                    },
-                    onBackgroundListening = viewModel::setBackgroundListening,
-                    onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
-                    onClearWallpaper = { viewModel.setWallpaper(null) },
-                    onSetInteractionMode = viewModel::setInteractionMode
-                )
+        ) { padding ->
+            NavHost(
+                navController = navController,
+                startDestination = Route.Home.name,
+                modifier = Modifier.padding(padding)
+            ) {
+                composable(Route.Home.name) {
+                    HomeScreen(
+                        state = state,
+                        onAssistantInput = viewModel::setAssistantInput,
+                        onSend = viewModel::sendAssistantMessage,
+                        onTalk = {
+                            onRequestVoicePermissions()
+                            viewModel.startPushToTalk()
+                        },
+                        onStopVoice = viewModel::stopVoice,
+                        onOpenApps = { navController.navigate(Route.Apps.name) },
+                        onOpenAssistant = { navController.navigate(Route.Assistant.name) },
+                        onQuitApp = onQuitApp,
+                        onLaunchApp = { app ->
+                            viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                        }
+                    )
+                }
+                composable(Route.Apps.name) {
+                    AppsScreen(
+                        state = state,
+                        onQuery = viewModel::setAppQuery,
+                        onLaunchApp = { app ->
+                            viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                        },
+                        onRefresh = viewModel::refreshApps
+                    )
+                }
+                composable(Route.Assistant.name) {
+                    AssistantScreen(
+                        state = state,
+                        onAssistantInput = viewModel::setAssistantInput,
+                        onSend = viewModel::sendAssistantMessage
+                    )
+                }
+                composable(Route.Tasks.name) {
+                    TasksScreen(state = state, onAddTodo = viewModel::addTodo)
+                }
+                composable(Route.Memory.name) {
+                    MemoryScreen(state = state, onAddMemory = viewModel::addMemory)
+                }
+                composable(Route.Settings.name) {
+                    SettingsScreen(
+                        state = state,
+                        onRequestVoicePermissions = onRequestVoicePermissions,
+                        onOpenHomeSettings = {
+                            showHomePrompt = true
+                        },
+                        onBackgroundListening = viewModel::setBackgroundListening,
+                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onClearWallpaper = { viewModel.setWallpaper(null) },
+                        onSetInteractionMode = viewModel::setInteractionMode,
+                        onConfigureModels = { navController.navigate(Route.Models.name) }
+                    )
+                }
+                composable(Route.Models.name) {
+                    ModelsScreen(
+                        state = state,
+                        onProviderSelected = viewModel::setLlmProvider,
+                        onGoogleApiKeyChanged = viewModel::setGoogleApiKey,
+                        onGoogleModelChanged = viewModel::setGoogleModel,
+                        onOpenAiApiKeyChanged = viewModel::setOpenAiApiKey,
+                        onOpenAiModelChanged = viewModel::setOpenAiModel,
+                        onOpenRouterApiKeyChanged = viewModel::setOpenRouterApiKey,
+                        onOpenRouterModelChanged = viewModel::setOpenRouterModel,
+                        onLoadOpenRouterModels = viewModel::loadOpenRouterModels,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
             }
         }
     }
@@ -994,7 +1028,262 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
 }
 
 @Composable
-private fun SettingsScreen(
+private fun OnboardingScreen(
+    state: LauncherUiState,
+    onGoogleLogin: (String) -> Unit,
+    onOpenAiLogin: (String) -> Unit,
+    onLocalSetup: (LlmProvider, String) -> Unit
+) {
+    var step by remember { mutableStateOf(1) }
+    var showGoogleDialog by remember { mutableStateOf(false) }
+    var showOpenAiDialog by remember { mutableStateOf(false) }
+    
+    var googleKeyInput by remember { mutableStateOf("") }
+    var openAiKeyInput by remember { mutableStateOf("") }
+    
+    var localProvider by remember { mutableStateOf(LlmProvider.Gemini) }
+    var localKeyInput by remember { mutableStateOf("") }
+
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "AURA",
+                style = MaterialTheme.typography.displayLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "SWISS COGNITIVE LAUNCHER",
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
+                ),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+            )
+            Spacer(Modifier.height(48.dp))
+
+            if (step == 1) {
+                Text(
+                    text = "WELCOME TO AURA",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Select an onboarding option below to configure your digital intelligence environment.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(32.dp))
+
+                FilledTonalButton(
+                    onClick = { showGoogleDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.onBackground,
+                        contentColor = MaterialTheme.colorScheme.background
+                    )
+                ) {
+                    Text("LOGIN VIA GOOGLE", fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = { showOpenAiDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Text("LOGIN VIA OPENAI", fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = { step = 2 },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Text("CONTINUE AS LOCAL-FIRST", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Text(
+                    text = "CONFIGURE LOCAL-FIRST ENGINE",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Data remains 100% on-device. Please enter a valid API key to drive local-first assistant conversations.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(24.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(LlmProvider.Gemini, LlmProvider.OpenRouter).forEach { provider ->
+                        val selected = localProvider == provider
+                        FilledTonalButton(
+                            onClick = { localProvider = provider },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
+                                contentColor = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
+                            Text(provider.label.uppercase(), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = localKeyInput,
+                    onValueChange = { localKeyInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(if (localProvider == LlmProvider.Gemini) "GOOGLE API KEY..." else "OPENROUTER API KEY...") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        cursorColor = MaterialTheme.colorScheme.onBackground
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(Modifier.height(24.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    TextButton(
+                        onClick = { step = 1 },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
+                    ) {
+                        Text("BACK", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = { onLocalSetup(localProvider, localKeyInput) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.onBackground,
+                            contentColor = MaterialTheme.colorScheme.background
+                        )
+                    ) {
+                        Text("FINISH SETUP", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showGoogleDialog) {
+        AlertDialog(
+            onDismissRequest = { showGoogleDialog = false },
+            title = { Text("Google Secure Auth Login", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Provide your Google Gemini API Key to log in securely.")
+                    OutlinedTextField(
+                        value = googleKeyInput,
+                        onValueChange = { googleKeyInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("GEMINI API KEY...") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            cursorColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showGoogleDialog = false
+                        onGoogleLogin(googleKeyInput)
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Sign In")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGoogleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showOpenAiDialog) {
+        AlertDialog(
+            onDismissRequest = { showOpenAiDialog = false },
+            title = { Text("OpenAI Secure Auth Login", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Provide your OpenAI API Key or Secure Access Token to log in.")
+                    OutlinedTextField(
+                        value = openAiKeyInput,
+                        onValueChange = { openAiKeyInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("OPENAI API KEY...") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            cursorColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOpenAiDialog = false
+                        onOpenAiLogin(openAiKeyInput)
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Sign In")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOpenAiDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ModelsScreen(
     state: LauncherUiState,
     onProviderSelected: (LlmProvider) -> Unit,
     onGoogleApiKeyChanged: (String) -> Unit,
@@ -1004,17 +1293,20 @@ private fun SettingsScreen(
     onOpenRouterApiKeyChanged: (String) -> Unit,
     onOpenRouterModelChanged: (String) -> Unit,
     onLoadOpenRouterModels: () -> Unit,
-    onRequestVoicePermissions: () -> Unit,
-    onOpenHomeSettings: () -> Unit,
-    onBackgroundListening: (Boolean) -> Unit,
-    onSelectWallpaper: () -> Unit,
-    onClearWallpaper: () -> Unit,
-    onSetInteractionMode: (String) -> Unit
+    onBack: () -> Unit
 ) {
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("SETTINGS", "System, model, and voice configuration.")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
+                Text("← BACK", fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Header("MODELS", "Configure LLM providers, API keys, and model parameters.")
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Card(
@@ -1083,7 +1375,8 @@ private fun SettingsScreen(
                         value = state.llmSettings.googleModel,
                         onValueChange = onGoogleModelChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("GEMINI-3-FLASH-PREVIEW...") },
+                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        placeholder = { Text("GOOGLE GEMINI MODEL ID...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.onBackground,
@@ -1106,18 +1399,13 @@ private fun SettingsScreen(
                 )
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("OPENAI", fontWeight = FontWeight.Bold)
-                    Text(
-                        "ChatGPT subscriptions do not include API usage. Use an OpenAI API key from your platform account here.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("OPENAI GPT", fontWeight = FontWeight.Bold)
                     OutlinedTextField(
                         value = state.llmSettings.openAiApiKey,
                         onValueChange = onOpenAiApiKeyChanged,
                         modifier = Modifier.fillMaxWidth(),
                         leadingIcon = { Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
-                        placeholder = { Text("OPENAI API KEY...") },
+                        placeholder = { Text("OPENAI PLATFORM API KEY...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.onBackground,
@@ -1132,7 +1420,8 @@ private fun SettingsScreen(
                         value = state.llmSettings.openAiModel,
                         onValueChange = onOpenAiModelChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("GPT-4.1-MINI...") },
+                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        placeholder = { Text("OPENAI MODEL ID...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.onBackground,
@@ -1155,7 +1444,7 @@ private fun SettingsScreen(
                 )
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("OPENROUTER", fontWeight = FontWeight.Bold)
+                    Text("OPENROUTER DIRECT", fontWeight = FontWeight.Bold)
                     OutlinedTextField(
                         value = state.llmSettings.openRouterApiKey,
                         onValueChange = onOpenRouterApiKeyChanged,
@@ -1172,53 +1461,73 @@ private fun SettingsScreen(
                         ),
                         shape = RoundedCornerShape(8.dp)
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = state.llmSettings.openRouterModel,
-                            onValueChange = onOpenRouterModelChanged,
-                            modifier = Modifier.weight(1f),
-                            placeholder = { Text("SELECT OR TYPE A MODEL...") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                cursorColor = MaterialTheme.colorScheme.onBackground
-                            ),
-                            shape = RoundedCornerShape(8.dp)
+                    OutlinedTextField(
+                        value = state.llmSettings.openRouterModel,
+                        onValueChange = onOpenRouterModelChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        placeholder = { Text("OPENROUTER MODEL ID...") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            cursorColor = MaterialTheme.colorScheme.onBackground
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Button(
+                        onClick = onLoadOpenRouterModels,
+                        enabled = !state.loadingModels,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.onBackground,
+                            contentColor = MaterialTheme.colorScheme.background
                         )
-                        Button(
-                            onClick = onLoadOpenRouterModels,
-                            enabled = !state.loadingModels,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.onBackground,
-                                contentColor = MaterialTheme.colorScheme.background
-                            )
-                        ) {
-                            Text(if (state.loadingModels) "LOADING" else "LOAD MODELS", fontWeight = FontWeight.Bold)
-                        }
+                    ) {
+                        Text(if (state.loadingModels) "LOADING" else "LOAD MODELS", fontWeight = FontWeight.Bold)
                     }
-                    if (state.openRouterModels.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 220.dp)
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            state.openRouterModels.forEach { model ->
-                                SettingsRow(
-                                    title = model.name,
-                                    subtitle = model.id,
-                                    onClick = { onOpenRouterModelChanged(model.id) }
-                                )
-                            }
+                }
+                if (state.openRouterModels.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        state.openRouterModels.forEach { model ->
+                            SettingsRow(
+                                title = model.name,
+                                subtitle = model.id,
+                                onClick = { onOpenRouterModelChanged(model.id) }
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    state: LauncherUiState,
+    onRequestVoicePermissions: () -> Unit,
+    onOpenHomeSettings: () -> Unit,
+    onBackgroundListening: (Boolean) -> Unit,
+    onSelectWallpaper: () -> Unit,
+    onClearWallpaper: () -> Unit,
+    onSetInteractionMode: (String) -> Unit,
+    onConfigureModels: () -> Unit
+) {
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+        Header("SETTINGS", "System, model, and voice configuration.")
+        Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -1237,6 +1546,7 @@ private fun SettingsScreen(
                     )
                 }
             }
+            SettingsRow("Models", "Configure active LLM provider, API keys, and model parameters.", onConfigureModels)
             SettingsRow("Default launcher", "Open Android Home app settings.", onOpenHomeSettings)
             SettingsRow("Voice permissions", "Microphone and notification access.", onRequestVoicePermissions)
             SettingsRow(
@@ -1495,4 +1805,5 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Tasks -> Icons.Outlined.CheckCircle
     Route.Memory -> Icons.Outlined.Layers
     Route.Settings -> Icons.Outlined.Settings
+    Route.Models -> Icons.Outlined.Settings
 }
