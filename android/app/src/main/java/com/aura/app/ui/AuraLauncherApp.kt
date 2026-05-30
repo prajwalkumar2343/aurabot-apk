@@ -1549,7 +1549,7 @@ private fun SettingsScreen(
             }
             SettingsRow("Models", "Configure active LLM provider, API keys, and model parameters.", onConfigureModels)
             SettingsRow("Default launcher", "Open Android Home app settings.", onOpenHomeSettings)
-            SettingsRow("Voice permissions", "Microphone and notification access.", onRequestVoicePermissions)
+            SettingsRow("App permissions", "Microphone, notification, and location access.", onRequestVoicePermissions)
             SettingsRow(
                 title = "Interaction visualizer",
                 subtitle = "Active: ${state.session.interactionMode.uppercase()}",
