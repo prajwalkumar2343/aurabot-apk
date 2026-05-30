@@ -1,6 +1,7 @@
 package com.aura.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -9,12 +10,18 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.aura.app.ui.AuraLauncherApp
+import com.aura.app.ui.LauncherViewModel
 import com.aura.app.ui.theme.AuraTheme
 
 class LauncherActivity : ComponentActivity() {
+    private val viewModel: LauncherViewModel by viewModels {
+        LauncherViewModel.Factory(application.auraContainer)
+    }
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
@@ -22,17 +29,31 @@ class LauncherActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        val container = application.auraContainer
         setContent {
             AuraTheme {
                 AuraLauncherApp(
-                    container = container,
+                    viewModel = viewModel,
                     onRequestVoicePermissions = ::requestVoicePermissions,
                     onOpenHomeSettings = ::openHomeSettings,
                     onQuitApp = ::quitApp
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val isDefault = isDefaultLauncher(this)
+        viewModel.setIsDefaultLauncher(isDefault)
+    }
+
+    private fun isDefaultLauncher(context: Context): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+        }
+        val resolveInfo = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val defaultLauncherPackage = resolveInfo?.activityInfo?.packageName
+        return defaultLauncherPackage == context.packageName
     }
 
     private fun requestVoicePermissions() {
