@@ -71,9 +71,6 @@ class SessionStore(private val context: Context) {
     suspend fun setHomeSettingsPrompted(prompted: Boolean) {
         context.sessionDataStore.edit { prefs ->
             prefs[homeSettingsPromptedKey] = prompted
-            if (prompted) {
-                prefs[onboardingKey] = true
-            }
         }
     }
 
