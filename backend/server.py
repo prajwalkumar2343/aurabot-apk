@@ -9,11 +9,15 @@ import uuid
 import base64
 import logging
 import tempfile
+import asyncio
+import json
+import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import bcrypt
 import jwt
+import requests
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -32,7 +36,7 @@ api_router = APIRouter(prefix="/api")
 JWT_ALGORITHM = "HS256"
 ACCESS_MIN = 60 * 24  # 1 day (mobile)
 REFRESH_DAYS = 30
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-exp")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 
@@ -139,14 +143,56 @@ class TodoOut(BaseModel):
     created_at: str
 
 
+class ChatMemoryIn(BaseModel):
+    title: str
+    content: str
+
+
+class ChatTodoIn(BaseModel):
+    title: str
+    done: bool
+
+
+class ChatAppIn(BaseModel):
+    label: str
+    package_name: str
+
+
+class ChatActionOut(BaseModel):
+    type: str
+    package_name: Optional[str] = None
+    app_query: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
 class ChatIn(BaseModel):
     message: str
     session_id: Optional[str] = None
+    provider: str = "gemini"
+    api_key: str
+    model: str
+    memories: List[ChatMemoryIn] = Field(default_factory=list)
+    todos: List[ChatTodoIn] = Field(default_factory=list)
+    apps: List[ChatAppIn] = Field(default_factory=list)
 
 
 class ChatOut(BaseModel):
     reply: str
     session_id: str
+    actions: List[ChatActionOut] = Field(default_factory=list)
+
+
+class OpenRouterModelsIn(BaseModel):
+    api_key: str
+
+
+class ProviderModelOut(BaseModel):
+    id: str
+    name: str
+
+
+class ProviderModelsOut(BaseModel):
+    data: List[ProviderModelOut]
 
 
 class TranscribeIn(BaseModel):
@@ -345,28 +391,209 @@ async def delete_todo(todo_id: str, user=Depends(get_current_user)):
     return {"ok": True}
 
 
-# ---------------- Assistant chat (Gemini 3.1 Flash Lite) ----------------
-@api_router.post("/assistant/chat", response_model=ChatOut)
-async def assistant_chat(data: ChatIn, user=Depends(get_current_user)):
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+def build_system_message(data: ChatIn) -> str:
+    memories = "\n".join(f"- {item.title}: {item.content}" for item in data.memories[:8]) or "- none"
+    todos = "\n".join(
+        f"- [{'done' if item.done else 'open'}] {item.title}" for item in data.todos[:12]
+    ) or "- none"
+    apps = "\n".join(
+        f"- {item.label} ({item.package_name})" for item in data.apps[:80]
+    ) or "- none"
+    return (
+        "You are Aura, a calm launcher assistant inside an Android home app. "
+        "You can chat normally and you can request local tools by returning actions. "
+        "Return ONLY valid JSON with this shape: "
+        '{"reply":"short plain-text reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30}]}. '
+        "Use actions only when the user asks to block, restrict, pause, or limit an app. "
+        "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
+        "If no duration is given, use 30 minutes. No markdown, no emoji.\n\n"
+        f"Local memories:\n{memories}\n\n"
+        f"Local tasks:\n{todos}\n\n"
+        f"Installed apps:\n{apps}"
+    )
 
-    session_id = data.session_id or str(uuid.uuid4())
-    system_msg = (
-        "You are Aura, a calm, minimalist voice assistant. "
-        "Reply concisely (1-3 short sentences) in plain text. "
-        "No markdown, no emoji. Be direct and helpful."
-    )
-    chat = (
-        LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"user-{user['id']}-{session_id}", system_message=system_msg)
-        .with_model("gemini", GEMINI_MODEL)
-        .with_params(max_tokens=400)
-    )
+
+def parse_tool_response(raw: str) -> tuple[str, List[ChatActionOut]]:
+    text = raw.strip()
     try:
-        reply = await chat.send_message(UserMessage(text=data.message))
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return text, []
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return text, []
+
+    reply = str(payload.get("reply") or "").strip() or "Done."
+    actions = []
+    for item in payload.get("actions") or []:
+        if not isinstance(item, dict):
+            continue
+        actions.append(
+            ChatActionOut(
+                type=str(item.get("type") or "").strip(),
+                package_name=item.get("package_name"),
+                app_query=item.get("app_query"),
+                duration_minutes=item.get("duration_minutes"),
+            )
+        )
+    return reply, [action for action in actions if action.type]
+
+
+def extract_openai_text(payload: dict) -> str:
+    output = payload.get("output", [])
+    text_parts: List[str] = []
+    for item in output:
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                text_parts.append(content["text"])
+    if text_parts:
+        return "\n".join(text_parts).strip()
+    raise HTTPException(status_code=502, detail="OpenAI response did not include text output")
+
+
+def call_gemini(data: ChatIn, system_message: str) -> str:
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{data.model}:generateContent",
+        headers={
+            "x-goog-api-key": data.api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": f"{system_message}\n\nUser request:\n{data.message}"
+                        }
+                    ]
+                }
+            ]
+        },
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=f"Gemini error: {response.text[:300]}")
+    payload = response.json()
+    candidates = payload.get("candidates") or []
+    parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+    text = "".join(part.get("text", "") for part in parts).strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="Gemini response did not include text")
+    return text
+
+
+def call_openai(data: ChatIn, system_message: str) -> str:
+    response = requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {data.api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": data.model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": system_message,
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": data.message,
+                        }
+                    ],
+                },
+            ],
+        },
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=f"OpenAI error: {response.text[:300]}")
+    return extract_openai_text(response.json())
+
+
+def call_openrouter(data: ChatIn, system_message: str) -> str:
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {data.api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": data.model,
+            "messages": [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": data.message},
+            ],
+        },
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=f"OpenRouter error: {response.text[:300]}")
+    payload = response.json()
+    choices = payload.get("choices") or []
+    text = choices[0].get("message", {}).get("content", "").strip() if choices else ""
+    if not text:
+        raise HTTPException(status_code=502, detail="OpenRouter response did not include text")
+    return text
+
+
+@api_router.post("/assistant/chat", response_model=ChatOut)
+async def assistant_chat(data: ChatIn):
+    session_id = data.session_id or str(uuid.uuid4())
+    system_message = build_system_message(data)
+    provider = data.provider.lower().strip()
+
+    try:
+        if provider == "gemini":
+            raw_reply = await asyncio.to_thread(call_gemini, data, system_message)
+        elif provider == "openai":
+            raw_reply = await asyncio.to_thread(call_openai, data, system_message)
+        elif provider == "openrouter":
+            raw_reply = await asyncio.to_thread(call_openrouter, data, system_message)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported provider")
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("assistant_chat failed")
         raise HTTPException(status_code=500, detail=f"Assistant error: {str(e)[:200]}")
-    return ChatOut(reply=str(reply), session_id=session_id)
+
+    reply, actions = parse_tool_response(raw_reply)
+    return ChatOut(reply=reply, session_id=session_id, actions=actions)
+
+
+@api_router.post("/providers/openrouter/models", response_model=ProviderModelsOut)
+async def openrouter_models(data: OpenRouterModelsIn):
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {data.api_key}"},
+            timeout=30,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OpenRouter request failed: {str(e)[:200]}")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=f"OpenRouter error: {response.text[:300]}")
+    payload = response.json()
+    models = [
+        ProviderModelOut(id=item.get("id", ""), name=item.get("name") or item.get("id", ""))
+        for item in payload.get("data", [])
+        if item.get("id")
+    ]
+    models.sort(key=lambda item: item.name.lower())
+    return ProviderModelsOut(data=models)
 
 
 # ---------------- Transcription (audio → text via Gemini) ----------------
