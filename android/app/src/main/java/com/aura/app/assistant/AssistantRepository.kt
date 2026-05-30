@@ -62,15 +62,45 @@ class AssistantRepository(
 
     suspend fun me(): UserResponse = requireLogin("Account") { api.me() }
 
-    suspend fun memories(): List<MemoryResponse> = localAssistantStore.memories()
+    suspend fun memories(): List<MemoryResponse> = withContext(Dispatchers.IO) {
+        if (sessionStore.accessToken().isNullOrBlank()) {
+            localAssistantStore.memories()
+        } else {
+            api.memories()
+        }
+    }
 
-    suspend fun createMemory(title: String, content: String): MemoryResponse = localAssistantStore.createMemory(title, content)
+    suspend fun createMemory(title: String, content: String): MemoryResponse = withContext(Dispatchers.IO) {
+        if (sessionStore.accessToken().isNullOrBlank()) {
+            localAssistantStore.createMemory(title, content)
+        } else {
+            api.createMemory(MemoryCreateRequest(title, content))
+        }
+    }
 
-    suspend fun todos(): List<TodoResponse> = localAssistantStore.todos()
+    suspend fun todos(): List<TodoResponse> = withContext(Dispatchers.IO) {
+        if (sessionStore.accessToken().isNullOrBlank()) {
+            localAssistantStore.todos()
+        } else {
+            api.todos()
+        }
+    }
 
-    suspend fun createTodo(title: String): TodoResponse = localAssistantStore.createTodo(title)
+    suspend fun createTodo(title: String): TodoResponse = withContext(Dispatchers.IO) {
+        if (sessionStore.accessToken().isNullOrBlank()) {
+            localAssistantStore.createTodo(title)
+        } else {
+            api.createTodo(TodoCreateRequest(title))
+        }
+    }
 
-    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse = localAssistantStore.updateTodoDone(id, done)
+    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse = withContext(Dispatchers.IO) {
+        if (sessionStore.accessToken().isNullOrBlank()) {
+            localAssistantStore.updateTodoDone(id, done)
+        } else {
+            api.updateTodo(id, TodoUpdateRequest(done = done))
+        }
+    }
 
     suspend fun chat(message: String, sessionId: String?, apps: List<AppInfo>): ChatResponse = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
