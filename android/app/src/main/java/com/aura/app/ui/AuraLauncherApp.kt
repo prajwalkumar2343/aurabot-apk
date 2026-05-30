@@ -35,6 +35,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -262,11 +264,7 @@ fun AuraLauncherApp(
                         )
                     }
                 ) {
-                    val routes = if (state.isDefaultLauncher) {
-                        listOf(Route.Home, Route.Apps, Route.Settings)
-                    } else {
-                        listOf(Route.Home, Route.Settings)
-                    }
+                    val routes = listOf(Route.Home, Route.Settings)
                     routes.forEach { route ->
                         NavigationBarItem(
                             selected = current == route.name,
@@ -335,8 +333,8 @@ fun AuraLauncherApp(
                             viewModel.startPushToTalk()
                         },
                         onStopVoice = viewModel::stopVoice,
-                        onOpenApps = { navController.navigate(Route.Apps.name) },
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
+                        onSwipeLeft = { navController.navigate(Route.Apps.name) },
                         onLaunchApp = { app ->
                             viewModel.launchIntent(app)?.let { context.startActivity(it) }
                         }
@@ -349,7 +347,8 @@ fun AuraLauncherApp(
                         onLaunchApp = { app ->
                             viewModel.launchIntent(app)?.let { context.startActivity(it) }
                         },
-                        onRefresh = viewModel::refreshApps
+                        onRefresh = viewModel::refreshApps,
+                        onSwipeRight = { navController.popBackStack() }
                     )
                 }
                 composable(Route.Assistant.name) {
@@ -408,8 +407,8 @@ private fun HomeScreen(
     onSend: () -> Unit,
     onTalk: () -> Unit,
     onStopVoice: () -> Unit,
-    onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
+    onSwipeLeft: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit
 ) {
     val presenceMode = when {
@@ -419,7 +418,23 @@ private fun HomeScreen(
         state.assistantInput.isNotBlank() -> AuraPresenceMode.Focused
         else -> AuraPresenceMode.Idle
     }
-    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+    var totalDrag = 0f
+    ScreenShell(
+        wallpaperUri = state.session.wallpaperUri,
+        modifier = Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragStart = { totalDrag = 0f },
+                onDragEnd = {
+                    if (totalDrag < -150f) {
+                        onSwipeLeft()
+                    }
+                },
+                onHorizontalDrag = { _, dragAmount ->
+                    totalDrag += dragAmount
+                }
+            )
+        }
+    ) {
         AuraEyes(
             mode = presenceMode,
             voiceLevel = state.status.rmsLevel,
@@ -439,27 +454,11 @@ private fun HomeScreen(
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(if (state.status.running) Icons.Rounded.Stop else Icons.Rounded.Mic, null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (state.status.running) "STOP" else "TALK")
-            }
-            if (state.isDefaultLauncher) {
-                FilledTonalButton(
-                    onClick = onOpenApps,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Rounded.Apps, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("APPS")
-                }
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -786,9 +785,26 @@ private fun AppsScreen(
     state: LauncherUiState,
     onQuery: (String) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onSwipeRight: () -> Unit
 ) {
-    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+    var totalDrag = 0f
+    ScreenShell(
+        wallpaperUri = state.session.wallpaperUri,
+        modifier = Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragStart = { totalDrag = 0f },
+                onDragEnd = {
+                    if (totalDrag > 150f) {
+                        onSwipeRight()
+                    }
+                },
+                onHorizontalDrag = { _, dragAmount ->
+                    totalDrag += dragAmount
+                }
+            )
+        }
+    ) {
         Header("APPS", "Search and open installed applications.")
         OutlinedTextField(
             value = state.appQuery,
@@ -1687,11 +1703,12 @@ private fun rememberWallpaperPainter(uriString: String?): ImageBitmap? {
 @Composable
 private fun ScreenShell(
     wallpaperUri: String? = null,
+    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
