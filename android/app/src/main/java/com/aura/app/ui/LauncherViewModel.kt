@@ -44,7 +44,8 @@ data class LauncherUiState(
     val loading: Boolean = false,
     val error: String? = null,
     val currentEmotion: String = "neutral",
-    val isSpeaking: Boolean = false
+    val isSpeaking: Boolean = false,
+    val isDefaultLauncher: Boolean = false
 ) {
     val filteredApps: List<AppInfo> =
         if (appQuery.isBlank()) apps else apps.filter {
@@ -317,6 +318,22 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun markHomeSettingsPrompted() {
         viewModelScope.launch {
             container.sessionStore.setHomeSettingsPrompted(true)
+        }
+    }
+
+    fun setIsDefaultLauncher(isDefault: Boolean) {
+        localState.update { it.copy(isDefaultLauncher = isDefault) }
+    }
+
+    fun setWallpaper(uri: String?) {
+        viewModelScope.launch {
+            container.sessionStore.setWallpaperUri(uri)
+        }
+    }
+
+    fun setInteractionMode(mode: String) {
+        viewModelScope.launch {
+            container.sessionStore.setInteractionMode(mode)
         }
     }
 
