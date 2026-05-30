@@ -13,6 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +58,13 @@ import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.RemoveRedEye
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -840,21 +849,37 @@ private fun AuraEyes(
 @Composable
 private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
     val isDark = isSystemInDarkTheme()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "app_scale"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onLaunchApp(app) }
-            .padding(vertical = 6.dp),
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = { onLaunchApp(app) }
+            )
+            .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (isDark) Color(0xFF1E1E1E) else Color(0xFFF2F2F7))
+                .size(62.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                 .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                    RoundedCornerShape(12.dp)
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
+                    RoundedCornerShape(16.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -862,7 +887,7 @@ private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
                 AppIcon(
                     drawable = app.icon,
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(42.dp)
                         .padding(2.dp)
                 )
             } else {
@@ -874,18 +899,176 @@ private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = app.label.uppercase(),
-            maxLines = 2,
-            minLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                letterSpacing = 0.5.sp
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "suggested_scale"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = { onLaunchApp(app) }
+            )
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                RoundedCornerShape(16.dp)
+            )
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.background)
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (app.icon != null) {
+                AppIcon(
+                    drawable = app.icon,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .padding(2.dp)
+                )
+            } else {
+                Text(
+                    text = app.label.take(1).uppercase(),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = app.label.uppercase(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                fontSize = 10.sp
             ),
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+@Composable
+private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "list_item_scale"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = { onLaunchApp(app) }
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
+                RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.background)
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
+                    RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (app.icon != null) {
+                AppIcon(
+                    drawable = app.icon,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .padding(2.dp)
+                )
+            } else {
+                Text(
+                    text = app.label.take(1).uppercase(),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = app.label.uppercase(),
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = app.packageName,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
@@ -898,6 +1081,8 @@ private fun AppsScreen(
     onSwipeRight: () -> Unit
 ) {
     var totalDrag = 0f
+    var isGridView by remember { mutableStateOf(true) }
+
     ScreenShell(
         wallpaperUri = state.session.wallpaperUri,
         modifier = Modifier.pointerInput(Unit) {
@@ -915,38 +1100,160 @@ private fun AppsScreen(
         }
     ) {
         Header("APPS", "Search and open installed applications.")
-        OutlinedTextField(
-            value = state.appQuery,
-            onValueChange = onQuery,
+        
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
-            placeholder = { Text("SEARCH APPS...") },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                cursorColor = MaterialTheme.colorScheme.onBackground
-            ),
-            shape = RoundedCornerShape(8.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        TextButton(
-            onClick = onRefresh,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("REFRESH APP LIST", fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                value = state.appQuery,
+                onValueChange = onQuery,
+                modifier = Modifier.weight(1f),
+                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
+                trailingIcon = {
+                    if (state.appQuery.isNotBlank()) {
+                        IconButton(onClick = { onQuery("") }) {
+                            Icon(Icons.Rounded.Clear, "Clear Search", tint = MaterialTheme.colorScheme.onBackground)
+                        }
+                    }
+                },
+                placeholder = { Text("SEARCH APPS...") },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    cursorColor = MaterialTheme.colorScheme.onBackground
+                ),
+                shape = CircleShape
+            )
+
+            IconButton(
+                onClick = { isGridView = !isGridView },
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
+                        CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = if (isGridView) Icons.Rounded.Layers else Icons.Rounded.Apps,
+                    contentDescription = "Toggle Layout",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.weight(1f)
+        
+        Spacer(Modifier.height(16.dp))
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) {
-            items(state.filteredApps, key = { it.componentName.flattenToString() }) { app ->
-                AppGridItem(app, onLaunchApp)
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (state.appQuery.isBlank()) {
+                    val suggestedApps = state.apps.take(4)
+                    if (suggestedApps.isNotEmpty()) {
+                        Text(
+                            text = "SUGGESTED APPS",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                            ),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            suggestedApps.forEach { app ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    SuggestedAppCard(app, onLaunchApp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+
+                if (isGridView) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(state.filteredApps, key = { it.componentName.flattenToString() }) { app ->
+                            AppGridItem(app, onLaunchApp)
+                        }
+                    }
+                } else {
+                    val groupedApps = remember(state.filteredApps) {
+                        state.filteredApps.groupBy { it.label.take(1).uppercase() }
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 80.dp)
+                    ) {
+                        groupedApps.forEach { (letter, appsInGroup) ->
+                            item(key = letter) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.onBackground),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = letter,
+                                            color = MaterialTheme.colorScheme.background,
+                                            fontWeight = FontWeight.Black,
+                                            style = MaterialTheme.typography.titleLarge
+                                        )
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        appsInGroup.forEach { app ->
+                                            AppListItem(app, onLaunchApp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            FloatingActionButton(
+                onClick = onRefresh,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.onBackground,
+                contentColor = MaterialTheme.colorScheme.background,
+                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Refresh Apps List",
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }
