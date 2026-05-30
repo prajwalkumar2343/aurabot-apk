@@ -38,17 +38,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.PowerSettingsNew
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -83,6 +87,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
@@ -434,7 +439,7 @@ private fun HomeScreen(
                 ),
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(if (state.status.running) Icons.Outlined.Stop else Icons.Outlined.Mic, null)
+                Icon(if (state.status.running) Icons.Rounded.Stop else Icons.Rounded.Mic, null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (state.status.running) "STOP" else "TALK")
             }
@@ -449,7 +454,7 @@ private fun HomeScreen(
                     ),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Outlined.Apps, null)
+                    Icon(Icons.Rounded.Apps, null)
                     Spacer(Modifier.width(8.dp))
                     Text("APPS")
                 }
@@ -791,7 +796,7 @@ private fun AppsScreen(
             value = state.appQuery,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
+            leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
             placeholder = { Text("SEARCH APPS...") },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -915,7 +920,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.CheckCircle,
+                        imageVector = Icons.Rounded.CheckCircle,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onBackground
                     )
@@ -1359,7 +1364,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.googleApiKey,
                         onValueChange = onGoogleApiKeyChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("GOOGLE AI STUDIO API KEY...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1375,7 +1380,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.googleModel,
                         onValueChange = onGoogleModelChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("GOOGLE GEMINI MODEL ID...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1404,7 +1409,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.openAiApiKey,
                         onValueChange = onOpenAiApiKeyChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("OPENAI PLATFORM API KEY...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1420,7 +1425,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.openAiModel,
                         onValueChange = onOpenAiModelChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("OPENAI MODEL ID...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1449,7 +1454,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.openRouterApiKey,
                         onValueChange = onOpenRouterApiKeyChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("OPENROUTER API KEY...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1465,7 +1470,7 @@ private fun ModelsScreen(
                         value = state.llmSettings.openRouterModel,
                         onValueChange = onOpenRouterModelChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
+                        leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.onBackground) },
                         placeholder = { Text("OPENROUTER MODEL ID...") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1547,12 +1552,28 @@ private fun SettingsScreen(
                     )
                 }
             }
-            SettingsRow("Models", "Configure active LLM provider, API keys, and model parameters.", onConfigureModels)
-            SettingsRow("Default launcher", "Open Android Home app settings.", onOpenHomeSettings)
-            SettingsRow("App permissions", "Microphone, notification, and location access.", onRequestVoicePermissions)
+            SettingsRow(
+                title = "Models",
+                subtitle = "Configure active LLM provider, API keys, and model parameters.",
+                icon = Icons.Rounded.Key,
+                onClick = onConfigureModels
+            )
+            SettingsRow(
+                title = "Default launcher",
+                subtitle = "Open Android Home app settings.",
+                icon = Icons.Rounded.Home,
+                onClick = onOpenHomeSettings
+            )
+            SettingsRow(
+                title = "App permissions",
+                subtitle = "Microphone, notification, and location access.",
+                icon = Icons.Rounded.Mic,
+                onClick = onRequestVoicePermissions
+            )
             SettingsRow(
                 title = "Interaction visualizer",
                 subtitle = "Active: ${state.session.interactionMode.uppercase()}",
+                icon = Icons.Rounded.RemoveRedEye,
                 onClick = {
                     val nextMode = if (state.session.interactionMode == "dot") "eyes" else "dot"
                     onSetInteractionMode(nextMode)
@@ -1561,12 +1582,14 @@ private fun SettingsScreen(
             SettingsRow(
                 title = "Set custom wallpaper",
                 subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
+                icon = Icons.Rounded.Image,
                 onClick = onSelectWallpaper
             )
             if (state.session.wallpaperUri != null) {
                 SettingsRow(
                     title = "Clear custom wallpaper",
                     subtitle = "Reset to solid black/white background.",
+                    icon = Icons.Rounded.Delete,
                     onClick = onClearWallpaper
                 )
             }
@@ -1596,6 +1619,7 @@ private fun SettingsScreen(
             SettingsRow(
                 title = "Quit system",
                 subtitle = "Exit the launcher activity and move system task to back.",
+                icon = Icons.Rounded.PowerSettingsNew,
                 onClick = onQuitApp
             )
         }
@@ -1708,7 +1732,7 @@ private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, on
             ),
             modifier = Modifier.size(56.dp)
         ) {
-            Icon(Icons.Outlined.Search, contentDescription = "Send")
+            Icon(Icons.Rounded.Search, contentDescription = "Send")
         }
     }
 }
@@ -1785,7 +1809,12 @@ private fun AppRow(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 }
 
 @Composable
-private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit) {
+private fun SettingsRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector? = null,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
@@ -1795,7 +1824,26 @@ private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit) {
             contentColor = MaterialTheme.colorScheme.onSurface
         )
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Bold)
                 Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
@@ -1805,11 +1853,11 @@ private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit) {
 }
 
 private fun routeIcon(route: Route) = when (route) {
-    Route.Home -> Icons.Outlined.Home
-    Route.Apps -> Icons.Outlined.Apps
-    Route.Assistant -> Icons.Outlined.GraphicEq
-    Route.Tasks -> Icons.Outlined.CheckCircle
-    Route.Memory -> Icons.Outlined.Layers
-    Route.Settings -> Icons.Outlined.Settings
-    Route.Models -> Icons.Outlined.Settings
+    Route.Home -> Icons.Rounded.Home
+    Route.Apps -> Icons.Rounded.Apps
+    Route.Assistant -> Icons.Rounded.GraphicEq
+    Route.Tasks -> Icons.Rounded.CheckCircle
+    Route.Memory -> Icons.Rounded.Layers
+    Route.Settings -> Icons.Rounded.Settings
+    Route.Models -> Icons.Rounded.Settings
 }
