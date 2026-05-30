@@ -120,6 +120,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.ui.text.style.TextAlign
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 
@@ -1044,6 +1045,10 @@ private fun OnboardingScreen(
     var localProvider by remember { mutableStateOf(LlmProvider.Gemini) }
     var localKeyInput by remember { mutableStateOf("") }
 
+    BackHandler(enabled = step == 2) {
+        step = 1
+    }
+
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Column(
             modifier = Modifier
@@ -1181,6 +1186,7 @@ private fun OnboardingScreen(
                     }
                     Button(
                         onClick = { onLocalSetup(localProvider, localKeyInput) },
+                        enabled = localKeyInput.isNotBlank(),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -1225,6 +1231,7 @@ private fun OnboardingScreen(
                         showGoogleDialog = false
                         onGoogleLogin(googleKeyInput)
                     },
+                    enabled = googleKeyInput.isNotBlank(),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Sign In")
@@ -1268,6 +1275,7 @@ private fun OnboardingScreen(
                         showOpenAiDialog = false
                         onOpenAiLogin(openAiKeyInput)
                     },
+                    enabled = openAiKeyInput.isNotBlank(),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Sign In")
