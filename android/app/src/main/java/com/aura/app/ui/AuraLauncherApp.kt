@@ -166,6 +166,7 @@ fun AuraLauncherApp(
     onQuitApp: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val onboardingComplete = state.session.onboardingComplete
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -193,8 +194,8 @@ fun AuraLauncherApp(
         viewModel.clearError()
     }
 
-    LaunchedEffect(state.session.homeSettingsPrompted) {
-        if (!state.session.homeSettingsPrompted) {
+    LaunchedEffect(state.session.homeSettingsPrompted, onboardingComplete) {
+        if (onboardingComplete && !state.session.homeSettingsPrompted) {
             showHomePrompt = true
         }
     }
@@ -227,7 +228,7 @@ fun AuraLauncherApp(
         )
     }
 
-    val onboardingComplete = state.session.onboardingComplete
+
     if (!onboardingComplete) {
         OnboardingScreen(
             state = state,
@@ -1176,8 +1177,10 @@ private fun OnboardingScreen(
     var localProvider by remember { mutableStateOf(LlmProvider.Gemini) }
     var localKeyInput by remember { mutableStateOf("") }
 
-    BackHandler(enabled = step == 2) {
-        step = 1
+    BackHandler(enabled = true) {
+        if (step == 2) {
+            step = 1
+        }
     }
 
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
