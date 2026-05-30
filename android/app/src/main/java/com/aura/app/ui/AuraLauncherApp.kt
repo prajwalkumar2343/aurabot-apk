@@ -862,19 +862,13 @@ private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
             modifier = Modifier
                 .size(62.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
-                    RoundedCornerShape(16.dp)
-                ),
+                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .padding(2.dp)
+                    modifier = Modifier.size(56.dp)
                 )
             } else {
                 Text(
@@ -936,19 +930,13 @@ private fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
             modifier = Modifier
                 .size(46.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.background)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
-                    CircleShape
-                ),
+                .background(MaterialTheme.colorScheme.background),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(2.dp)
+                    modifier = Modifier.size(42.dp)
                 )
             } else {
                 Text(
@@ -1011,19 +999,13 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
             modifier = Modifier
                 .size(38.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.background)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
-                    RoundedCornerShape(8.dp)
-                ),
+                .background(MaterialTheme.colorScheme.background),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .padding(2.dp)
+                    modifier = Modifier.size(34.dp)
                 )
             } else {
                 Text(
