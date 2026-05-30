@@ -28,7 +28,8 @@ class LauncherActivity : ComponentActivity() {
                 AuraLauncherApp(
                     container = container,
                     onRequestVoicePermissions = ::requestVoicePermissions,
-                    onOpenHomeSettings = ::openHomeSettings
+                    onOpenHomeSettings = ::openHomeSettings,
+                    onQuitApp = ::quitApp
                 )
             }
         }
@@ -50,5 +51,10 @@ class LauncherActivity : ComponentActivity() {
 
     private fun openHomeSettings() {
         startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+    }
+
+    private fun quitApp() {
+        moveTaskToBack(true)
+        finishAndRemoveTask()
     }
 }
