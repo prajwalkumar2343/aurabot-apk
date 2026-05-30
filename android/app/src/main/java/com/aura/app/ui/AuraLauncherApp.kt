@@ -360,10 +360,10 @@ fun AuraLauncherApp(
                     )
                 }
                 composable(Route.Tasks.name) {
-                    TasksScreen(state = state, onAddTodo = viewModel::addTodo)
+                    TasksScreen(state = state, onAddTodo = viewModel::addTodo, onBack = { navController.popBackStack() })
                 }
                 composable(Route.Memory.name) {
-                    MemoryScreen(state = state, onAddMemory = viewModel::addMemory)
+                    MemoryScreen(state = state, onAddMemory = viewModel::addMemory, onBack = { navController.popBackStack() })
                 }
                 composable(Route.Settings.name) {
                     SettingsScreen(
@@ -377,6 +377,8 @@ fun AuraLauncherApp(
                         onClearWallpaper = { viewModel.setWallpaper(null) },
                         onSetInteractionMode = viewModel::setInteractionMode,
                         onConfigureModels = { navController.navigate(Route.Models.name) },
+                        onConfigureTasks = { navController.navigate(Route.Tasks.name) },
+                        onConfigureMemories = { navController.navigate(Route.Memory.name) },
                         onQuitApp = onQuitApp
                     )
                 }
@@ -460,25 +462,21 @@ private fun HomeScreen(
                 }
             }
         }
-        if (state.isDefaultLauncher) {
-            Spacer(Modifier.height(24.dp))
-            Text("PINNED APPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                state.pinnedApps.forEach { app ->
-                    AppInitial(app, Modifier.weight(1f), onLaunchApp)
-                }
-            }
-        }
+        Spacer(Modifier.height(16.dp))
+        HomeChatLayer(state, onOpenAssistant)
+        Spacer(Modifier.height(16.dp))
+        AssistantComposer(state.assistantInput, onAssistantInput, onSend)
+
     }
 }
 
 @Composable
-private fun HomeChatLayer(state: LauncherUiState) {
+private fun HomeChatLayer(state: LauncherUiState, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 112.dp, max = 176.dp),
+            .heightIn(min = 112.dp, max = 176.dp)
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
         colors = CardDefaults.cardColors(
@@ -866,9 +864,15 @@ private fun AssistantScreen(
 }
 
 @Composable
-private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
+private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onBack: () -> Unit) {
     var title by remember { mutableStateOf("") }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
+                Text("← BACK", fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         Header("TASKS", "${state.openTodos} open items on this device.")
         OutlinedTextField(
             value = title,
@@ -939,10 +943,16 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit) {
 }
 
 @Composable
-private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -> Unit) {
+private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -> Unit, onBack: () -> Unit) {
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
+                Text("← BACK", fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         Header("MEMORY", "${state.memories.size} local memories stored.")
         OutlinedTextField(
             value = title,
@@ -1526,6 +1536,8 @@ private fun SettingsScreen(
     onClearWallpaper: () -> Unit,
     onSetInteractionMode: (String) -> Unit,
     onConfigureModels: () -> Unit,
+    onConfigureTasks: () -> Unit,
+    onConfigureMemories: () -> Unit,
     onQuitApp: () -> Unit
 ) {
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
@@ -1557,6 +1569,18 @@ private fun SettingsScreen(
                 subtitle = "Configure active LLM provider, API keys, and model parameters.",
                 icon = Icons.Rounded.Key,
                 onClick = onConfigureModels
+            )
+            SettingsRow(
+                title = "Tasks",
+                subtitle = "Manage list of todo items.",
+                icon = Icons.Rounded.CheckCircle,
+                onClick = onConfigureTasks
+            )
+            SettingsRow(
+                title = "Memories",
+                subtitle = "Manage stored assistant memory items.",
+                icon = Icons.Rounded.Layers,
+                onClick = onConfigureMemories
             )
             SettingsRow(
                 title = "Default launcher",
