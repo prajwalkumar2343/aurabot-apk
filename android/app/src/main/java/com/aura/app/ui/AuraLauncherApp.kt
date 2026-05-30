@@ -238,7 +238,13 @@ fun AuraLauncherApp(
     }
 
 
-    if (!onboardingComplete) {
+    if (!state.sessionLoaded) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        )
+    } else if (!onboardingComplete) {
         OnboardingScreen(
             state = state,
             onGoogleLogin = { key ->

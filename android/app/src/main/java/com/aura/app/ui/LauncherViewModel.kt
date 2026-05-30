@@ -45,7 +45,8 @@ data class LauncherUiState(
     val error: String? = null,
     val currentEmotion: String = "neutral",
     val isSpeaking: Boolean = false,
-    val isDefaultLauncher: Boolean = false
+    val isDefaultLauncher: Boolean = false,
+    val sessionLoaded: Boolean = false
 ) {
     val filteredApps: List<AppInfo> =
         if (appQuery.isBlank()) apps else apps.filter {
@@ -69,7 +70,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             container.llmSettingsStore.state,
             container.appBlockStore.activeRules
         ) { state, session, voice, llmSettings, appBlocks ->
-            state.copy(session = session, status = voice, llmSettings = llmSettings, appBlocks = appBlocks)
+            state.copy(
+                session = session,
+                status = voice,
+                llmSettings = llmSettings,
+                appBlocks = appBlocks,
+                sessionLoaded = true
+            )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
 
     init {
