@@ -133,6 +133,12 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.foundation.gestures.detectTapGestures
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -249,44 +255,46 @@ fun AuraLauncherApp(
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
-                val current = navController.currentBackStackEntryAsState().value?.destination?.route
-                val isDark = isSystemInDarkTheme()
-                val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    tonalElevation = 0.dp,
-                    modifier = Modifier.drawBehind {
-                        drawLine(
-                            color = borderColor,
-                            start = Offset(0f, 0f),
-                            end = Offset(size.width, 0f),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-                ) {
-                    val routes = listOf(Route.Home, Route.Settings)
-                    routes.forEach { route ->
-                        NavigationBarItem(
-                            selected = current == route.name,
-                            onClick = {
-                                navController.navigate(route.name) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(routeIcon(route), contentDescription = route.title) },
-                            label = { Text(route.title) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                                selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                indicatorColor = Color.Transparent
+                if (!state.isDefaultLauncher) {
+                    val current = navController.currentBackStackEntryAsState().value?.destination?.route
+                    val isDark = isSystemInDarkTheme()
+                    val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        tonalElevation = 0.dp,
+                        modifier = Modifier.drawBehind {
+                            drawLine(
+                                color = borderColor,
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx()
                             )
-                        )
+                        }
+                    ) {
+                        val routes = listOf(Route.Home, Route.Settings)
+                        routes.forEach { route ->
+                            NavigationBarItem(
+                                selected = current == route.name,
+                                onClick = {
+                                    navController.navigate(route.name) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(routeIcon(route), contentDescription = route.title) },
+                                label = { Text(route.title) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                    unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                    indicatorColor = Color.Transparent
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -335,8 +343,14 @@ fun AuraLauncherApp(
                         onStopVoice = viewModel::stopVoice,
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
+                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onOpenSettings = { navController.navigate(Route.Settings.name) },
                         onLaunchApp = { app ->
-                            viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                            if (app.packageName == "com.aura.app.settings") {
+                                navController.navigate(Route.Settings.name)
+                            } else {
+                                viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                            }
                         }
                     )
                 }
@@ -409,6 +423,8 @@ private fun HomeScreen(
     onStopVoice: () -> Unit,
     onOpenAssistant: () -> Unit,
     onSwipeLeft: () -> Unit,
+    onSelectWallpaper: () -> Unit,
+    onOpenSettings: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit
 ) {
     val presenceMode = when {
@@ -418,22 +434,31 @@ private fun HomeScreen(
         state.assistantInput.isNotBlank() -> AuraPresenceMode.Focused
         else -> AuraPresenceMode.Idle
     }
+    var showLongPressMenu by remember { mutableStateOf(false) }
     var totalDrag = 0f
     ScreenShell(
         wallpaperUri = state.session.wallpaperUri,
-        modifier = Modifier.pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragStart = { totalDrag = 0f },
-                onDragEnd = {
-                    if (totalDrag < -150f) {
-                        onSwipeLeft()
+        modifier = Modifier
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = {
+                        showLongPressMenu = true
                     }
-                },
-                onHorizontalDrag = { _, dragAmount ->
-                    totalDrag += dragAmount
-                }
-            )
-        }
+                )
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onDragEnd = {
+                        if (totalDrag < -150f) {
+                            onSwipeLeft()
+                        }
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDrag += dragAmount
+                    }
+                )
+            }
     ) {
         AuraEyes(
             mode = presenceMode,
@@ -466,6 +491,89 @@ private fun HomeScreen(
         Spacer(Modifier.height(16.dp))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
 
+    }
+
+    if (showLongPressMenu) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable { showLongPressMenu = false },
+            contentAlignment = Alignment.Center
+        ) {
+            var animateTrigger by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                animateTrigger = true
+            }
+            AnimatedVisibility(
+                visible = animateTrigger,
+                enter = scaleIn(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(),
+                exit = scaleOut() + fadeOut()
+            ) {
+                Card(
+                    modifier = Modifier
+                        .width(280.dp)
+                        .clickable(enabled = false) {},
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.onBackground),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        contentColor = MaterialTheme.colorScheme.onBackground
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "DESKTOP OPTIONS",
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                showLongPressMenu = false
+                                onSelectWallpaper()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.onBackground,
+                                contentColor = MaterialTheme.colorScheme.background
+                              )
+                        ) {
+                            Icon(Icons.Rounded.Image, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("WALLPAPER", fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                showLongPressMenu = false
+                                onOpenSettings()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Rounded.Settings, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("SETTINGS", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
