@@ -496,8 +496,7 @@ private fun HomeScreen(
                 Text(if (state.status.running) "STOP" else "TALK")
             }
         }
-        Spacer(Modifier.height(16.dp))
-        HomeChatLayer(state, onOpenAssistant)
+
         Spacer(Modifier.height(16.dp))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
 
@@ -763,10 +762,6 @@ private fun AuraEyes(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                RoundedCornerShape(8.dp)
-            )
             .padding(18.dp)
     ) {
         Column {
@@ -833,15 +828,6 @@ private fun AuraEyes(
                     drawEye(rightEyeX, 1f)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
