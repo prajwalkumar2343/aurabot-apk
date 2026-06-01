@@ -23,6 +23,13 @@ The Android app is a Home launcher. After installing the debug APK, choose Aura 
 
 The native app keeps the existing API contract:
 
+Run the API from the modular FastAPI entrypoint:
+
+```bash
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
 - `POST /api/auth/login`
 - `GET /api/auth/me`
 - `GET/POST /api/memories`
