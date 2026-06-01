@@ -8,12 +8,13 @@ logger = logging.getLogger(__name__)
 
 def transcribe_audio(audio_base64: str, mime_type: str = "audio/m4a") -> str:
     try:
-        base64_data = audio_base64
+        base64_data = audio_base64.strip()
         if "," in base64_data:
             base64_data = base64_data.split(",", 1)[1]
+        if not base64_data:
+            raise ValueError("empty audio payload")
         
-        # Simple validation check for base64 correctness
-        base64.b64decode(base64_data)
+        base64.b64decode(base64_data, validate=True)
     except Exception as e:
         logger.warning(f"Invalid base64 provided: {e}")
         raise HTTPException(status_code=400, detail="Invalid base64 audio")

@@ -18,6 +18,9 @@ router = APIRouter(tags=["Assistant"])
 
 @router.post("/assistant/chat", response_model=ChatOut)
 async def assistant_chat(data: ChatIn):
+    if not data.message.strip():
+        raise HTTPException(status_code=400, detail="Message is required")
+
     session_id = data.session_id or str(uuid.uuid4())
     system_message = build_system_message(data)
     provider = data.provider.lower().strip()
