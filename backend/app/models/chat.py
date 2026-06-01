@@ -13,11 +13,21 @@ class ChatAppIn(BaseModel):
     label: str
     package_name: str
 
+class ChatMiniAppIn(BaseModel):
+    id: str
+    name: str
+    intents: List[str] = Field(default_factory=list)
+
 class ChatActionOut(BaseModel):
     type: str
     package_name: Optional[str] = None
     app_query: Optional[str] = None
     duration_minutes: Optional[int] = None
+    mini_app_id: Optional[str] = None
+    mini_app_query: Optional[str] = None
+    action_id: Optional[str] = None
+    record_type: Optional[str] = None
+    values: Optional[dict[str, str]] = None
 
 class ChatIn(BaseModel):
     message: str
@@ -28,6 +38,7 @@ class ChatIn(BaseModel):
     memories: List[ChatMemoryIn] = Field(default_factory=list)
     todos: List[ChatTodoIn] = Field(default_factory=list)
     apps: List[ChatAppIn] = Field(default_factory=list)
+    mini_apps: List[ChatMiniAppIn] = Field(default_factory=list)
 
 class ChatOut(BaseModel):
     reply: str

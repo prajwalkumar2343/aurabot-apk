@@ -6,6 +6,8 @@ import com.aura.app.apps.AppsRepository
 import com.aura.app.assistant.AssistantRepository
 import com.aura.app.assistant.LlmSettingsStore
 import com.aura.app.assistant.LocalAssistantStore
+import com.aura.app.miniapps.MiniAppDatabase
+import com.aura.app.miniapps.MiniAppRepository
 import com.aura.app.session.SessionStore
 import com.aura.app.voice.VoiceServiceController
 
@@ -15,6 +17,7 @@ class AppContainer(context: Context) {
     val sessionStore = SessionStore(appContext)
     val appsRepository = AppsRepository(appContext.packageManager)
     val appBlockStore = AppBlockStore(appContext)
+    val miniAppRepository = MiniAppRepository(MiniAppDatabase.get(appContext).miniAppDao())
     val llmSettingsStore = LlmSettingsStore(appContext)
     private val localAssistantStore = LocalAssistantStore(appContext)
     val assistantRepository = AssistantRepository(

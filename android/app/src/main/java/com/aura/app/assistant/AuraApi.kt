@@ -41,6 +41,9 @@ interface AuraApi {
     @POST("providers/openrouter/models")
     suspend fun openRouterModels(@Body request: OpenRouterModelsRequest): OpenRouterModelsResponse
 
+    @POST("mini-apps/build")
+    suspend fun buildMiniApp(@Body request: MiniAppBuildRequest): MiniAppBuildResponse
+
     @POST("transcribe")
     suspend fun transcribe(@Body request: TranscribeRequest): TranscribeResponse
 }
