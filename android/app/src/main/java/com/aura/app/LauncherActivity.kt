@@ -35,7 +35,8 @@ class LauncherActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onRequestVoicePermissions = ::requestVoicePermissions,
                     onOpenHomeSettings = ::openHomeSettings,
-                    onQuitApp = ::quitApp
+                    onQuitApp = ::quitApp,
+                    onMinimizeApp = { moveTaskToBack(true) }
                 )
             }
         }

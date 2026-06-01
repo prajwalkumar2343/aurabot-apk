@@ -19,7 +19,8 @@ data class SessionState(
     val backgroundListeningEnabled: Boolean = BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
     val homeSettingsPrompted: Boolean = false,
     val wallpaperUri: String? = null,
-    val interactionMode: String = "eyes"
+    val interactionMode: String = "eyes",
+    val appMode: String = "launcher"
 ) {
     val isLoggedIn: Boolean = !accessToken.isNullOrBlank()
 }
@@ -32,6 +33,7 @@ class SessionStore(private val context: Context) {
     private val homeSettingsPromptedKey = booleanPreferencesKey("home_settings_prompted")
     private val wallpaperUriKey = stringPreferencesKey("wallpaper_uri")
     private val interactionModeKey = stringPreferencesKey("interaction_mode")
+    private val appModeKey = stringPreferencesKey("app_mode")
 
     val state: Flow<SessionState> = context.sessionDataStore.data.map { prefs ->
         val token = prefs[tokenKey]
@@ -43,7 +45,8 @@ class SessionStore(private val context: Context) {
                 ?: BuildConfig.AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT,
             homeSettingsPrompted = prefs[homeSettingsPromptedKey] ?: false,
             wallpaperUri = prefs[wallpaperUriKey],
-            interactionMode = prefs[interactionModeKey] ?: "eyes"
+            interactionMode = prefs[interactionModeKey] ?: "eyes",
+            appMode = prefs[appModeKey] ?: "launcher"
         )
     }
 
@@ -93,6 +96,12 @@ class SessionStore(private val context: Context) {
     suspend fun setInteractionMode(mode: String) {
         context.sessionDataStore.edit { prefs ->
             prefs[interactionModeKey] = mode
+        }
+    }
+
+    suspend fun setAppMode(mode: String) {
+        context.sessionDataStore.edit { prefs ->
+            prefs[appModeKey] = mode
         }
     }
 }

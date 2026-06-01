@@ -356,6 +356,12 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setAppMode(mode: String) {
+        viewModelScope.launch {
+            container.sessionStore.setAppMode(mode)
+        }
+    }
+
     fun setOnboardingComplete(complete: Boolean) {
         viewModelScope.launch {
             container.sessionStore.setOnboardingComplete(complete)
