@@ -9,8 +9,8 @@ a strict black & white, minimalist, brutalist-inspired UI.
 ## Stack
 - **Frontend:** Expo React Native (SDK 54) + expo-router, expo-av, expo-speech,
   expo-notifications, expo-keep-awake, AsyncStorage, react-native-reanimated
-- **Backend:** FastAPI + Motor (MongoDB) + PyJWT + bcrypt + emergentintegrations
-- **LLM:** Gemini (`gemini-3-flash-preview`) via Emergent Universal Key for
+- **Backend:** FastAPI + Motor (MongoDB) + PyJWT + bcrypt
+- **LLM:** Gemini (`gemini-3-flash-preview`) for
   transcription (audio input → text) and assistant chat
 - **TTS:** On-device `expo-speech` (native Android/iOS voice). Gemini 3 Flash
   returns text only; native TTS is used for audio output.
