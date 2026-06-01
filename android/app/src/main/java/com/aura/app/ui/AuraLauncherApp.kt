@@ -270,6 +270,8 @@ fun AuraLauncherApp(
         OnboardingScreen(
             state = state,
             onRequestPermissions = onRequestVoicePermissions,
+            onCreateAccount = viewModel::register,
+            onSignIn = viewModel::login,
             onFinishOnboarding = { appMode, provider, apiKey, modelId, bgListening ->
                 viewModel.setAppMode(appMode)
                 viewModel.setLlmProvider(provider)
@@ -1936,12 +1938,21 @@ private fun OnboardingHeader(
 private fun OnboardingScreen(
     state: LauncherUiState,
     onRequestPermissions: () -> Unit,
+    onCreateAccount: (email: String, password: String, name: String?, onResult: (Result<com.aura.app.assistant.UserResponse>) -> Unit) -> Unit,
+    onSignIn: (email: String, password: String, onResult: (Result<com.aura.app.assistant.UserResponse>) -> Unit) -> Unit,
     onFinishOnboarding: (appMode: String, provider: LlmProvider, apiKey: String, modelId: String, bgListening: Boolean) -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
     
     // Step 1: App Mode state (default to launcher as shown in mockup)
     var selectedAppMode by remember { mutableStateOf("launcher") }
+    var accountMode by remember { mutableStateOf("local") }
+    var nameInput by remember { mutableStateOf("") }
+    var emailInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var authMessage by remember { mutableStateOf<String?>(null) }
+    var authComplete by remember { mutableStateOf(state.session.isLoggedIn) }
     
     // Step 2: AI Engine state
     var selectedProvider by remember { mutableStateOf(LlmProvider.Gemini) }
@@ -1949,7 +1960,7 @@ private fun OnboardingScreen(
     var showApiKey by remember { mutableStateOf(false) }
     
     // Initialize default model IDs
-    var modelIdInput by remember { mutableStateOf("gemini-1.5-flash") }
+    var modelIdInput by remember { mutableStateOf("gemini-3-flash-preview") }
     
     // Step 3: Background Listening state
     var bgListeningEnabled by remember { mutableStateOf(false) }
@@ -1997,27 +2008,21 @@ private fun OnboardingScreen(
                 when (step) {
                     1 -> {
                         Spacer(Modifier.height(16.dp))
-                        
-                        // Large Hero Assistant Face
                         AuraAvatarFace(sizeMultiplier = 1.3f)
-                        
-                        Spacer(Modifier.height(32.dp))
-                        
-                        // Headline
+
+                        Spacer(Modifier.height(24.dp))
+
                         Text(
-                            text = "Meet your AI launcher",
+                            text = "Set up Aura",
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
                             ),
                             color = MaterialTheme.colorScheme.onBackground
                         )
-                        
-                        Spacer(Modifier.height(12.dp))
-                        
-                        // Subtitle
+
                         Text(
-                            text = "It organizes your apps, finds what you need, and helps you get things done.",
+                            text = "Choose how Aura should run, then add an optional cloud account for synced tasks and memories.",
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 textAlign = TextAlign.Center,
                                 lineHeight = 24.sp
@@ -2025,110 +2030,148 @@ private fun OnboardingScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
-                        
-                        Spacer(Modifier.height(48.dp))
-                        
-                        val buttonBgColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
-                        
-                        // Google Continue Button
-                        Button(
-                            onClick = { step = 2 },
+
+                        Spacer(Modifier.height(16.dp))
+
+                        val modeOptions = listOf(
+                            Triple("launcher", "Home launcher", "Replace the default home screen with Aura."),
+                            Triple("normal", "Normal app", "Use Aura as a regular app without changing Home."),
+                            Triple("overlay", "Background assistant", "Keep Aura available as an always-on assistant.")
+                        )
+                        modeOptions.forEach { (mode, title, subtitle) ->
+                            val selected = selectedAppMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .glassCard(shape = RoundedCornerShape(20.dp), borderWidth = if (selected) 2.dp else 1.2.dp)
+                                    .clickable { selectedAppMode = mode }
+                                    .background(if (selected) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f) else Color.Transparent)
+                                    .padding(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (selected) {
+                                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(horizontal = 16.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = buttonBgColor,
-                                contentColor = MaterialTheme.colorScheme.onBackground
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                // Google 'G' icon in sleek monochrome bold typography
-                                Text(
-                                    text = "G",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif
+                            listOf("local" to "Local", "create" to "Create", "signIn" to "Sign in").forEach { (mode, label) ->
+                                val selected = accountMode == mode
+                                Button(
+                                    onClick = {
+                                        accountMode = mode
+                                        authMessage = null
+                                    },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selected) MaterialTheme.colorScheme.onBackground else Color.Transparent,
+                                        contentColor = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onBackground
                                     ),
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = "Continue with Google",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
+                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+                                ) {
+                                    Text(label, fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
                             }
                         }
-                        
-                        Spacer(Modifier.height(14.dp))
-                        
-                        // Email Continue Button
-                        OutlinedButton(
-                            onClick = { step = 2 },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(horizontal = 16.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            border = BorderStroke(
-                                width = 1.2.dp,
-                                color = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.12f)
-                            ),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onBackground
+
+                        if (accountMode == "local") {
+                            Text(
+                                text = "Local mode stores settings, tasks, and memories on this device. You can add an account later.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp)
                             )
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Mail,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = "Continue with email",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge
+                        } else {
+                            if (accountMode == "create") {
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { nameInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    leadingIcon = { Icon(Icons.Rounded.RemoveRedEye, contentDescription = null) },
+                                    placeholder = { Text("Name") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                             }
+                            OutlinedTextField(
+                                value = emailInput,
+                                onValueChange = { emailInput = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = { Icon(Icons.Rounded.Mail, contentDescription = null) },
+                                placeholder = { Text("Email") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            OutlinedTextField(
+                                value = passwordInput,
+                                onValueChange = { passwordInput = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+                                trailingIcon = {
+                                    IconButton(onClick = { showPassword = !showPassword }) {
+                                        Icon(
+                                            imageVector = if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                            contentDescription = "Toggle password visibility"
+                                        )
+                                    }
+                                },
+                                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                                placeholder = { Text("Password") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Button(
+                                onClick = {
+                                    val done: (Result<com.aura.app.assistant.UserResponse>) -> Unit = { result ->
+                                        authComplete = result.isSuccess
+                                        authMessage = result.fold(
+                                            onSuccess = { "Signed in as ${it.email}" },
+                                            onFailure = { it.message ?: "Account setup failed" }
+                                        )
+                                    }
+                                    if (accountMode == "create") {
+                                        onCreateAccount(emailInput.trim(), passwordInput, nameInput.trim(), done)
+                                    } else {
+                                        onSignIn(emailInput.trim(), passwordInput, done)
+                                    }
+                                },
+                                enabled = !state.loading && emailInput.isNotBlank() && passwordInput.length >= 6,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(26.dp)
+                            ) {
+                                Text(if (state.loading) "Working..." else if (accountMode == "create") "Create account" else "Sign in")
+                            }
                         }
-                        
-                        Spacer(Modifier.height(24.dp))
-                        
-                        // Sign In Action Link
-                        Text(
-                            text = "Sign in",
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color(0xFF9E86FF) else Color(0xFF6366F1),
-                                textAlign = TextAlign.Center
-                            ),
-                            modifier = Modifier
-                                .clickable { step = 2 }
-                                .padding(8.dp)
-                        )
-                        
-                        Spacer(modifier = Modifier.weight(1f))
-                        
-                        // Terms of Service Footer
-                        Text(
-                            text = "By continuing, you agree to our Terms of Service\nand acknowledge our Privacy Policy",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                textAlign = TextAlign.Center,
-                                lineHeight = 18.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-                        )
+
+                        authMessage?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (authComplete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                        }
                     }
                     
                     2 -> {
@@ -2140,12 +2183,12 @@ private fun OnboardingScreen(
                         Spacer(Modifier.height(16.dp))
                         
                         Text(
-                            text = "Connect your AI",
+                            text = "Connect AI",
                             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Choose how to power your assistant.",
+                            text = "Add an API key now, or skip and configure it later in Settings.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2160,7 +2203,7 @@ private fun OnboardingScreen(
                                 .glassCard(shape = RoundedCornerShape(20.dp), borderWidth = if (isGemini) 2.dp else 1.2.dp)
                                 .clickable {
                                     selectedProvider = LlmProvider.Gemini
-                                    modelIdInput = "gemini-1.5-flash"
+                                    modelIdInput = "gemini-3-flash-preview"
                                 }
                                 .background(if (isGemini) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f) else Color.Transparent)
                                 .padding(16.dp)
@@ -2210,7 +2253,7 @@ private fun OnboardingScreen(
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Text(
-                                        text = "Fast setup. Native integration. Powered by Gemini 1.5 Flash.",
+                                        text = "Fast setup. Native integration. Powered by Gemini.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -2266,7 +2309,7 @@ private fun OnboardingScreen(
                                     )
                                     Spacer(Modifier.height(4.dp))
                                     Text(
-                                        text = "Popular setup. Reliable performance. Powered by GPT-4o.",
+                                        text = "Popular setup. Reliable performance. Powered by OpenAI.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -2298,7 +2341,7 @@ private fun OnboardingScreen(
                         
                         // Credentials form
                         Text(
-                            text = "${selectedProvider.label} API key",
+                            text = "${selectedProvider.label} API key (optional)",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onBackground,
@@ -2363,13 +2406,13 @@ private fun OnboardingScreen(
                                 Spacer(Modifier.width(16.dp))
                                 Column {
                                     Text(
-                                        text = "Stored securely on this device.",
+                                        text = "Stored on this device.",
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        text = "Your API key is encrypted and never shared with third parties.",
+                                        text = "Leave this blank to finish setup now and add a key later.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -2575,48 +2618,46 @@ private fun OnboardingScreen(
                 }
             }
             
-            // Bottom Action buttons (Rendered dynamically for step 2 and 3)
-            if (step > 1) {
-                Spacer(Modifier.height(16.dp))
-                val isNextEnabled = when (step) {
-                    2 -> apiKeyInput.isNotBlank()
-                    3 -> true
-                    else -> true
-                }
-                
-                Button(
-                    onClick = {
-                        if (step < 3) {
-                            step++
-                        } else {
-                            onFinishOnboarding(
-                                selectedAppMode,
-                                selectedProvider,
-                                apiKeyInput,
-                                modelIdInput,
-                                bgListeningEnabled
-                            )
-                        }
-                    },
-                    enabled = isNextEnabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .padding(horizontal = 8.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(
-                        text = if (step < 3) "Continue" else "Initialize system",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
+            val isNextEnabled = when (step) {
+                1 -> accountMode == "local" || authComplete
+                2 -> true
+                3 -> true
+                else -> true
             }
+
+            Button(
+                onClick = {
+                    if (step < 3) {
+                        step++
+                    } else {
+                        onFinishOnboarding(
+                            selectedAppMode,
+                            selectedProvider,
+                            apiKeyInput,
+                            modelIdInput,
+                            bgListeningEnabled
+                        )
+                    }
+                },
+                enabled = isNextEnabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 8.dp),
+                shape = RoundedCornerShape(28.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text(
+                    text = if (step < 3) "Continue" else "Initialize system",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

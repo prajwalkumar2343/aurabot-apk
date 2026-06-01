@@ -8,6 +8,9 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface AuraApi {
+    @POST("auth/register")
+    suspend fun register(@Body request: RegisterRequest): UserResponse
+
     @POST("auth/login")
     suspend fun login(@Body request: LoginRequest): LoginResponse
 

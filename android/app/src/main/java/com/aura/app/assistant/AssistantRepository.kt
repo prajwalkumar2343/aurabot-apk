@@ -56,6 +56,12 @@ class AssistantRepository(
             .create(AuraApi::class.java)
     }
 
+    suspend fun register(email: String, password: String, name: String?): UserResponse = withContext(Dispatchers.IO) {
+        val user = api.register(RegisterRequest(email = email, password = password, name = name?.takeIf { it.isNotBlank() }))
+        login(email, password)
+        user
+    }
+
     suspend fun login(email: String, password: String): UserResponse = withContext(Dispatchers.IO) {
         val response = api.login(LoginRequest(email = email, password = password))
         sessionStore.setToken(response.access_token)
