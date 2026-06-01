@@ -390,16 +390,23 @@ def test_25_login_nonexistent_user(client):
     assert response.status_code == 401
 
 def test_26_brute_force_lockout_mechanism(client):
-    """26. Confirms brute-force defense locks account on the 6th failed request with 429."""
+    """26. Confirms brute-force defense returns 429 as soon as the threshold is hit."""
     email = "targetuser@aura.app"
     client.post("/api/auth/register", json={"email": email, "password": "password123"})
     
-    for _ in range(5):
-        client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
-        
+    for _ in range(4):
+        response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
+        assert response.status_code == 401
+
     response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
     assert response.status_code == 429
     assert "too many attempts" in response.json()["detail"].lower()
+
+    response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
+    assert response.status_code == 429
+
+    response = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    assert response.status_code == 429
 
 def test_27_brute_force_reset_on_success(client):
     """27. Successful login clears previous failed attempts counter."""

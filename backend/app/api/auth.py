@@ -59,6 +59,8 @@ async def login(data: LoginIn, request: Request, response: Response, db = Depend
         if count >= 5:
             update["locked_until"] = (now + timedelta(minutes=15)).isoformat()
         await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+        if count >= 5:
+            raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     await db.login_attempts.delete_one({"identifier": identifier})

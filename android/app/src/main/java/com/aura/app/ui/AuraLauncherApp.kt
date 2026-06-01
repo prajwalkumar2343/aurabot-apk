@@ -63,6 +63,8 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
@@ -76,6 +78,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -1471,6 +1474,200 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
 }
 
 @Composable
+private fun AuraAvatarFace(
+    modifier: Modifier = Modifier,
+    sizeMultiplier: Float = 1f
+) {
+    val isDark = isSystemInDarkTheme()
+    val capsuleWidth = (36 * sizeMultiplier).dp
+    val capsuleHeight = (96 * sizeMultiplier).dp
+    val capsuleRadius = (18 * sizeMultiplier).dp
+    val slitWidth = (8 * sizeMultiplier).dp
+    val slitHeight = (48 * sizeMultiplier).dp
+    val slitRadius = (4 * sizeMultiplier).dp
+    val eyeGap = (40 * sizeMultiplier).dp
+    val smileGap = (16 * sizeMultiplier).dp
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Eyes Row
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(eyeGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left Eye
+            Box(
+                modifier = Modifier
+                    .size(width = capsuleWidth, height = capsuleHeight)
+                    .clip(RoundedCornerShape(capsuleRadius))
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = if (isDark) {
+                                listOf(Color(0xFF2C2C2E), Color(0xFF1C1C1E))
+                            } else {
+                                listOf(Color(0xFFE5E5EA), Color(0xFFD1D1D6))
+                            }
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(capsuleRadius)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                // Glowing slit
+                Box(
+                    modifier = Modifier
+                        .size(width = slitWidth, height = slitHeight)
+                        .clip(RoundedCornerShape(slitRadius))
+                        .background(
+                            color = if (isDark) Color.White else Color(0xFF0F0F10)
+                        )
+                )
+            }
+
+            // Right Eye
+            Box(
+                modifier = Modifier
+                    .size(width = capsuleWidth, height = capsuleHeight)
+                    .clip(RoundedCornerShape(capsuleRadius))
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = if (isDark) {
+                                listOf(Color(0xFF2C2C2E), Color(0xFF1C1C1E))
+                            } else {
+                                listOf(Color(0xFFE5E5EA), Color(0xFFD1D1D6))
+                            }
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(capsuleRadius)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                // Glowing slit
+                Box(
+                    modifier = Modifier
+                        .size(width = slitWidth, height = slitHeight)
+                        .clip(RoundedCornerShape(slitRadius))
+                        .background(
+                            color = if (isDark) Color.White else Color(0xFF0F0F10)
+                        )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(smileGap))
+
+        // Curved Smile
+        val strokeColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.25f)
+        Canvas(
+            modifier = Modifier.size(width = (48 * sizeMultiplier).dp, height = (12 * sizeMultiplier).dp)
+        ) {
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(0f, 0f)
+                quadraticTo(
+                    x1 = size.width / 2f,
+                    y1 = size.height,
+                    x2 = size.width,
+                    y2 = 0f
+                )
+            }
+            drawPath(
+                path = path,
+                color = strokeColor,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = (3 * sizeMultiplier).dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun OnboardingHeader(
+    step: Int,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDark = isSystemInDarkTheme()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Back Button
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (isDark) Color(0xFF1C1C1E) else Color.White)
+                .border(
+                    width = 1.dp,
+                    color = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f),
+                    shape = CircleShape
+                )
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ArrowBack,
+                contentDescription = "Back",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // Pill indicator label "X of 3"
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (isDark) Color(0xFF1C1C1E) else Color.White)
+                .border(
+                    width = 1.dp,
+                    color = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(16.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = "$step of 3",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // Progress Capsule Bars
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (i in 1..3) {
+                val active = step >= i
+                val barColor = if (active) {
+                    MaterialTheme.colorScheme.onBackground
+                } else {
+                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)
+                }
+                Box(
+                    modifier = Modifier
+                        .size(width = 24.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(barColor)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun OnboardingScreen(
     state: LauncherUiState,
     onRequestPermissions: () -> Unit,
@@ -1478,7 +1675,7 @@ private fun OnboardingScreen(
 ) {
     var step by remember { mutableStateOf(1) }
     
-    // Step 1: App Mode state
+    // Step 1: App Mode state (default to launcher as shown in mockup)
     var selectedAppMode by remember { mutableStateOf("launcher") }
     
     // Step 2: AI Engine state
@@ -1493,6 +1690,7 @@ private fun OnboardingScreen(
     var bgListeningEnabled by remember { mutableStateOf(false) }
     
     val context = LocalContext.current
+    val isDark = isSystemInDarkTheme()
     
     // Dynamically query permission states
     val hasMic = ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -1509,68 +1707,18 @@ private fun OnboardingScreen(
     
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Stark minimalist Title and subtitle
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 16.dp)) {
-                Text(
-                    text = "AURA",
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = "COGNITIVE DIGITAL ENVIRONMENT",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp
-                    ),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            
-            // Sleek Step Progress Indicator
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 32.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (i in 1..3) {
-                    val active = step == i
-                    val completed = step > i
-                    val bulletColor = when {
-                        active -> MaterialTheme.colorScheme.primary
-                        completed -> MaterialTheme.colorScheme.secondary
-                        else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)
-                    }
-                    val bulletSize = if (active) 14.dp else 10.dp
-                    
-                    Box(
-                        modifier = Modifier
-                            .size(bulletSize)
-                            .clip(CircleShape)
-                            .background(bulletColor)
-                    )
-                    
-                    if (i < 3) {
-                        Spacer(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(2.dp)
-                                .background(
-                                    if (step > i) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)
-                                )
-                        )
+            // Sleek premium Onboarding Header
+            OnboardingHeader(
+                step = step,
+                onBack = {
+                    if (step > 1) {
+                        step--
                     }
                 }
-            }
+            )
             
             // Step content display
             Column(
@@ -1583,237 +1731,382 @@ private fun OnboardingScreen(
             ) {
                 when (step) {
                     1 -> {
+                        Spacer(Modifier.height(16.dp))
+                        
+                        // Large Hero Assistant Face
+                        AuraAvatarFace(sizeMultiplier = 1.3f)
+                        
+                        Spacer(Modifier.height(32.dp))
+                        
+                        // Headline
                         Text(
-                            text = "STEP 1: SELECT SYSTEM INTEGRATION",
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "Meet your AI launcher",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            ),
                             color = MaterialTheme.colorScheme.onBackground
                         )
+                        
+                        Spacer(Modifier.height(12.dp))
+                        
+                        // Subtitle
                         Text(
-                            text = "Choose how Aura runs on your hardware.",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "It organizes your apps, finds what you need, and helps you get things done.",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                textAlign = TextAlign.Center,
+                                lineHeight = 24.sp
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         )
                         
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(48.dp))
                         
-                        // Mode Option A: System Launcher
-                        val isLauncher = selectedAppMode == "launcher"
-                        Box(
+                        val buttonBgColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+                        
+                        // Google Continue Button
+                        Button(
+                            onClick = { step = 2 },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard(borderWidth = if (isLauncher) 2.dp else 1.2.dp)
-                                .clickable { selectedAppMode = "launcher" }
-                                .padding(16.dp)
+                                .height(56.dp)
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = buttonBgColor,
+                                contentColor = MaterialTheme.colorScheme.onBackground
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
                         ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isLauncher) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text("HOME SCREEN LAUNCHER", fontWeight = FontWeight.Bold, color = if (isLauncher) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
-                                }
-                                Spacer(Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                // Google 'G' icon in sleek monochrome bold typography
                                 Text(
-                                    "Replaces your default Android launcher. Serves as your full-screen minimal home screen with voice & app shortcuts.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "G",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif
+                                    ),
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge
                                 )
                             }
                         }
                         
-                        // Mode Option B: Standalone App
-                        val isNormal = selectedAppMode == "normal"
-                        Box(
+                        Spacer(Modifier.height(14.dp))
+                        
+                        // Email Continue Button
+                        OutlinedButton(
+                            onClick = { step = 2 },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard(borderWidth = if (isNormal) 2.dp else 1.2.dp)
-                                .clickable { selectedAppMode = "normal" }
-                                .padding(16.dp)
+                                .height(56.dp)
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            border = BorderStroke(
+                                width = 1.2.dp,
+                                color = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.12f)
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onBackground
+                            )
                         ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isNormal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text("STANDALONE PRODUCTIVITY APP", fontWeight = FontWeight.Bold, color = if (isNormal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
-                                }
-                                Spacer(Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mail,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
                                 Text(
-                                    "Launches as a normal app from your existing launcher. Great if you only want to access Aura on demand.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "Continue with email",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge
                                 )
                             }
                         }
                         
-                        // Mode Option C: Overlay Assistant
-                        val isOverlay = selectedAppMode == "overlay"
-                        Box(
+                        Spacer(Modifier.height(24.dp))
+                        
+                        // Sign In Action Link
+                        Text(
+                            text = "Sign in",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFF9E86FF) else Color(0xFF6366F1),
+                                textAlign = TextAlign.Center
+                            ),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .glassCard(borderWidth = if (isOverlay) 2.dp else 1.2.dp)
-                                .clickable { selectedAppMode = "overlay" }
-                                .padding(16.dp)
-                        ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isOverlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text("ALWAYS-ON VOICE OVERLAY", fontWeight = FontWeight.Bold, color = if (isOverlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    "Runs persistently in the background. Pulls up automatically as a floating overlay on speech detection.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
+                                .clickable { step = 2 }
+                                .padding(8.dp)
+                        )
+                        
+                        Spacer(modifier = Modifier.weight(1f))
+                        
+                        // Terms of Service Footer
+                        Text(
+                            text = "By continuing, you agree to our Terms of Service\nand acknowledge our Privacy Policy",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                        )
                     }
                     
                     2 -> {
+                        Spacer(Modifier.height(12.dp))
+                        
+                        // Small Assistant Brand Icon
+                        AuraAvatarFace(sizeMultiplier = 0.6f)
+                        
+                        Spacer(Modifier.height(16.dp))
+                        
                         Text(
-                            text = "STEP 2: DRIVE COGNITIVE INTELLIGENCE",
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "Connect your AI",
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Select your preferred AI engine and authenticate locally.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+                            text = "Choose how to power your assistant.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(16.dp))
                         
-                        // Provider Tabs
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            LlmProvider.entries.forEach { provider ->
-                                val selected = selectedProvider == provider
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .glassCard(
-                                            shape = RoundedCornerShape(12.dp),
-                                            borderWidth = if (selected) 2.dp else 1.dp
-                                        )
-                                        .clickable { 
-                                            selectedProvider = provider 
-                                            // Prepopulate default model ID on selection
-                                            modelIdInput = when (provider) {
-                                                LlmProvider.Gemini -> "gemini-1.5-flash"
-                                                LlmProvider.OpenAI -> "gpt-4o-mini"
-                                                LlmProvider.OpenRouter -> "google/gemini-2.0-flash-exp:free"
-                                            }
-                                        }
-                                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f) else Color.Transparent)
-                                        .padding(vertical = 12.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = provider.label.uppercase(),
-                                        fontWeight = FontWeight.Black,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
-                                    )
-                                }
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Credentials form
+                        // provider A: Gemini (Recommended)
+                        val isGemini = selectedProvider == LlmProvider.Gemini
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard()
+                                .glassCard(shape = RoundedCornerShape(20.dp), borderWidth = if (isGemini) 2.dp else 1.2.dp)
+                                .clickable {
+                                    selectedProvider = LlmProvider.Gemini
+                                    modelIdInput = "gemini-1.5-flash"
+                                }
+                                .background(if (isGemini) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f) else Color.Transparent)
                                 .padding(16.dp)
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Text(
-                                    text = "CREDENTIAL SETUP",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Star Icon for Gemini (using GraphicEq)
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.GraphicEq,
+                                        contentDescription = null,
+                                        tint = if (isGemini) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                                    )
+                                }
                                 
-                                OutlinedTextField(
-                                    value = apiKeyInput,
-                                    onValueChange = { apiKeyInput = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    leadingIcon = { Icon(Icons.Rounded.Key, null) },
-                                    trailingIcon = {
-                                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                                            Icon(
-                                                imageVector = if (showApiKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                                contentDescription = "Toggle key visibility"
+                                Spacer(Modifier.width(16.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Connect Gemini",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        // Recommended Capsule Badge
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isDark) Color(0xFF1E3A1E) else Color(0xFFE8F5E9))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "✦ Recommended",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
                                             )
                                         }
-                                    },
-                                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                                    placeholder = { Text("${selectedProvider.label.uppercase()} API KEY...") },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f),
-                                        focusedContainerColor = Color.Transparent,
-                                        unfocusedContainerColor = Color.Transparent,
-                                        cursorColor = MaterialTheme.colorScheme.primary
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Fast setup. Native integration. Powered by Gemini 1.5 Flash.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 
-                                OutlinedTextField(
-                                    value = modelIdInput,
-                                    onValueChange = { modelIdInput = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    leadingIcon = { Icon(Icons.Rounded.GraphicEq, null) },
-                                    placeholder = { Text("MODEL ID (E.G. ${if (selectedProvider == LlmProvider.Gemini) "gemini-1.5-flash" else "gpt-4o-mini"})") },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f),
-                                        focusedContainerColor = Color.Transparent,
-                                        unfocusedContainerColor = Color.Transparent,
-                                        cursorColor = MaterialTheme.colorScheme.primary
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
+                                Text(
+                                    text = "→",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                        
+                        // provider B: OpenAI
+                        val isOpenAi = selectedProvider == LlmProvider.OpenAI
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard(shape = RoundedCornerShape(20.dp), borderWidth = if (isOpenAi) 2.dp else 1.2.dp)
+                                .clickable {
+                                    selectedProvider = LlmProvider.OpenAI
+                                    modelIdInput = "gpt-4o-mini"
+                                }
+                                .background(if (isOpenAi) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f) else Color.Transparent)
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Spiral Icon for OpenAI (using Layers icon as representation)
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Layers,
+                                        contentDescription = null,
+                                        tint = if (isOpenAi) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                                    )
+                                }
                                 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
+                                Spacer(Modifier.width(16.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Connect OpenAI",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Popular setup. Reliable performance. Powered by GPT-4o.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                
+                                Text(
+                                    text = "→",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        
+                        // or separator with horizontal line dividers
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Box(modifier = Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)))
+                            Text(
+                                text = "or",
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            Box(modifier = Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)))
+                        }
+                        
+                        // Credentials form
+                        Text(
+                            text = "${selectedProvider.label} API key",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.fillMaxWidth().align(Alignment.Start)
+                        )
+                        
+                        OutlinedTextField(
+                            value = apiKeyInput,
+                            onValueChange = { apiKeyInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(
+                                        imageVector = if (showApiKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = "Toggle key visibility"
+                                    )
+                                }
+                            },
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            placeholder = { Text(if (selectedProvider == LlmProvider.Gemini) "AIzaSy..." else "sk-........................") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.onBackground,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f),
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                cursorColor = MaterialTheme.colorScheme.onBackground
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        // Stored Securely Device Footnote
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isDark) Color(0xFF1C1C1E) else Color.White)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Lock,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                                         modifier = Modifier.size(16.dp)
                                     )
-                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Spacer(Modifier.width(16.dp))
+                                Column {
                                     Text(
-                                        text = "Secure local vault. Keys never leave your device.",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                                        text = "Stored securely on this device.",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "Your API key is encrypted and never shared with third parties.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -1821,26 +2114,31 @@ private fun OnboardingScreen(
                     }
                     
                     3 -> {
+                        Spacer(Modifier.height(12.dp))
+                        
+                        // Small Assistant Brand Icon
+                        AuraAvatarFace(sizeMultiplier = 0.6f)
+                        
+                        Spacer(Modifier.height(16.dp))
+                        
                         Text(
-                            text = "STEP 3: SYSTEM CONCURRENCES",
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "Activate capabilities",
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Grant hardware permissions to activate cognitive capabilities.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+                            text = "Grant hardware permissions to enable AI voice.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(16.dp))
                         
                         // Permission Card: Microphone
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard()
+                                .glassCard(shape = RoundedCornerShape(20.dp))
                                 .clickable { if (!hasMic) onRequestPermissions() }
                                 .padding(16.dp)
                         ) {
@@ -1850,14 +2148,24 @@ private fun OnboardingScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Mic,
-                                        contentDescription = null,
-                                        tint = if (hasMic) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Mic,
+                                            contentDescription = null,
+                                            tint = if (hasMic) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                     Spacer(Modifier.width(16.dp))
                                     Column {
-                                        Text("MICROPHONE CAPTURE", fontWeight = FontWeight.Bold)
+                                        Text("Microphone Capture", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                        Spacer(Modifier.height(2.dp))
                                         Text("Required for speech-to-text processing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
@@ -1879,7 +2187,7 @@ private fun OnboardingScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard()
+                                .glassCard(shape = RoundedCornerShape(20.dp))
                                 .clickable { if (!hasNotif) onRequestPermissions() }
                                 .padding(16.dp)
                         ) {
@@ -1889,14 +2197,24 @@ private fun OnboardingScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (hasNotif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.CheckCircle,
+                                            contentDescription = null,
+                                            tint = if (hasNotif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                     Spacer(Modifier.width(16.dp))
                                     Column {
-                                        Text("SYSTEM ALERTS", fontWeight = FontWeight.Bold)
+                                        Text("System Alerts", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                        Spacer(Modifier.height(2.dp))
                                         Text("Displays active voice states and overlay triggers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
@@ -1918,7 +2236,7 @@ private fun OnboardingScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard()
+                                .glassCard(shape = RoundedCornerShape(20.dp))
                                 .clickable { if (!hasLoc) onRequestPermissions() }
                                 .padding(16.dp)
                         ) {
@@ -1928,14 +2246,24 @@ private fun OnboardingScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Home,
-                                        contentDescription = null,
-                                        tint = if (hasLoc) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Home,
+                                            contentDescription = null,
+                                            tint = if (hasLoc) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                     Spacer(Modifier.width(16.dp))
                                     Column {
-                                        Text("COGNITIVE MAP ACCESS", fontWeight = FontWeight.Bold)
+                                        Text("Surroundings Access", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                        Spacer(Modifier.height(2.dp))
                                         Text("Allows assistant context based on surroundings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
@@ -1959,7 +2287,7 @@ private fun OnboardingScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassCard()
+                                .glassCard(shape = RoundedCornerShape(20.dp))
                                 .padding(16.dp)
                         ) {
                             Row(
@@ -1968,7 +2296,8 @@ private fun OnboardingScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("BACKGROUND LISTENING CAPABILITY", fontWeight = FontWeight.Bold)
+                                    Text("Background voice capability", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                    Spacer(Modifier.height(2.dp))
                                     Text("Opt-in background voice activation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Switch(
@@ -1981,31 +2310,11 @@ private fun OnboardingScreen(
                 }
             }
             
-            // Bottom Action buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                if (step > 1) {
-                    FilledTonalButton(
-                        onClick = { step-- },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Text("PREVIOUS", fontWeight = FontWeight.Bold)
-                    }
-                }
-                
-                val keyFilled = apiKeyInput.isNotBlank()
+            // Bottom Action buttons (Rendered dynamically for step 2 and 3)
+            if (step > 1) {
+                Spacer(Modifier.height(16.dp))
                 val isNextEnabled = when (step) {
-                    1 -> true
-                    2 -> keyFilled
+                    2 -> apiKeyInput.isNotBlank()
                     3 -> true
                     else -> true
                 }
@@ -2025,18 +2334,23 @@ private fun OnboardingScreen(
                         }
                     },
                     enabled = isNextEnabled,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = 8.dp),
+                    shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (step == 3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
-                        contentColor = if (step == 3) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onPrimary
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
                     Text(
-                        text = if (step < 3) "CONTINUE" else "INITIALIZE SYSTEM",
-                        fontWeight = FontWeight.Black
+                        text = if (step < 3) "Continue" else "Initialize system",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge
                     )
                 }
+                Spacer(Modifier.height(12.dp))
             }
         }
     }
@@ -2567,30 +2881,30 @@ fun Modifier.glassCard(
     val bgBrush = if (isDark) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0x1F1C1D3A), // Translucent Space Purple-Grey
-                Color(0x0A020205)  // Near-Black Deep Glass
+                Color(0xFF1C1C1E), // Frosted Carbon Grey
+                Color(0xFF141416)  // Pitch Carbon Grey
             )
         )
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xD9FFFFFF), // Frosted White Glass
-                Color(0xB3FFFFFF)
+                Color(0xFFFFFFFF), // Crisp Clean White
+                Color(0xFFFAFAFC)
             )
         )
     }
     val borderBrush = if (isDark) {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.10f),
                 Color.White.copy(alpha = 0.02f)
             )
         )
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.60f),
-                Color.Black.copy(alpha = 0.06f)
+                Color.Black.copy(alpha = 0.08f),
+                Color.Black.copy(alpha = 0.02f)
             )
         )
     }
@@ -2633,12 +2947,12 @@ private fun ScreenShell(
                 val width = size.width
                 val height = size.height
                 
-                // Deep background gradient
+                // Deep background gradient aligned with new matte carbon / light themes
                 val bgBrush = Brush.verticalGradient(
                     colors = if (isDark) {
-                        listOf(Color(0xFF04050D), Color(0xFF080B18), Color(0xFF020306))
+                        listOf(Color(0xFF0F0F10), Color(0xFF151517), Color(0xFF0A0A0B))
                     } else {
-                        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+                        listOf(Color(0xFFF2F2F7), Color(0xFFE5E5EA), Color(0xFFD1D1D6))
                     }
                 )
                 drawRect(brush = bgBrush)
