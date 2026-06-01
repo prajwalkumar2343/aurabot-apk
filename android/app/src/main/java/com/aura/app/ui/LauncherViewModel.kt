@@ -15,6 +15,7 @@ import com.aura.app.assistant.MemoryResponse
 import com.aura.app.assistant.MessageRole
 import com.aura.app.assistant.OpenRouterModelInfo
 import com.aura.app.assistant.TodoResponse
+import com.aura.app.assistant.UserResponse
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -174,6 +175,24 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     messages = listOf(AssistantMessage(MessageRole.Assistant, "Aura is back in local mode."))
                 )
             }
+        }
+    }
+
+    fun register(email: String, password: String, name: String?, onResult: (Result<UserResponse>) -> Unit) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            val result = runCatching { container.assistantRepository.register(email, password, name) }
+            localState.update { it.copy(loading = false, error = result.exceptionOrNull()?.message) }
+            onResult(result)
+        }
+    }
+
+    fun login(email: String, password: String, onResult: (Result<UserResponse>) -> Unit) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            val result = runCatching { container.assistantRepository.login(email, password) }
+            localState.update { it.copy(loading = false, error = result.exceptionOrNull()?.message) }
+            onResult(result)
         }
     }
 

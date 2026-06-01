@@ -1,6 +1,7 @@
 package com.aura.app.assistant
 
 data class LoginRequest(val email: String, val password: String)
+data class RegisterRequest(val email: String, val password: String, val name: String? = null)
 data class LoginResponse(
     val id: String,
     val email: String,
