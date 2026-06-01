@@ -9,33 +9,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkScheme = darkColorScheme(
-    primary = Color.White,
-    onPrimary = Color.Black,
-    secondary = Color.White,
-    onSecondary = Color.Black,
-    tertiary = Color.White,
-    background = Color.Black,
-    onBackground = Color.White,
-    surface = Color(0xFF121212),
+    primary = Color(0xFF00F0FF), // Electric Neon Cyan
+    onPrimary = Color(0xFF030408), // Space Obsidian
+    secondary = Color(0xFF8B5CF6), // Cosmic Violet
+    onSecondary = Color.White,
+    tertiary = Color(0xFFEC4899), // Electric Pink
+    background = Color(0xFF04050D), // Space Deep Black
+    onBackground = Color(0xFFF3F4F6),
+    surface = Color(0x1F1A1B2F), // Frosted Deep Space Glass
     onSurface = Color.White,
-    surfaceVariant = Color(0xFF1C1C1E),
-    onSurfaceVariant = Color(0xFF8E8E93),
-    error = Color.White
+    surfaceVariant = Color(0x14FFFFFF), // Frosted Thin White Glass
+    onSurfaceVariant = Color(0xFF9CA3AF),
+    error = Color(0xFFEF4444)
 )
 
 private val LightScheme = lightColorScheme(
-    primary = Color.Black,
+    primary = Color(0xFF6366F1), // Royal Indigo
     onPrimary = Color.White,
-    secondary = Color.Black,
+    secondary = Color(0xFF06B6D4), // Soft Cyan
     onSecondary = Color.White,
-    tertiary = Color.Black,
-    background = Color.White,
-    onBackground = Color.Black,
-    surface = Color(0xFFF2F2F7),
-    onSurface = Color.Black,
-    surfaceVariant = Color(0xFFE5E5EA),
-    onSurfaceVariant = Color(0xFF8E8E93),
-    error = Color.Black
+    tertiary = Color(0xFF8B5CF6), // Soft Violet
+    background = Color(0xFFF6F8FC), // Soft Slate
+    onBackground = Color(0xFF0F172A),
+    surface = Color(0xCCFFFFFF), // Frosted Translucent White Glass
+    onSurface = Color(0xFF0F172A),
+    surfaceVariant = Color(0x75E2E8F0), // Frosted Thin Grey Glass
+    onSurfaceVariant = Color(0xFF64748B),
+    error = Color(0xFFDC2626)
 )
 
 @Composable
@@ -50,3 +50,4 @@ fun AuraTheme(
         content = content
     )
 }
+
