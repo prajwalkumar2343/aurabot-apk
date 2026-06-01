@@ -59,6 +59,15 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import android.os.Build
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.FloatingActionButton
@@ -92,6 +101,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -248,23 +258,25 @@ fun AuraLauncherApp(
     } else if (!onboardingComplete) {
         OnboardingScreen(
             state = state,
-            onGoogleLogin = { key ->
-                viewModel.setGoogleApiKey(key)
-                viewModel.setLlmProvider(LlmProvider.Gemini)
-                viewModel.setOnboardingComplete(true)
-            },
-            onOpenAiLogin = { key ->
-                viewModel.setOpenAiApiKey(key)
-                viewModel.setLlmProvider(LlmProvider.OpenAI)
-                viewModel.setOnboardingComplete(true)
-            },
-            onLocalSetup = { provider, key ->
+            onRequestPermissions = onRequestVoicePermissions,
+            onFinishOnboarding = { appMode, provider, apiKey, modelId, bgListening ->
+                viewModel.setAppMode(appMode)
                 viewModel.setLlmProvider(provider)
-                if (provider == LlmProvider.Gemini) {
-                    viewModel.setGoogleApiKey(key)
-                } else if (provider == LlmProvider.OpenRouter) {
-                    viewModel.setOpenRouterApiKey(key)
+                when (provider) {
+                    LlmProvider.Gemini -> {
+                        viewModel.setGoogleApiKey(apiKey)
+                        if (modelId.isNotBlank()) viewModel.setGoogleModel(modelId)
+                    }
+                    LlmProvider.OpenAI -> {
+                        viewModel.setOpenAiApiKey(apiKey)
+                        if (modelId.isNotBlank()) viewModel.setOpenAiModel(modelId)
+                    }
+                    LlmProvider.OpenRouter -> {
+                        viewModel.setOpenRouterApiKey(apiKey)
+                        if (modelId.isNotBlank()) viewModel.setOpenRouterModel(modelId)
+                    }
                 }
+                viewModel.setBackgroundListening(bgListening)
                 viewModel.setOnboardingComplete(true)
             }
         )
@@ -494,23 +506,25 @@ private fun HomeScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             FilledTonalButton(
                 onClick = if (state.status.running) onStopVoice else onTalk,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
                 colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(if (state.status.running) Icons.Rounded.Stop else Icons.Rounded.Mic, null)
+                Icon(if (state.status.running) Icons.Rounded.Stop else Icons.Rounded.Mic, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text(if (state.status.running) "STOP" else "TALK")
+                Text(if (state.status.running) "STOP VOICE" else "ACTIVATE VOICE", fontWeight = FontWeight.Bold)
             }
         }
 
         Spacer(Modifier.height(16.dp))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
 
+        Spacer(Modifier.height(16.dp))
+        HomeChatLayer(state = state, onClick = onOpenAssistant)
     }
 
     if (showLongPressMenu) {
@@ -601,46 +615,46 @@ private fun HomeScreen(
 
 @Composable
 private fun HomeChatLayer(state: LauncherUiState, onClick: () -> Unit) {
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 112.dp, max = 176.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+            .glassCard(shape = RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("CHAT CONVERSATION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-            state.recentMessages.forEach { message ->
-                val isUser = message.role == MessageRole.User
-                Text(
-                    text = if (isUser) "YOU: ${message.text}" else "AURA: ${message.text}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isUser) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Text("ACTIVE COGNITIVE TRANSMISSIONS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp), color = MaterialTheme.colorScheme.primary)
+            
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                state.recentMessages.forEach { message ->
+                    val isUser = message.role == MessageRole.User
+                    Text(
+                        text = if (isUser) "YOU: ${message.text}" else "AURA: ${message.text}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isUser) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                
+                if (state.loading) {
+                    Text(
+                        text = "AURA IS THINKING...",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
             }
-            if (state.loading) {
-                Text(
-                    text = "AURA IS THINKING...",
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
+            
             if (state.appBlocks.isNotEmpty()) {
                 val block = state.appBlocks.first()
                 Text(
                     text = "${block.label.uppercase()} BLOCKED FOR ${block.remainingMinutes()}M",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.error
                 )
             }
         }
@@ -657,6 +671,8 @@ private fun AuraEyes(
     interactionMode: String,
     modifier: Modifier = Modifier
 ) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
     val infiniteTransition = rememberInfiniteTransition(label = "aura_eyes")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -812,27 +828,45 @@ private fun AuraEyes(
                     // Tilt left eye positive, right eye negative (slants inward)
                     val tilt = tiltDegrees * direction
 
+                    val eyeBrush = Brush.linearGradient(
+                        colors = listOf(primaryColor, secondaryColor),
+                        start = Offset(originX + travelX, eyeY + travelY),
+                        end = Offset(originX + travelX + eyeWidth, eyeY + travelY + eyeHeight)
+                    )
+
                     rotate(degrees = tilt, pivot = Offset(pivotX, pivotY)) {
-                        drawRect(
-                            color = Color.White,
+                        drawRoundRect(
+                            brush = eyeBrush,
                             topLeft = Offset(originX + travelX, eyeY + travelY),
-                            size = Size(eyeWidth, eyeHeight)
+                            size = Size(eyeWidth, eyeHeight),
+                            cornerRadius = CornerRadius(16f, 16f)
                         )
                     }
                 }
 
                 if (interactionMode == "dot") {
                     if (dotAlpha > 0.01f) {
-                        val baseDotRadius = size.height * 0.08f
+                        val baseDotRadius = size.height * 0.09f
                         val dotScale = when {
                             isSpeaking -> speechWave
                             mode == AuraPresenceMode.Thinking -> dotBreathe
                             mode == AuraPresenceMode.Hearing -> 1f + (voiceLevel.coerceIn(0, 12) / 12f) * 0.45f
                             else -> 1f
                         }
+                        
+                        val dotBrush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor,
+                                secondaryColor.copy(alpha = 0.35f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = baseDotRadius * dotScale * 1.3f
+                        )
+                        
                         drawCircle(
-                            color = Color.White.copy(alpha = dotAlpha),
-                            radius = baseDotRadius * dotScale,
+                            brush = dotBrush,
+                            radius = baseDotRadius * dotScale * 1.3f,
                             center = Offset(size.width / 2f, size.height / 2f)
                         )
                     }
@@ -847,7 +881,6 @@ private fun AuraEyes(
 
 @Composable
 private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val isDark = isSystemInDarkTheme()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -873,15 +906,14 @@ private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(62.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)),
+                .size(64.dp)
+                .glassCard(shape = RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(52.dp)
                 )
             } else {
                 Text(
@@ -909,7 +941,6 @@ private fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 private fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val isDark = isSystemInDarkTheme()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -930,26 +961,21 @@ private fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
                 indication = LocalIndication.current,
                 onClick = { onLaunchApp(app) }
             )
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                RoundedCornerShape(16.dp)
-            )
-            .padding(10.dp),
+            .glassCard(shape = RoundedCornerShape(20.dp))
+            .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
                 .size(46.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.background),
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.4f)),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier.size(42.dp)
+                    modifier = Modifier.size(38.dp)
                 )
             } else {
                 Text(
@@ -977,7 +1003,6 @@ private fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val isDark = isSystemInDarkTheme()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -998,13 +1023,8 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
                 indication = LocalIndication.current,
                 onClick = { onLaunchApp(app) }
             )
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)),
-                RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -1012,13 +1032,13 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
             modifier = Modifier
                 .size(38.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.background),
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.4f)),
             contentAlignment = Alignment.Center
         ) {
             if (app.icon != null) {
                 AppIcon(
                     drawable = app.icon,
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(32.dp)
                 )
             } else {
                 Text(
@@ -1044,7 +1064,7 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 8.sp,
                     fontWeight = FontWeight.Normal,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1087,40 +1107,41 @@ private fun AppsScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            OutlinedTextField(
-                value = state.appQuery,
-                onValueChange = onQuery,
-                modifier = Modifier.weight(1f),
-                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
-                trailingIcon = {
-                    if (state.appQuery.isNotBlank()) {
-                        IconButton(onClick = { onQuery("") }) {
-                            Icon(Icons.Rounded.Clear, "Clear Search", tint = MaterialTheme.colorScheme.onBackground)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .glassCard(shape = CircleShape)
+            ) {
+                OutlinedTextField(
+                    value = state.appQuery,
+                    onValueChange = onQuery,
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onBackground) },
+                    trailingIcon = {
+                        if (state.appQuery.isNotBlank()) {
+                            IconButton(onClick = { onQuery("") }) {
+                                Icon(Icons.Rounded.Clear, "Clear Search", tint = MaterialTheme.colorScheme.onBackground)
+                            }
                         }
-                    }
-                },
-                placeholder = { Text("SEARCH APPS...") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    cursorColor = MaterialTheme.colorScheme.onBackground
-                ),
-                shape = CircleShape
-            )
-
+                    },
+                    placeholder = { Text("SEARCH APPS...") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = CircleShape
+                )
+            }
+ 
             IconButton(
                 onClick = { isGridView = !isGridView },
                 modifier = Modifier
                     .size(52.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(
-                        BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                        CircleShape
-                    )
+                    .glassCard(shape = CircleShape)
             ) {
                 Icon(
                     imageVector = if (isGridView) Icons.Rounded.Layers else Icons.Rounded.Apps,
@@ -1224,10 +1245,11 @@ private fun AppsScreen(
                 onClick = onRefresh,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .glassCard(shape = CircleShape),
                 shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.primary,
                 elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp)
             ) {
                 Icon(
@@ -1451,266 +1473,575 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
 @Composable
 private fun OnboardingScreen(
     state: LauncherUiState,
-    onGoogleLogin: (String) -> Unit,
-    onOpenAiLogin: (String) -> Unit,
-    onLocalSetup: (LlmProvider, String) -> Unit
+    onRequestPermissions: () -> Unit,
+    onFinishOnboarding: (appMode: String, provider: LlmProvider, apiKey: String, modelId: String, bgListening: Boolean) -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
-    var showGoogleDialog by remember { mutableStateOf(false) }
-    var showOpenAiDialog by remember { mutableStateOf(false) }
     
-    var googleKeyInput by remember { mutableStateOf("") }
-    var openAiKeyInput by remember { mutableStateOf("") }
+    // Step 1: App Mode state
+    var selectedAppMode by remember { mutableStateOf("launcher") }
     
-    var localProvider by remember { mutableStateOf(LlmProvider.Gemini) }
-    var localKeyInput by remember { mutableStateOf("") }
-
-    BackHandler(enabled = true) {
-        if (step == 2) {
-            step = 1
-        }
+    // Step 2: AI Engine state
+    var selectedProvider by remember { mutableStateOf(LlmProvider.Gemini) }
+    var apiKeyInput by remember { mutableStateOf("") }
+    var showApiKey by remember { mutableStateOf(false) }
+    
+    // Initialize default model IDs
+    var modelIdInput by remember { mutableStateOf("gemini-1.5-flash") }
+    
+    // Step 3: Background Listening state
+    var bgListeningEnabled by remember { mutableStateOf(false) }
+    
+    val context = LocalContext.current
+    
+    // Dynamically query permission states
+    val hasMic = ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val hasNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    } else {
+        true
     }
-
+    
+    BackHandler(enabled = step > 1) {
+        step--
+    }
+    
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "AURA",
-                style = MaterialTheme.typography.displayLarge,
-                fontWeight = FontWeight.Black,
-                letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "SWISS COGNITIVE LAUNCHER",
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified
-                ),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-            )
-            Spacer(Modifier.height(48.dp))
-
-            if (step == 1) {
+            // Stark minimalist Title and subtitle
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 16.dp)) {
                 Text(
-                    text = "WELCOME TO AURA",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black
+                    text = "AURA",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
-                Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "Select an onboarding option below to configure your digital intelligence environment.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
+                    text = "COGNITIVE DIGITAL ENVIRONMENT",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp
+                    ),
+                    color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(Modifier.height(32.dp))
-
-                FilledTonalButton(
-                    onClick = { showGoogleDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.onBackground,
-                        contentColor = MaterialTheme.colorScheme.background
+            }
+            
+            // Sleek Step Progress Indicator
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (i in 1..3) {
+                    val active = step == i
+                    val completed = step > i
+                    val bulletColor = when {
+                        active -> MaterialTheme.colorScheme.primary
+                        completed -> MaterialTheme.colorScheme.secondary
+                        else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)
+                    }
+                    val bulletSize = if (active) 14.dp else 10.dp
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(bulletSize)
+                            .clip(CircleShape)
+                            .background(bulletColor)
                     )
-                ) {
-                    Text("LOGIN VIA GOOGLE", fontWeight = FontWeight.Bold)
+                    
+                    if (i < 3) {
+                        Spacer(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(2.dp)
+                                .background(
+                                    if (step > i) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)
+                                )
+                        )
+                    }
                 }
-                Spacer(Modifier.height(12.dp))
-                FilledTonalButton(
-                    onClick = { showOpenAiDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Text("LOGIN VIA OPENAI", fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.height(12.dp))
-                FilledTonalButton(
-                    onClick = { step = 2 },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Text("CONTINUE AS LOCAL-FIRST", fontWeight = FontWeight.Bold)
-                }
-            } else {
-                Text(
-                    text = "CONFIGURE LOCAL-FIRST ENGINE",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Data remains 100% on-device. Please enter a valid API key to drive local-first assistant conversations.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(24.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    listOf(LlmProvider.Gemini, LlmProvider.OpenRouter).forEach { provider ->
-                        val selected = localProvider == provider
-                        FilledTonalButton(
-                            onClick = { localProvider = provider },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
-                                contentColor = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
-                            )
+            }
+            
+            // Step content display
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                when (step) {
+                    1 -> {
+                        Text(
+                            text = "STEP 1: SELECT SYSTEM INTEGRATION",
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Choose how Aura runs on your hardware.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Mode Option A: System Launcher
+                        val isLauncher = selectedAppMode == "launcher"
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard(borderWidth = if (isLauncher) 2.dp else 1.2.dp)
+                                .clickable { selectedAppMode = "launcher" }
+                                .padding(16.dp)
                         ) {
-                            Text(provider.label.uppercase(), fontWeight = FontWeight.Bold)
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isLauncher) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("HOME SCREEN LAUNCHER", fontWeight = FontWeight.Bold, color = if (isLauncher) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Replaces your default Android launcher. Serves as your full-screen minimal home screen with voice & app shortcuts.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        
+                        // Mode Option B: Standalone App
+                        val isNormal = selectedAppMode == "normal"
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard(borderWidth = if (isNormal) 2.dp else 1.2.dp)
+                                .clickable { selectedAppMode = "normal" }
+                                .padding(16.dp)
+                        ) {
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isNormal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("STANDALONE PRODUCTIVITY APP", fontWeight = FontWeight.Bold, color = if (isNormal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Launches as a normal app from your existing launcher. Great if you only want to access Aura on demand.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        
+                        // Mode Option C: Overlay Assistant
+                        val isOverlay = selectedAppMode == "overlay"
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard(borderWidth = if (isOverlay) 2.dp else 1.2.dp)
+                                .clickable { selectedAppMode = "overlay" }
+                                .padding(16.dp)
+                        ) {
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isOverlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("ALWAYS-ON VOICE OVERLAY", fontWeight = FontWeight.Bold, color = if (isOverlay) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Runs persistently in the background. Pulls up automatically as a floating overlay on speech detection.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    
+                    2 -> {
+                        Text(
+                            text = "STEP 2: DRIVE COGNITIVE INTELLIGENCE",
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Select your preferred AI engine and authenticate locally.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Provider Tabs
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            LlmProvider.entries.forEach { provider ->
+                                val selected = selectedProvider == provider
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .glassCard(
+                                            shape = RoundedCornerShape(12.dp),
+                                            borderWidth = if (selected) 2.dp else 1.dp
+                                        )
+                                        .clickable { 
+                                            selectedProvider = provider 
+                                            // Prepopulate default model ID on selection
+                                            modelIdInput = when (provider) {
+                                                LlmProvider.Gemini -> "gemini-1.5-flash"
+                                                LlmProvider.OpenAI -> "gpt-4o-mini"
+                                                LlmProvider.OpenRouter -> "google/gemini-2.0-flash-exp:free"
+                                            }
+                                        }
+                                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f) else Color.Transparent)
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = provider.label.uppercase(),
+                                        fontWeight = FontWeight.Black,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                                    )
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Credentials form
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .padding(16.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Text(
+                                    text = "CREDENTIAL SETUP",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                OutlinedTextField(
+                                    value = apiKeyInput,
+                                    onValueChange = { apiKeyInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    leadingIcon = { Icon(Icons.Rounded.Key, null) },
+                                    trailingIcon = {
+                                        IconButton(onClick = { showApiKey = !showApiKey }) {
+                                            Icon(
+                                                imageVector = if (showApiKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                                contentDescription = "Toggle key visibility"
+                                            )
+                                        }
+                                    },
+                                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                    placeholder = { Text("${selectedProvider.label.uppercase()} API KEY...") },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f),
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        cursorColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                
+                                OutlinedTextField(
+                                    value = modelIdInput,
+                                    onValueChange = { modelIdInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    leadingIcon = { Icon(Icons.Rounded.GraphicEq, null) },
+                                    placeholder = { Text("MODEL ID (E.G. ${if (selectedProvider == LlmProvider.Gemini) "gemini-1.5-flash" else "gpt-4o-mini"})") },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f),
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        cursorColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Lock,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Secure local vault. Keys never leave your device.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    3 -> {
+                        Text(
+                            text = "STEP 3: SYSTEM CONCURRENCES",
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Grant hardware permissions to activate cognitive capabilities.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Permission Card: Microphone
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .clickable { if (!hasMic) onRequestPermissions() }
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Mic,
+                                        contentDescription = null,
+                                        tint = if (hasMic) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text("MICROPHONE CAPTURE", fontWeight = FontWeight.Bold)
+                                        Text("Required for speech-to-text processing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(if (hasMic) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (hasMic) {
+                                        Icon(Icons.Rounded.Check, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Permission Card: Notifications
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .clickable { if (!hasNotif) onRequestPermissions() }
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CheckCircle,
+                                        contentDescription = null,
+                                        tint = if (hasNotif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text("SYSTEM ALERTS", fontWeight = FontWeight.Bold)
+                                        Text("Displays active voice states and overlay triggers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(if (hasNotif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (hasNotif) {
+                                        Icon(Icons.Rounded.Check, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Permission Card: Location
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .clickable { if (!hasLoc) onRequestPermissions() }
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Home,
+                                        contentDescription = null,
+                                        tint = if (hasLoc) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text("COGNITIVE MAP ACCESS", fontWeight = FontWeight.Bold)
+                                        Text("Allows assistant context based on surroundings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(if (hasLoc) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (hasLoc) {
+                                        Icon(Icons.Rounded.Check, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Background Listening Toggle
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("BACKGROUND LISTENING CAPABILITY", fontWeight = FontWeight.Bold)
+                                    Text("Opt-in background voice activation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(
+                                    checked = bgListeningEnabled,
+                                    onCheckedChange = { bgListeningEnabled = it }
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = localKeyInput,
-                    onValueChange = { localKeyInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(if (localProvider == LlmProvider.Gemini) "GOOGLE API KEY..." else "OPENROUTER API KEY...") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        cursorColor = MaterialTheme.colorScheme.onBackground
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                )
-                Spacer(Modifier.height(24.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    TextButton(
-                        onClick = { step = 1 },
+            }
+            
+            // Bottom Action buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (step > 1) {
+                    FilledTonalButton(
+                        onClick = { step-- },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
-                    ) {
-                        Text("BACK", fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = { onLocalSetup(localProvider, localKeyInput) },
-                        enabled = localKeyInput.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.onBackground,
-                            contentColor = MaterialTheme.colorScheme.background
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     ) {
-                        Text("FINISH SETUP", fontWeight = FontWeight.Bold)
+                        Text("PREVIOUS", fontWeight = FontWeight.Bold)
                     }
+                }
+                
+                val keyFilled = apiKeyInput.isNotBlank()
+                val isNextEnabled = when (step) {
+                    1 -> true
+                    2 -> keyFilled
+                    3 -> true
+                    else -> true
+                }
+                
+                Button(
+                    onClick = {
+                        if (step < 3) {
+                            step++
+                        } else {
+                            onFinishOnboarding(
+                                selectedAppMode,
+                                selectedProvider,
+                                apiKeyInput,
+                                modelIdInput,
+                                bgListeningEnabled
+                            )
+                        }
+                    },
+                    enabled = isNextEnabled,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (step == 3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                        contentColor = if (step == 3) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(
+                        text = if (step < 3) "CONTINUE" else "INITIALIZE SYSTEM",
+                        fontWeight = FontWeight.Black
+                    )
                 }
             }
         }
     }
-
-    if (showGoogleDialog) {
-        AlertDialog(
-            onDismissRequest = { showGoogleDialog = false },
-            title = { Text("Google Secure Auth Login", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Provide your Google Gemini API Key to log in securely.")
-                    OutlinedTextField(
-                        value = googleKeyInput,
-                        onValueChange = { googleKeyInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("GEMINI API KEY...") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            cursorColor = MaterialTheme.colorScheme.onBackground
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showGoogleDialog = false
-                        onGoogleLogin(googleKeyInput)
-                    },
-                    enabled = googleKeyInput.isNotBlank(),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Sign In")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGoogleDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showOpenAiDialog) {
-        AlertDialog(
-            onDismissRequest = { showOpenAiDialog = false },
-            title = { Text("OpenAI Secure Auth Login", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Provide your OpenAI API Key or Secure Access Token to log in.")
-                    OutlinedTextField(
-                        value = openAiKeyInput,
-                        onValueChange = { openAiKeyInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("OPENAI API KEY...") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            cursorColor = MaterialTheme.colorScheme.onBackground
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showOpenAiDialog = false
-                        onOpenAiLogin(openAiKeyInput)
-                    },
-                    enabled = openAiKeyInput.isNotBlank(),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Sign In")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showOpenAiDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 }
+
 
 @Composable
 private fun ModelsScreen(
@@ -2228,6 +2559,48 @@ private fun rememberWallpaperPainter(uriString: String?): ImageBitmap? {
     }
 }
 
+fun Modifier.glassCard(
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(24.dp),
+    borderWidth: androidx.compose.ui.unit.Dp = 1.2.dp
+): Modifier = this.composed {
+    val isDark = isSystemInDarkTheme()
+    val bgBrush = if (isDark) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0x1F1C1D3A), // Translucent Space Purple-Grey
+                Color(0x0A020205)  // Near-Black Deep Glass
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xD9FFFFFF), // Frosted White Glass
+                Color(0xB3FFFFFF)
+            )
+        )
+    }
+    val borderBrush = if (isDark) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.02f)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.60f),
+                Color.Black.copy(alpha = 0.06f)
+            )
+        )
+    }
+    
+    this
+        .clip(shape)
+        .background(brush = bgBrush)
+        .border(width = borderWidth, brush = borderBrush, shape = shape)
+}
+
 @Composable
 private fun ScreenShell(
     wallpaperUri: String? = null,
@@ -2253,6 +2626,81 @@ private fun ScreenShell(
                     .fillMaxSize()
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
+        } else {
+            val isDark = isSystemInDarkTheme()
+            // Gorgeous premium space ambient mesh gradient
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                
+                // Deep background gradient
+                val bgBrush = Brush.verticalGradient(
+                    colors = if (isDark) {
+                        listOf(Color(0xFF04050D), Color(0xFF080B18), Color(0xFF020306))
+                    } else {
+                        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+                    }
+                )
+                drawRect(brush = bgBrush)
+                
+                // Slowly-drifting neon radial glow circles
+                if (isDark) {
+                    // Cosmic Violet blob at top-right
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x388B5CF6), Color.Transparent),
+                            center = Offset(width * 0.8f, height * 0.2f),
+                            radius = width * 0.7f
+                        ),
+                        radius = width * 0.7f,
+                        center = Offset(width * 0.8f, height * 0.2f)
+                    )
+                    
+                    // Electric Cyan blob at bottom-left
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x2B00F0FF), Color.Transparent),
+                            center = Offset(width * 0.15f, height * 0.8f),
+                            radius = width * 0.65f
+                        ),
+                        radius = width * 0.65f,
+                        center = Offset(width * 0.15f, height * 0.8f)
+                    )
+                    
+                    // Neon Pink subtle blob at center-right
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x1FEC4899), Color.Transparent),
+                            center = Offset(width * 0.9f, height * 0.65f),
+                            radius = width * 0.45f
+                        ),
+                        radius = width * 0.45f,
+                        center = Offset(width * 0.9f, height * 0.65f)
+                    )
+                } else {
+                    // Soft Indigo blob top-right
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x1A6366F1), Color.Transparent),
+                            center = Offset(width * 0.75f, height * 0.18f),
+                            radius = width * 0.6f
+                        ),
+                        radius = width * 0.6f,
+                        center = Offset(width * 0.75f, height * 0.18f)
+                    )
+                    
+                    // Soft Teal blob bottom-left
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x1F06B6D4), Color.Transparent),
+                            center = Offset(width * 0.2f, height * 0.78f),
+                            radius = width * 0.55f
+                        ),
+                        radius = width * 0.55f,
+                        center = Offset(width * 0.2f, height * 0.78f)
+                    )
+                }
+            }
         }
         Column(
             modifier = Modifier
@@ -2275,33 +2723,39 @@ private fun Header(title: String, subtitle: String) {
 @Composable
 private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, onSend: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("ASK AURA...") },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.onBackground,
-                unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                cursorColor = MaterialTheme.colorScheme.onBackground
-            ),
-            shape = RoundedCornerShape(8.dp)
-        )
-        Spacer(Modifier.width(10.dp))
-        Button(
-            onClick = onSend,
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = PaddingValues(0.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background
-            ),
-            modifier = Modifier.size(56.dp)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .glassCard(shape = RoundedCornerShape(16.dp))
         ) {
-            Icon(Icons.Rounded.Search, contentDescription = "Send")
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("ASK AURA...") },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    cursorColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        IconButton(
+            onClick = onSend,
+            modifier = Modifier
+                .size(56.dp)
+                .glassCard(shape = RoundedCornerShape(16.dp))
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = "Send",
+                tint = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }
@@ -2384,31 +2838,28 @@ private fun SettingsRow(
     icon: ImageVector? = null,
     onClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp)
     ) {
         Row(
-            Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (icon != null) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
+                        .glassCard(shape = RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onBackground
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
                 Spacer(Modifier.width(16.dp))
