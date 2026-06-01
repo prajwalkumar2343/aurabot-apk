@@ -19,6 +19,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.aura.app.LauncherActivity
 import com.aura.app.R
+import android.provider.Settings
+import com.aura.app.AuraApplication
+import com.aura.app.auraContainer
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -217,6 +222,20 @@ class AuraListeningService : Service() {
             speechEvents.incrementAndGet()
             lastSpeechAt.set(System.currentTimeMillis())
             emitEvent()
+
+            try {
+                val container = (application as AuraApplication).container
+                val sessionState = runBlocking { container.sessionStore.state.first() }
+                if (sessionState.appMode == "overlay" && Settings.canDrawOverlays(this@AuraListeningService)) {
+                    val launchIntent = Intent(this@AuraListeningService, LauncherActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra("voice_triggered", true)
+                    }
+                    startActivity(launchIntent)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
         if (isSpeechDetected.get() && silenceFrames >= SPEECH_END_FRAMES) {

@@ -172,7 +172,8 @@ fun AuraLauncherApp(
     viewModel: LauncherViewModel,
     onRequestVoicePermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
-    onQuitApp: () -> Unit
+    onQuitApp: () -> Unit,
+    onMinimizeApp: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val onboardingComplete = state.session.onboardingComplete
@@ -203,8 +204,8 @@ fun AuraLauncherApp(
         viewModel.clearError()
     }
 
-    LaunchedEffect(state.session.homeSettingsPrompted, onboardingComplete) {
-        if (onboardingComplete && !state.session.homeSettingsPrompted) {
+    LaunchedEffect(state.session.homeSettingsPrompted, onboardingComplete, state.session.appMode) {
+        if (state.session.appMode == "launcher" && onboardingComplete && !state.session.homeSettingsPrompted) {
             showHomePrompt = true
         }
     }
@@ -345,8 +346,11 @@ fun AuraLauncherApp(
                 }
             ) {
                 composable(Route.Home.name) {
-                    BackHandler(enabled = state.isDefaultLauncher) {
-                        // Do absolutely nothing. Prevents finishing/exiting the launcher activity and avoids screen jitter.
+                    val appMode = state.session.appMode
+                    BackHandler(enabled = appMode != "normal") {
+                        if (appMode == "overlay") {
+                            onMinimizeApp()
+                        }
                     }
                     HomeScreen(
                         state = state,
@@ -408,7 +412,8 @@ fun AuraLauncherApp(
                         onConfigureModels = { navController.navigate(Route.Models.name) },
                         onConfigureTasks = { navController.navigate(Route.Tasks.name) },
                         onConfigureMemories = { navController.navigate(Route.Memory.name) },
-                        onQuitApp = onQuitApp
+                        onQuitApp = onQuitApp,
+                        onSetAppMode = viewModel::setAppMode
                     )
                 }
                 composable(Route.Models.name) {
@@ -551,23 +556,25 @@ private fun HomeScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                showLongPressMenu = false
-                                onSelectWallpaper()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.onBackground,
-                                contentColor = MaterialTheme.colorScheme.background
-                              )
-                        ) {
-                            Icon(Icons.Rounded.Image, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("WALLPAPER", fontWeight = FontWeight.Bold)
+                        if (state.session.appMode == "launcher") {
+                            Button(
+                                onClick = {
+                                    showLongPressMenu = false
+                                    onSelectWallpaper()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.onBackground,
+                                    contentColor = MaterialTheme.colorScheme.background
+                                  )
+                            ) {
+                                Icon(Icons.Rounded.Image, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("WALLPAPER", fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(12.dp))
                         }
-                        Spacer(Modifier.height(12.dp))
                         Button(
                             onClick = {
                                 showLongPressMenu = false
@@ -1946,8 +1953,13 @@ private fun SettingsScreen(
     onConfigureModels: () -> Unit,
     onConfigureTasks: () -> Unit,
     onConfigureMemories: () -> Unit,
-    onQuitApp: () -> Unit
+    onQuitApp: () -> Unit,
+    onSetAppMode: (String) -> Unit
 ) {
+    var showAppModeDialog by remember { mutableStateOf(false) }
+    var showPermissionExplanation by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Header("SETTINGS", "System, model, and voice configuration.")
         Column(
@@ -1990,12 +2002,29 @@ private fun SettingsScreen(
                 icon = Icons.Rounded.Layers,
                 onClick = onConfigureMemories
             )
+
+            val currentModeLabel = when (state.session.appMode) {
+                "launcher" -> "Home Launcher"
+                "normal" -> "Normal App"
+                "overlay" -> "Always-On Background Assistant"
+                else -> "Home Launcher"
+            }
             SettingsRow(
-                title = "Default launcher",
-                subtitle = "Open Android Home app settings.",
-                icon = Icons.Rounded.Home,
-                onClick = onOpenHomeSettings
+                title = "App Mode",
+                subtitle = "Active: $currentModeLabel. Tap to change.",
+                icon = Icons.Rounded.Apps,
+                onClick = { showAppModeDialog = true }
             )
+
+            if (state.session.appMode == "launcher") {
+                SettingsRow(
+                    title = "Default launcher",
+                    subtitle = "Open Android Home app settings.",
+                    icon = Icons.Rounded.Home,
+                    onClick = onOpenHomeSettings
+                )
+            }
+
             SettingsRow(
                 title = "App permissions",
                 subtitle = "Microphone, notification, and location access.",
@@ -2011,20 +2040,24 @@ private fun SettingsScreen(
                     onSetInteractionMode(nextMode)
                 }
             )
-            SettingsRow(
-                title = "Set custom wallpaper",
-                subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
-                icon = Icons.Rounded.Image,
-                onClick = onSelectWallpaper
-            )
-            if (state.session.wallpaperUri != null) {
+
+            if (state.session.appMode == "launcher") {
                 SettingsRow(
-                    title = "Clear custom wallpaper",
-                    subtitle = "Reset to solid black/white background.",
-                    icon = Icons.Rounded.Delete,
-                    onClick = onClearWallpaper
+                    title = "Set custom wallpaper",
+                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
+                    icon = Icons.Rounded.Image,
+                    onClick = onSelectWallpaper
                 )
+                if (state.session.wallpaperUri != null) {
+                    SettingsRow(
+                        title = "Clear custom wallpaper",
+                        subtitle = "Reset to solid black/white background.",
+                        icon = Icons.Rounded.Delete,
+                        onClick = onClearWallpaper
+                    )
+                }
             }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -2055,6 +2088,109 @@ private fun SettingsScreen(
                 onClick = onQuitApp
             )
         }
+    }
+
+    if (showAppModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppModeDialog = false },
+            title = { Text("SELECT APP MODE") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Choose how Aura runs on this device:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            onSetAppMode("launcher")
+                            showAppModeDialog = false
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (state.session.appMode == "launcher") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Home Launcher", fontWeight = FontWeight.Bold)
+                            Text("Operate as default system home screen.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            onSetAppMode("normal")
+                            showAppModeDialog = false
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (state.session.appMode == "normal") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Normal App", fontWeight = FontWeight.Bold)
+                            Text("Run as a standard standalone assistant application.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            val overlayGranted = android.provider.Settings.canDrawOverlays(context)
+                            if (overlayGranted) {
+                                onSetAppMode("overlay")
+                                showAppModeDialog = false
+                            } else {
+                                showPermissionExplanation = true
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (state.session.appMode == "overlay") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Always-On Background Assistant", fontWeight = FontWeight.Bold)
+                            Text("Run always in background; auto-overlay on speech (requires display overlay permission).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAppModeDialog = false }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
+
+    if (showPermissionExplanation) {
+        AlertDialog(
+            onDismissRequest = { showPermissionExplanation = false },
+            title = { Text("OVERLAY PERMISSION REQUIRED") },
+            text = {
+                Text("To pop up Aura instantly when speech is detected in the background, please grant the 'Display over other apps' permission in system settings.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showPermissionExplanation = false
+                    showAppModeDialog = false
+                    onSetAppMode("overlay")
+                    val intent = Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                }) {
+                    Text("GO TO SETTINGS")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionExplanation = false }) {
+                    Text("CANCEL")
+                }
+            }
+        )
     }
 }
 
