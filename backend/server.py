@@ -37,7 +37,7 @@ JWT_ALGORITHM = "HS256"
 ACCESS_MIN = 60 * 24  # 1 day (mobile)
 REFRESH_DAYS = 30
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("EMERGENT_LLM_KEY", ""))
 
 
 # ---------------- Auth helpers ----------------
@@ -601,53 +601,70 @@ async def openrouter_models(data: OpenRouterModelsIn):
 # ---------------- Transcription (audio → text via Gemini) ----------------
 @api_router.post("/transcribe", response_model=TranscribeOut)
 async def transcribe(data: TranscribeIn, user=Depends(get_current_user)):
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
-
     try:
-        audio_bytes = base64.b64decode(data.audio_base64)
+        base64_data = data.audio_base64
+        if "," in base64_data:
+            base64_data = base64_data.split(",", 1)[1]
+        
+        # Simple validation check for base64 correctness
+        base64.b64decode(base64_data)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 audio")
 
-    # Write to a temp file so emergentintegrations can attach it
-    suffix = ".m4a"
-    if "wav" in data.mime_type:
-        suffix = ".wav"
-    elif "mp3" in data.mime_type or "mpeg" in data.mime_type:
-        suffix = ".mp3"
-    elif "webm" in data.mime_type:
-        suffix = ".webm"
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     try:
-        tmp.write(audio_bytes)
-        tmp.flush()
-        tmp.close()
-
-        chat = (
-            LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"transcribe-{user['id']}-{uuid.uuid4()}",
-                system_message="You are a strict audio transcriber. Return only the spoken words in plain text, no punctuation explanations, no preamble.",
+        # Call Gemini REST API directly using inlineData
+        response = await asyncio.to_thread(
+            requests.post,
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            headers={
+                "x-goog-api-key": GEMINI_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": "Transcribe this audio. Return ONLY the transcription text, nothing else."
+                            },
+                            {
+                                "inlineData": {
+                                    "mimeType": data.mime_type,
+                                    "data": base64_data,
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "systemInstruction": {
+                    "parts": [
+                        {
+                            "text": "You are a strict audio transcriber. Return only the spoken words in plain text, no punctuation explanations, no preamble."
+                        }
+                    ]
+                }
+            },
+            timeout=60,
+        )
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Gemini transcription API error: {response.text[:300]}",
             )
-            .with_model("gemini", GEMINI_MODEL)
-            .with_params(max_tokens=500)
-        )
-        attachment = FileContentWithMimeType(file_path=tmp.name, mime_type=data.mime_type)
-        msg = UserMessage(
-            text="Transcribe this audio. Return ONLY the transcription text, nothing else.",
-            file_contents=[attachment],
-        )
-        result = await chat.send_message(msg)
-        text = str(result).strip().strip('"')
+        
+        payload = response.json()
+        candidates = payload.get("candidates") or []
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        text = "".join(part.get("text", "") for part in parts).strip()
+        if not text:
+            raise HTTPException(status_code=502, detail="Gemini transcription response did not include text")
+        
         return TranscribeOut(text=text)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("transcribe failed")
         raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)[:200]}")
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
 
 
 # ---------------- Supabase Gateway (MOCKED) ----------------
