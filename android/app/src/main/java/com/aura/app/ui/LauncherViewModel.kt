@@ -15,6 +15,10 @@ import com.aura.app.assistant.MemoryResponse
 import com.aura.app.assistant.MessageRole
 import com.aura.app.assistant.OpenRouterModelInfo
 import com.aura.app.assistant.TodoResponse
+import com.aura.app.miniapps.BuiltInMiniApps
+import com.aura.app.miniapps.MiniAppBundle
+import com.aura.app.miniapps.MiniAppInstall
+import com.aura.app.miniapps.MiniAppRecord
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +41,10 @@ data class LauncherUiState(
     val memories: List<MemoryResponse> = emptyList(),
     val todos: List<TodoResponse> = emptyList(),
     val appBlocks: List<AppBlockRule> = emptyList(),
+    val miniApps: List<MiniAppInstall> = emptyList(),
+    val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
+    val activeMiniApp: MiniAppBundle? = null,
+    val activeMiniAppRecords: List<MiniAppRecord> = emptyList(),
     val llmSettings: LlmSettingsState = LlmSettingsState(),
     val openRouterModels: List<OpenRouterModelInfo> = emptyList(),
     val loadingModels: Boolean = false,
@@ -81,6 +89,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         refreshApps()
+        refreshMiniApps()
         refreshCloud()
     }
 
@@ -141,10 +150,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 )
             }
             try {
+                val bundles = uiState.value.miniApps.mapNotNull { container.miniAppRepository.bundle(it.id) }
                 val response = container.assistantRepository.chat(
                     message = message,
                     sessionId = uiState.value.assistantSessionId,
-                    apps = uiState.value.apps
+                    apps = uiState.value.apps,
+                    miniApps = uiState.value.miniApps,
+                    miniAppBundles = bundles
                 )
                 val actionReplies = applyChatActions(response.actions)
                 localState.update {
@@ -230,9 +242,148 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         replies += "${rule.label} is blocked for ${rule.remainingMinutes()} minutes."
                     }
                 }
+                "open_mini_app" -> {
+                    val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
+                    if (miniApp == null) {
+                        replies += "I could not find that mini app."
+                    } else {
+                        openMiniApp(miniApp.id)
+                        replies += "Opened ${miniApp.name}."
+                    }
+                }
+                "create_mini_app_record" -> {
+                    val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
+                    if (miniApp == null) {
+                        replies += "I could not find that mini app."
+                    } else if (!action.action_id.isNullOrBlank()) {
+                        container.miniAppRepository.runAction(miniApp.id, action.action_id)
+                        openMiniApp(miniApp.id)
+                        replies += "Updated ${miniApp.name}."
+                    } else {
+                        val recordType = action.record_type ?: "record"
+                        container.miniAppRepository.createRecord(miniApp.id, recordType, action.values.orEmpty())
+                        openMiniApp(miniApp.id)
+                        replies += "Saved that in ${miniApp.name}."
+                    }
+                }
+                "query_mini_app_records" -> {
+                    val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
+                    if (miniApp == null) {
+                        replies += "I could not find that mini app."
+                    } else {
+                        val count = container.miniAppRepository.records(miniApp.id).size
+                        openMiniApp(miniApp.id)
+                        replies += "${miniApp.name} has $count local records."
+                    }
+                }
             }
         }
         return replies
+    }
+
+    fun refreshMiniApps() {
+        viewModelScope.launch {
+            try {
+                container.miniAppRepository.ensureBuiltInsInstalled()
+                localState.update { it.copy(miniApps = container.miniAppRepository.listInstalled()) }
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not load mini apps") }
+            }
+        }
+    }
+
+    fun installMiniApp(bundle: MiniAppBundle) {
+        viewModelScope.launch {
+            try {
+                container.miniAppRepository.install(bundle)
+                refreshMiniApps()
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not install mini app") }
+            }
+        }
+    }
+
+    fun createMiniAppFromPrompt(prompt: String) {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val bundle = container.assistantRepository.buildMiniApp(trimmed)
+                container.miniAppRepository.install(bundle)
+                refreshMiniApps()
+                return@launch
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not build mini app; created a local starter instead") }
+            }
+            installMiniApp(localStarterMiniApp(trimmed))
+        }
+    }
+
+    private fun localStarterMiniApp(prompt: String): MiniAppBundle {
+        val trimmed = prompt.trim()
+        val slug = trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifBlank { "custom" }
+        val name = trimmed.split(Regex("\\s+")).take(3).joinToString(" ").replaceFirstChar { it.uppercase() }
+        return MiniAppBundle(
+            id = "local.$slug",
+            metadata = com.aura.app.miniapps.MiniAppMetadata(
+                name = name,
+                description = "Created locally with Aura.",
+                category = "Custom"
+            ),
+            icon = com.aura.app.miniapps.MiniAppIcon(value = name.take(1).uppercase(), background = "#7C3AED"),
+            dataSchema = com.aura.app.miniapps.MiniAppDataSchema(
+                fields = listOf(com.aura.app.miniapps.MiniAppField("title", "text", required = true))
+            ),
+            actions = listOf(com.aura.app.miniapps.MiniAppAction("quick_add", "create_record", values = mapOf("title" to trimmed))),
+            assistantIntents = listOf(com.aura.app.miniapps.MiniAppAssistantIntent("quick_add", listOf("add to $name"), actionId = "quick_add")),
+            screens = listOf(
+                com.aura.app.miniapps.MiniAppScreen(
+                    id = "dashboard",
+                    title = name,
+                    components = listOf(
+                        com.aura.app.miniapps.MiniAppComponent("dashboard_block", "Local Records", metric = "record_count"),
+                        com.aura.app.miniapps.MiniAppComponent("quick_action_grid", "Actions", items = listOf(com.aura.app.miniapps.MiniAppComponentItem("Add", "quick_add"))),
+                        com.aura.app.miniapps.MiniAppComponent("timeline", "History", source = "records")
+                    )
+                )
+            )
+        )
+    }
+
+    fun openMiniApp(id: String) {
+        viewModelScope.launch {
+            val bundle = container.miniAppRepository.bundle(id)
+            val records = container.miniAppRepository.records(id)
+            localState.update { it.copy(activeMiniApp = bundle, activeMiniAppRecords = records) }
+        }
+    }
+
+    fun closeMiniApp() {
+        localState.update { it.copy(activeMiniApp = null, activeMiniAppRecords = emptyList()) }
+    }
+
+    fun runMiniAppAction(miniAppId: String, actionId: String) {
+        viewModelScope.launch {
+            container.miniAppRepository.runAction(miniAppId, actionId)
+            openMiniApp(miniAppId)
+        }
+    }
+
+    fun deleteMiniAppRecord(miniAppId: String, recordId: String) {
+        viewModelScope.launch {
+            container.miniAppRepository.deleteRecord(miniAppId, recordId)
+            openMiniApp(miniAppId)
+        }
+    }
+
+    private fun resolveMiniApp(id: String?, query: String?): MiniAppInstall? {
+        id?.takeIf { it.isNotBlank() }?.let { miniAppId ->
+            uiState.value.miniApps.firstOrNull { it.id == miniAppId }?.let { return it }
+        }
+        val normalized = query?.trim()?.lowercase().orEmpty()
+        if (normalized.isBlank()) return null
+        return uiState.value.miniApps.firstOrNull { it.name.equals(normalized, ignoreCase = true) }
+            ?: uiState.value.miniApps.firstOrNull { it.name.lowercase().contains(normalized) || it.id.lowercase().contains(normalized) }
     }
 
     private fun resolveApp(packageName: String?, appQuery: String?): AppInfo? {

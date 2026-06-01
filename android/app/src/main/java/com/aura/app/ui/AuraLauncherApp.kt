@@ -64,6 +64,9 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Store
 import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -129,6 +132,10 @@ import com.aura.app.AppContainer
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.MessageRole
+import com.aura.app.miniapps.MiniAppBundle
+import com.aura.app.miniapps.MiniAppComponent
+import com.aura.app.miniapps.MiniAppInstall
+import com.aura.app.miniapps.MiniAppRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -169,7 +176,8 @@ private enum class Route(val title: String) {
     Tasks("Tasks"),
     Memory("Memory"),
     Settings("Settings"),
-    Models("Models")
+    Models("Models"),
+    MiniApp("MiniApp")
 }
 
 private enum class AuraPresenceMode {
@@ -396,8 +404,26 @@ fun AuraLauncherApp(
                         onLaunchApp = { app ->
                             viewModel.launchIntent(app)?.let { context.startActivity(it) }
                         },
+                        onOpenMiniApp = { miniApp ->
+                            viewModel.openMiniApp(miniApp.id)
+                            navController.navigate(Route.MiniApp.name)
+                        },
+                        onInstallMiniApp = viewModel::installMiniApp,
+                        onCreateMiniApp = viewModel::createMiniAppFromPrompt,
                         onRefresh = viewModel::refreshApps,
                         onSwipeRight = { navController.popBackStack() }
+                    )
+                }
+                composable(Route.MiniApp.name) {
+                    MiniAppRuntimeScreen(
+                        bundle = state.activeMiniApp,
+                        records = state.activeMiniAppRecords,
+                        onBack = {
+                            viewModel.closeMiniApp()
+                            navController.popBackStack()
+                        },
+                        onRunAction = viewModel::runMiniAppAction,
+                        onDeleteRecord = viewModel::deleteMiniAppRecord
                     )
                 }
                 composable(Route.Assistant.name) {
@@ -505,29 +531,8 @@ private fun HomeScreen(
             interactionMode = state.session.interactionMode,
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            FilledTonalButton(
-                onClick = if (state.status.running) onStopVoice else onTalk,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(if (state.status.running) Icons.Rounded.Stop else Icons.Rounded.Mic, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(if (state.status.running) "STOP VOICE" else "ACTIVATE VOICE", fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.weight(1f))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
-
-        Spacer(Modifier.height(16.dp))
-        HomeChatLayer(state = state, onClick = onOpenAssistant)
     }
 
     if (showLongPressMenu) {
@@ -792,9 +797,6 @@ private fun AuraEyes(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(18.dp)
     ) {
         Column {
             Canvas(
@@ -802,11 +804,6 @@ private fun AuraEyes(
                     .fillMaxWidth()
                     .aspectRatio(1.75f)
             ) {
-                // Solid flat pitch-black visor display
-                drawRoundRect(
-                    color = Color.Black,
-                    cornerRadius = CornerRadius(12f, 12f)
-                )
 
                 val wave = sin(phase)
                 val commandBias = (commandText.length.coerceAtMost(32) / 32f) * focusAmount
@@ -1081,11 +1078,15 @@ private fun AppsScreen(
     state: LauncherUiState,
     onQuery: (String) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
+    onOpenMiniApp: (MiniAppInstall) -> Unit,
+    onInstallMiniApp: (MiniAppBundle) -> Unit,
+    onCreateMiniApp: (String) -> Unit,
     onRefresh: () -> Unit,
     onSwipeRight: () -> Unit
 ) {
     var totalDrag = 0f
     var isGridView by remember { mutableStateOf(true) }
+    var createPrompt by remember { mutableStateOf("") }
 
     ScreenShell(
         wallpaperUri = state.session.wallpaperUri,
@@ -1163,6 +1164,20 @@ private fun AppsScreen(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (state.appQuery.isBlank()) {
+                    AuraStoreSection(
+                        installed = state.miniApps,
+                        builtIns = state.builtInMiniApps,
+                        prompt = createPrompt,
+                        onPrompt = { createPrompt = it },
+                        onOpen = onOpenMiniApp,
+                        onInstall = onInstallMiniApp,
+                        onCreate = {
+                            onCreateMiniApp(createPrompt)
+                            createPrompt = ""
+                        }
+                    )
+                    Spacer(Modifier.height(18.dp))
+
                     val suggestedApps = state.apps.take(4)
                     if (suggestedApps.isNotEmpty()) {
                         Text(
@@ -1263,6 +1278,256 @@ private fun AppsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AuraStoreSection(
+    installed: List<MiniAppInstall>,
+    builtIns: List<MiniAppBundle>,
+    prompt: String,
+    onPrompt: (String) -> Unit,
+    onOpen: (MiniAppInstall) -> Unit,
+    onInstall: (MiniAppBundle) -> Unit,
+    onCreate: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Rounded.Store, null, tint = MaterialTheme.colorScheme.primary)
+            Text(
+                "AURA STORE",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f)
+            )
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.height(118.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            userScrollEnabled = false
+        ) {
+            items(installed, key = { it.id }) { miniApp ->
+                MiniAppIconCard(miniApp, onOpen)
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            builtIns.filterNot { builtIn -> installed.any { it.id == builtIn.id } }.take(2).forEach { bundle ->
+                FilledTonalButton(
+                    onClick = { onInstall(bundle) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(bundle.metadata.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = onPrompt,
+                modifier = Modifier.weight(1f),
+                leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
+                placeholder = { Text("CREATE WITH AURA...") },
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp)
+            )
+            IconButton(
+                onClick = onCreate,
+                modifier = Modifier
+                    .size(52.dp)
+                    .glassCard(shape = CircleShape)
+            ) {
+                Icon(Icons.Rounded.Add, "Create Mini App")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppIconCard(miniApp: MiniAppInstall, onOpen: (MiniAppInstall) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen(miniApp) }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(parseMiniAppColor(miniApp.icon.background, MaterialTheme.colorScheme.primary)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                miniApp.icon.value.take(2).uppercase(),
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(
+            miniApp.name.uppercase(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun MiniAppRuntimeScreen(
+    bundle: MiniAppBundle?,
+    records: List<MiniAppRecord>,
+    onBack: () -> Unit,
+    onRunAction: (String, String) -> Unit,
+    onDeleteRecord: (String, String) -> Unit
+) {
+    if (bundle == null) {
+        ScreenShell(wallpaperUri = null) {
+            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back") }
+        }
+        return
+    }
+    val screen = bundle.screens.first()
+    val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
+    ScreenShell(wallpaperUri = null) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
+                Icon(Icons.Rounded.ArrowBack, "Back")
+            }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(parseMiniAppColor(bundle.icon.background, primary)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(bundle.icon.value.take(2).uppercase(), color = Color.White, fontWeight = FontWeight.Black)
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(bundle.metadata.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
+                Text(screen.title.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f))
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            items(screen.components, key = { it.type + it.title }) { component ->
+                MiniAppComponentView(bundle, component, records, primary, onRunAction, onDeleteRecord)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppComponentView(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    records: List<MiniAppRecord>,
+    primary: Color,
+    onRunAction: (String, String) -> Unit,
+    onDeleteRecord: (String, String) -> Unit
+) {
+    when (component.type) {
+        "quick_action_grid" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(92.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), userScrollEnabled = false) {
+                items(component.items, key = { it.label }) { item ->
+                    FilledTonalButton(
+                        onClick = { item.actionId?.let { onRunAction(bundle.id, it) } },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(72.dp)
+                    ) {
+                        Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        "timeline" -> Column(
+            modifier = Modifier.glassCard(shape = RoundedCornerShape(16.dp)).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+            records.take(8).ifEmpty { listOf(null) }.forEach { record ->
+                if (record == null) {
+                    Text("No local records yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(primary))
+                        Column(Modifier.weight(1f)) {
+                            Text(record.values.values.joinToString(" · ").ifBlank { record.recordType }, fontWeight = FontWeight.Bold)
+                            Text(formatMiniAppTime(record.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { onDeleteRecord(bundle.id, record.id) }) {
+                            Icon(Icons.Rounded.Delete, "Delete", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+        "streak_view", "progress_ring", "dashboard_block", "chart" -> MiniAppMetricCard(component, records, primary)
+        else -> MiniAppMetricCard(component, records, primary)
+    }
+}
+
+@Composable
+private fun MiniAppMetricCard(component: MiniAppComponent, records: List<MiniAppRecord>, primary: Color) {
+    val today = remember(records) { records.count { isToday(it.createdAt) } }
+    val streak = remember(records) { calculateStreak(records) }
+    val value = when (component.metric) {
+        "today_count" -> "$today"
+        "streak" -> "$streak"
+        "weekly_count" -> records.take(7).size.toString()
+        else -> records.size.toString()
+    }
+    Row(
+        modifier = Modifier.glassCard(shape = RoundedCornerShape(16.dp)).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(Modifier.size(54.dp).clip(CircleShape).background(primary.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+            Text(value, color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+        }
+        Column {
+            Text(component.title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+            Text("Stored locally on this phone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun parseMiniAppColor(value: String, fallback: Color): Color =
+    try {
+        Color(android.graphics.Color.parseColor(value))
+    } catch (_: Exception) {
+        fallback
+    }
+
+private fun formatMiniAppTime(value: Long): String =
+    SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(value))
+
+private fun isToday(value: Long): Boolean {
+    val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
+    return fmt.format(Date(value)) == fmt.format(Date())
+}
+
+private fun calculateStreak(records: List<MiniAppRecord>): Int {
+    if (records.isEmpty()) return 0
+    val days = records.map { SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(it.createdAt)) }.toSet()
+    var streak = 0
+    val calendar = java.util.Calendar.getInstance()
+    while (days.contains(SimpleDateFormat("yyyyMMdd", Locale.US).format(calendar.time))) {
+        streak += 1
+        calendar.add(java.util.Calendar.DATE, -1)
+    }
+    return streak
 }
 
 @Composable
@@ -3194,4 +3459,5 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Memory -> Icons.Rounded.Layers
     Route.Settings -> Icons.Rounded.Settings
     Route.Models -> Icons.Rounded.Settings
+    Route.MiniApp -> Icons.Rounded.Store
 }

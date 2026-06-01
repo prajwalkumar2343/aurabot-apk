@@ -1,5 +1,7 @@
 package com.aura.app.assistant
 
+import com.aura.app.miniapps.MiniAppBundle
+
 data class LoginRequest(val email: String, val password: String)
 data class LoginResponse(
     val id: String,
@@ -25,6 +27,7 @@ enum class LlmProvider(val wireValue: String, val label: String) {
 data class ChatMemoryItem(val title: String, val content: String)
 data class ChatTodoItem(val title: String, val done: Boolean)
 data class ChatAppItem(val label: String, val package_name: String)
+data class ChatMiniAppItem(val id: String, val name: String, val intents: List<String> = emptyList())
 
 data class ChatRequest(
     val message: String,
@@ -34,13 +37,19 @@ data class ChatRequest(
     val model: String,
     val memories: List<ChatMemoryItem> = emptyList(),
     val todos: List<ChatTodoItem> = emptyList(),
-    val apps: List<ChatAppItem> = emptyList()
+    val apps: List<ChatAppItem> = emptyList(),
+    val mini_apps: List<ChatMiniAppItem> = emptyList()
 )
 data class ChatAction(
     val type: String,
     val package_name: String? = null,
     val app_query: String? = null,
-    val duration_minutes: Int? = null
+    val duration_minutes: Int? = null,
+    val mini_app_id: String? = null,
+    val mini_app_query: String? = null,
+    val action_id: String? = null,
+    val record_type: String? = null,
+    val values: Map<String, String>? = null
 )
 data class ChatResponse(
     val reply: String,
@@ -50,6 +59,14 @@ data class ChatResponse(
 
 data class OpenRouterModelsRequest(val api_key: String)
 data class OpenRouterModelsResponse(val data: List<OpenRouterModelInfo>)
+
+data class MiniAppBuildRequest(
+    val prompt: String,
+    val provider: String,
+    val api_key: String,
+    val model: String
+)
+data class MiniAppBuildResponse(val bundle: MiniAppBundle)
 
 data class MemoryCreateRequest(val title: String, val content: String)
 data class MemoryResponse(val id: String, val title: String, val content: String, val created_at: String)

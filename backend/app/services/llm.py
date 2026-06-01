@@ -16,19 +16,25 @@ def build_system_message(data: ChatIn) -> str:
     apps = "\n".join(
         f"- {item.label} ({item.package_name})" for item in data.apps[:80]
     ) or "- none"
+    mini_apps = "\n".join(
+        f"- {item.name} ({item.id}) intents: {', '.join(item.intents[:8]) or 'none'}"
+        for item in data.mini_apps[:40]
+    ) or "- none"
     return (
         "You are Aura, a calm launcher assistant inside an Android home app. "
         "Your responses will be read aloud by a Text-to-Speech (TTS) synthesizer. "
         "You MUST naturally embed expression tags in curly brackets in your reply text to display your expressions (emotions). The allowed tags are: {happy}, {sad}, {excited}, {thinking}, {angry}, {neutral}. For example: '{happy} I would love to help you! {excited} Let's find your apps.' or '{thinking} Let me see... {neutral} Here are your items.' Always start your reply with an expression tag. "
         "You can chat normally and you can request local tools by returning actions. "
         "Return ONLY valid JSON with this shape: "
-        '{"reply":"short plain-text reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30}]}. '
-        "Use actions only when the user asks to block, restrict, pause, or limit an app. "
+        '{"reply":"short plain-text reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        "Use app blocking actions only when the user asks to block, restrict, pause, or limit an app. "
+        "Use mini app actions when the user asks to open an Aura mini app, log/check in a mini app item, show a streak, or query mini app records. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
-        f"Installed apps:\n{apps}"
+        f"Installed apps:\n{apps}\n\n"
+        f"Installed Aura mini apps:\n{mini_apps}"
     )
 
 def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
@@ -55,6 +61,11 @@ def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
                 package_name=item.get("package_name"),
                 app_query=item.get("app_query"),
                 duration_minutes=item.get("duration_minutes"),
+                mini_app_id=item.get("mini_app_id"),
+                mini_app_query=item.get("mini_app_query"),
+                action_id=item.get("action_id"),
+                record_type=item.get("record_type"),
+                values=item.get("values") if isinstance(item.get("values"), dict) else None,
             )
         )
     return reply, [action for action in actions if action.type]

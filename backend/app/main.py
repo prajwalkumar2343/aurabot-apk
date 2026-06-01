@@ -15,6 +15,7 @@ from app.api.assistant import router as assistant_router
 from app.api.transcribe import router as transcribe_router
 from app.api.gateway import router as gateway_router
 from app.api.health import router as health_router
+from app.api.mini_apps import router as mini_apps_router
 
 # Configure logging
 logging.basicConfig(
@@ -35,6 +36,7 @@ api_router.include_router(assistant_router)
 api_router.include_router(transcribe_router)
 api_router.include_router(gateway_router)
 api_router.include_router(health_router)
+api_router.include_router(mini_apps_router)
 
 app.include_router(api_router)
 

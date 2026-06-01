@@ -2,6 +2,8 @@ package com.aura.app.assistant
 
 import com.aura.app.session.SessionStore
 import com.aura.app.apps.AppInfo
+import com.aura.app.miniapps.MiniAppBundle
+import com.aura.app.miniapps.MiniAppInstall
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -102,7 +104,13 @@ class AssistantRepository(
         }
     }
 
-    suspend fun chat(message: String, sessionId: String?, apps: List<AppInfo>): ChatResponse = withContext(Dispatchers.IO) {
+    suspend fun chat(
+        message: String,
+        sessionId: String?,
+        apps: List<AppInfo>,
+        miniApps: List<MiniAppInstall> = emptyList(),
+        miniAppBundles: List<MiniAppBundle> = emptyList()
+    ): ChatResponse = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
         val apiKey = settings.currentApiKey
         val model = settings.currentModel
@@ -123,7 +131,15 @@ class AssistantRepository(
                 model = model,
                 memories = memories.map { ChatMemoryItem(title = it.title, content = it.content) },
                 todos = todos.map { ChatTodoItem(title = it.title, done = it.done) },
-                apps = apps.map { ChatAppItem(label = it.label, package_name = it.packageName) }
+                apps = apps.map { ChatAppItem(label = it.label, package_name = it.packageName) },
+                mini_apps = miniApps.map { install ->
+                    val bundle = miniAppBundles.firstOrNull { it.id == install.id }
+                    ChatMiniAppItem(
+                        id = install.id,
+                        name = install.name,
+                        intents = bundle?.assistantIntents?.map { it.name }.orEmpty()
+                    )
+                }
             )
         )
     }
@@ -135,6 +151,26 @@ class AssistantRepository(
             throw IllegalStateException("Add an OpenRouter API key in Settings")
         }
         api.openRouterModels(OpenRouterModelsRequest(api_key = apiKey)).data
+    }
+
+    suspend fun buildMiniApp(prompt: String): MiniAppBundle = withContext(Dispatchers.IO) {
+        val settings = llmSettingsStore.state.first()
+        val apiKey = settings.currentApiKey
+        val model = settings.currentModel
+        if (apiKey.isBlank()) {
+            throw IllegalStateException("Add a ${settings.provider.label} API key in Settings")
+        }
+        if (model.isBlank()) {
+            throw IllegalStateException("Choose a ${settings.provider.label} model in Settings")
+        }
+        api.buildMiniApp(
+            MiniAppBuildRequest(
+                prompt = prompt,
+                provider = settings.provider.wireValue,
+                api_key = apiKey,
+                model = model
+            )
+        ).bundle
     }
 
     suspend fun setProvider(provider: LlmProvider) = llmSettingsStore.setProvider(provider)
