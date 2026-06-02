@@ -3783,48 +3783,60 @@ private fun AppInitial(app: AppInfo, modifier: Modifier = Modifier, onLaunchApp:
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)), RoundedCornerShape(8.dp)),
+                .glassCard(shape = RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(app.label.take(1).uppercase(), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.height(6.dp))
-        Text(app.label.uppercase(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+        Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 @Composable
 private fun AppRow(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onLaunchApp(app) },
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .clickable { onLaunchApp(app) }
+            .padding(14.dp)
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.onBackground),
                 contentAlignment = Alignment.Center
             ) {
                 Text(app.label.take(1).uppercase(), color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(12.dp))
-            Column {
-                Text(app.label, fontWeight = FontWeight.Bold)
+            Column(Modifier.weight(1f)) {
+                Text(app.label, fontWeight = FontWeight.SemiBold)
                 Text(app.packageName, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
             }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
+}
+
+@Composable
+private fun SettingsSectionLabel(label: String) {
+    Text(
+        text = label.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, top = 4.dp)
+    )
 }
 
 @Composable
