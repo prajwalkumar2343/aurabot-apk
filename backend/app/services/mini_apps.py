@@ -2,6 +2,7 @@ import json
 import re
 import uuid
 from fastapi import HTTPException
+from typing import Optional
 
 from app.models.chat import ChatIn
 from app.models.mini_apps import MiniAppBuildIn, MiniAppBundle
@@ -26,15 +27,23 @@ SUPPORTED_CAPABILITIES = {"local_storage", "assistant_actions", "notifications"}
 SUPPORTED_FIELDS = {"text", "number", "boolean", "date", "datetime"}
 
 
-def mini_app_builder_system_prompt() -> str:
+def mini_app_builder_system_prompt(repair_error: Optional[str] = None, previous_output: Optional[str] = None) -> str:
     components = ", ".join(sorted(SUPPORTED_COMPONENTS))
-    return (
+    prompt = (
         "Create one safe declarative Aura mini app bundle as JSON only. "
         "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
         f"Supported component types: {components}. "
         "Use camelCase fields exactly matching the schema: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities. "
         "Make the UI polished with dashboard blocks, quick actions, timeline/history, stats, and assistant intents when useful."
     )
+    if repair_error:
+        prompt += (
+            "\n\nRepair pass:\n"
+            f"- Previous bundle error: {repair_error}\n"
+            "- Return corrected JSON only.\n"
+            f"- Previous output excerpt: {(previous_output or '')[:800]}"
+        )
+    return prompt
 
 
 def parse_json_object(raw: str) -> dict:
@@ -123,7 +132,7 @@ def fallback_bundle(prompt: str) -> MiniAppBundle:
     )
 
 
-def call_builder_llm(data: MiniAppBuildIn) -> str:
+def call_builder_llm(data: MiniAppBuildIn, system_prompt: Optional[str] = None) -> str:
     chat = ChatIn(
         message=data.prompt,
         provider=data.provider,
@@ -131,7 +140,7 @@ def call_builder_llm(data: MiniAppBuildIn) -> str:
         model=data.model,
     )
     provider = data.provider.lower().strip()
-    system = mini_app_builder_system_prompt()
+    system = system_prompt or mini_app_builder_system_prompt()
     if provider == "gemini":
         return call_gemini(chat, system)
     if provider == "openai":

@@ -1,6 +1,9 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.models.chat import ChatIn
 from app.services.llm import (
     assistant_tool_definitions,
@@ -9,6 +12,10 @@ from app.services.llm import (
     extract_openai_text,
     parse_tool_response,
 )
+
+
+def client():
+    return TestClient(app, raise_server_exceptions=False)
 
 
 def test_parse_mini_app_assistant_actions():
@@ -161,3 +168,51 @@ def test_openrouter_tool_calls_are_converted_to_chat_actions(mock_post):
     assert reply == "{neutral} Saved it."
     assert actions[0].type == "create_mini_app_record"
     assert actions[0].values == {"habit": "Workout", "done": "True"}
+
+
+@patch("app.services.llm.requests.post")
+def test_assistant_chat_repairs_claimed_action_without_tool_call(mock_post):
+    first_response = MagicMock()
+    first_response.status_code = 200
+    first_response.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": "Done, blocked it."}]}}]
+    }
+    repaired_response = MagicMock()
+    repaired_response.status_code = 200
+    repaired_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"text": "{neutral} Blocking it now."},
+                        {
+                            "functionCall": {
+                                "name": "block_app",
+                                "args": {
+                                    "package_name": "com.example.focus",
+                                    "duration_minutes": 30,
+                                },
+                            }
+                        },
+                    ]
+                }
+            }
+        ]
+    }
+    mock_post.side_effect = [first_response, repaired_response]
+
+    response = client().post(
+        "/api/assistant/chat",
+        json={
+            "message": "block Focus",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "gemini-test",
+            "apps": [{"label": "Focus", "package_name": "com.example.focus"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_post.call_count == 2
+    assert response.json()["reply"] == "{neutral} Blocking it now."
+    assert response.json()["actions"][0]["type"] == "block_app"

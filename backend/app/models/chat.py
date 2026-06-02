@@ -39,6 +39,10 @@ class ChatIn(BaseModel):
     todos: List[ChatTodoIn] = Field(default_factory=list)
     apps: List[ChatAppIn] = Field(default_factory=list)
     mini_apps: List[ChatMiniAppIn] = Field(default_factory=list)
+    context_files: List[str] = Field(default_factory=list)
+    planning_mode: str = "auto"
+    model_route: str = "off"
+    max_repair_attempts: int = 1
 
 class ChatOut(BaseModel):
     reply: str

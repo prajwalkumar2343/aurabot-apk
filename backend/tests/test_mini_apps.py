@@ -62,6 +62,16 @@ def test_build_mini_app_rejects_malformed_json(client):
     assert response.status_code == 422
 
 
+def test_build_mini_app_repairs_invalid_first_bundle(client):
+    with patch("app.api.mini_apps.call_builder_llm", side_effect=["not json", json.dumps(valid_bundle())]) as mock_call:
+        response = client.post("/api/mini-apps/build", json=build_payload())
+
+    assert response.status_code == 200
+    assert mock_call.call_count == 2
+    assert "Repair pass" in mock_call.call_args.args[1]
+    assert response.json()["bundle"]["id"] == "generated.habits"
+
+
 def test_build_mini_app_rejects_unsupported_component(client):
     bundle = valid_bundle()
     bundle["screens"][0]["components"][0]["type"] = "webview"

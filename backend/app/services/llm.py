@@ -5,6 +5,13 @@ import requests
 from fastapi import HTTPException
 from typing import Any, Iterable, List, Optional, Tuple
 from app.models.chat import ChatIn, ChatActionOut
+from app.services.prompt_harness import (
+    PromptHarness,
+    build_prompt_harness,
+    format_activated_skills,
+    format_context_snippets,
+    format_skill_summaries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +27,8 @@ def _context_list(items: Iterable[str]) -> str:
     return "\n".join(items) or "- none"
 
 
-def build_system_message(data: ChatIn) -> str:
+def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) -> str:
+    harness = harness or build_prompt_harness(data)
     memories = _context_list(f"- {item.title}: {item.content}" for item in data.memories[:8])
     todos = _context_list(
         f"- [{'done' if item.done else 'open'}] {item.title}" for item in data.todos[:12]
@@ -42,13 +50,19 @@ def build_system_message(data: ChatIn) -> str:
         "Use mini app tools when the user asks to open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. "
+        f"Planning mode is {harness.planning_mode}. "
+        "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
+        f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
         '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
         f"Installed apps:\n{apps}\n\n"
-        f"Installed Aura mini apps:\n{mini_apps}"
+        f"Installed Aura mini apps:\n{mini_apps}\n\n"
+        f"Loaded file context:\n{format_context_snippets(harness.context_snippets)}\n\n"
+        f"Available skill summaries:\n{format_skill_summaries(harness.skill_summaries)}\n\n"
+        f"Activated skill details:\n{format_activated_skills(harness.activated_skills)}"
     )
 
 
