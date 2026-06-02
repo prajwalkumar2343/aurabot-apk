@@ -27,11 +27,11 @@ async def assistant_chat(data: ChatIn):
 
     try:
         if provider == "gemini":
-            raw_reply = await asyncio.to_thread(call_gemini, data, system_message)
+            raw_reply = await asyncio.to_thread(call_gemini, data, system_message, True)
         elif provider == "openai":
-            raw_reply = await asyncio.to_thread(call_openai, data, system_message)
+            raw_reply = await asyncio.to_thread(call_openai, data, system_message, True)
         elif provider == "openrouter":
-            raw_reply = await asyncio.to_thread(call_openrouter, data, system_message)
+            raw_reply = await asyncio.to_thread(call_openrouter, data, system_message, True)
         else:
             raise HTTPException(status_code=400, detail="Unsupported provider")
     except HTTPException:
