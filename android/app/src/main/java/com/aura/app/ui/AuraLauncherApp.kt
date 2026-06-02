@@ -38,11 +38,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -63,7 +65,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Store
@@ -72,6 +74,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
 import androidx.core.content.ContextCompat
+import android.content.Context
 import android.content.pm.PackageManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
@@ -154,6 +157,7 @@ import android.widget.ImageView
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.ui.text.style.TextAlign
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -204,7 +208,7 @@ fun AuraLauncherApp(
     var showHomePrompt by remember { mutableStateOf(false) }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
@@ -212,8 +216,7 @@ fun AuraLauncherApp(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
             viewModel.setWallpaper(uri.toString())
         }
@@ -388,13 +391,17 @@ fun AuraLauncherApp(
                         onStopVoice = viewModel::stopVoice,
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
-                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onOpenSettings = { navController.navigate(Route.Settings.name) },
                         onLaunchApp = { app ->
                             if (app.packageName == "com.aura.app.settings") {
                                 navController.navigate(Route.Settings.name)
                             } else {
-                                viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                                viewModel.launchIntent(app)?.let { intent ->
+                                    if (!startActivitySafely(context, intent)) {
+                                        viewModel.showError("Could not open ${app.label}")
+                                    }
+                                }
                             }
                         }
                     )
@@ -404,7 +411,11 @@ fun AuraLauncherApp(
                         state = state,
                         onQuery = viewModel::setAppQuery,
                         onLaunchApp = { app ->
-                            viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                            viewModel.launchIntent(app)?.let { intent ->
+                                if (!startActivitySafely(context, intent)) {
+                                    viewModel.showError("Could not open ${app.label}")
+                                }
+                            }
                         },
                         onOpenMiniApp = { miniApp ->
                             viewModel.openMiniApp(miniApp.id)
@@ -449,7 +460,7 @@ fun AuraLauncherApp(
                             showHomePrompt = true
                         },
                         onBackgroundListening = viewModel::setBackgroundListening,
-                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onClearWallpaper = { viewModel.setWallpaper(null) },
                         onSetInteractionMode = viewModel::setInteractionMode,
                         onConfigureModels = { navController.navigate(Route.Models.name) },
@@ -3131,7 +3142,7 @@ private fun SettingsScreen(
                         android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:${context.packageName}")
                     )
-                    context.startActivity(intent)
+                    startActivitySafely(context, intent)
                 }) {
                     Text("GO TO SETTINGS")
                 }
