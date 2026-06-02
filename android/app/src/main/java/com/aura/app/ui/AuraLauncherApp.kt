@@ -2116,7 +2116,7 @@ private fun OnboardingHeader(
                 )
         ) {
             Icon(
-                imageVector = Icons.Rounded.ArrowBack,
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = "Back",
                 tint = MaterialTheme.colorScheme.onBackground
             )
@@ -2470,7 +2470,7 @@ private fun OnboardingScreen(
                                         // Recommended Capsule Badge
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(RoundedCornerShape(16.dp))
                                                 .background(if (isDark) Color(0xFF1E3A1E) else Color(0xFFE8F5E9))
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
