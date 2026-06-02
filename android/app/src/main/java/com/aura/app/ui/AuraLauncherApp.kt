@@ -893,7 +893,7 @@ private fun AuraEyes(
                             brush = eyeBrush,
                             topLeft = Offset(originX + travelX, eyeY + travelY),
                             size = Size(eyeWidth, eyeHeight),
-                            cornerRadius = CornerRadius(16f, 16f)
+                            cornerRadius = CornerRadius(eyeWidth * 0.45f, eyeHeight * 0.45f)
                         )
                     }
                 }
@@ -907,6 +907,22 @@ private fun AuraEyes(
                             mode == AuraPresenceMode.Hearing -> 1f + (voiceLevel.coerceIn(0, 12) / 12f) * 0.45f
                             else -> 1f
                         }
+                        
+                        // Outer glow ring
+                        val glowBrush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = 0.12f * dotAlpha),
+                                secondaryColor.copy(alpha = 0.06f * dotAlpha),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = baseDotRadius * dotScale * 3.5f
+                        )
+                        drawCircle(
+                            brush = glowBrush,
+                            radius = baseDotRadius * dotScale * 3.5f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
                         
                         val dotBrush = Brush.radialGradient(
                             colors = listOf(
@@ -925,6 +941,45 @@ private fun AuraEyes(
                         )
                     }
                 } else {
+                    // Ambient glow halos behind each eye
+                    val glowAlpha = when (mode) {
+                        AuraPresenceMode.Thinking -> 0.18f * dotBreathe
+                        AuraPresenceMode.Hearing -> 0.22f
+                        AuraPresenceMode.Listening -> 0.14f
+                        AuraPresenceMode.Focused -> 0.12f
+                        AuraPresenceMode.Idle -> 0.06f
+                    }
+                    val glowRadius = eyeWidth * 1.6f
+                    
+                    // Left eye halo
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = glowAlpha),
+                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
+                                Color.Transparent
+                            ),
+                            center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
+                            radius = glowRadius
+                        ),
+                        radius = glowRadius,
+                        center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f)
+                    )
+                    // Right eye halo
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = glowAlpha),
+                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
+                                Color.Transparent
+                            ),
+                            center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
+                            radius = glowRadius
+                        ),
+                        radius = glowRadius,
+                        center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f)
+                    )
+                    
                     drawEye(leftEyeX, -1f)
                     drawEye(rightEyeX, 1f)
                 }
