@@ -439,6 +439,10 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         localState.update { it.copy(error = null) }
     }
 
+    fun showError(message: String) {
+        localState.update { it.copy(error = message) }
+    }
+
     fun setLlmProvider(provider: LlmProvider) {
         viewModelScope.launch {
             container.assistantRepository.setProvider(provider)

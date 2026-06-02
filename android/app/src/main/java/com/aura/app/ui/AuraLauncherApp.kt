@@ -38,11 +38,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -63,7 +65,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Store
@@ -72,6 +74,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
 import androidx.core.content.ContextCompat
+import android.content.Context
 import android.content.pm.PackageManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
@@ -154,6 +157,7 @@ import android.widget.ImageView
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.ui.text.style.TextAlign
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -204,7 +208,7 @@ fun AuraLauncherApp(
     var showHomePrompt by remember { mutableStateOf(false) }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
@@ -212,8 +216,7 @@ fun AuraLauncherApp(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
             viewModel.setWallpaper(uri.toString())
         }
@@ -300,42 +303,83 @@ fun AuraLauncherApp(
                 if (!state.isDefaultLauncher) {
                     val current = navController.currentBackStackEntryAsState().value?.destination?.route
                     val isDark = isSystemInDarkTheme()
-                    val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        tonalElevation = 0.dp,
-                        modifier = Modifier.drawBehind {
-                            drawLine(
-                                color = borderColor,
-                                start = Offset(0f, 0f),
-                                end = Offset(size.width, 0f),
-                                strokeWidth = 1.dp.toPx()
-                            )
-                        }
+                    val routes = listOf(Route.Home, Route.Settings)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 60.dp, vertical = 20.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        val routes = listOf(Route.Home, Route.Settings)
-                        routes.forEach { route ->
-                            NavigationBarItem(
-                                selected = current == route.name,
-                                onClick = {
-                                    navController.navigate(route.name) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(routeIcon(route), contentDescription = route.title) },
-                                label = { Text(route.title) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                    indicatorColor = Color.Transparent
+                        Row(
+                            modifier = Modifier
+                                .glassCard(shape = RoundedCornerShape(28.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            routes.forEach { route ->
+                                val selected = current == route.name
+                                val iconScale by animateFloatAsState(
+                                    targetValue = if (selected) 1.1f else 0.95f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    ),
+                                    label = "nav_icon_scale_${route.name}"
                                 )
-                            )
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .scale(iconScale)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (selected) {
+                                                if (isDark) Color.White.copy(alpha = 0.12f)
+                                                else Color.Black.copy(alpha = 0.08f)
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .clickable {
+                                            navController.navigate(route.name) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            routeIcon(route),
+                                            contentDescription = route.title,
+                                            modifier = Modifier.size(22.dp),
+                                            tint = if (selected) {
+                                                MaterialTheme.colorScheme.onBackground
+                                            } else {
+                                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f)
+                                            }
+                                        )
+                                        if (selected) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (isDark) Color(0xFF8B5CF6)
+                                                        else Color(0xFF6366F1)
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -388,13 +432,17 @@ fun AuraLauncherApp(
                         onStopVoice = viewModel::stopVoice,
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
-                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onOpenSettings = { navController.navigate(Route.Settings.name) },
                         onLaunchApp = { app ->
                             if (app.packageName == "com.aura.app.settings") {
                                 navController.navigate(Route.Settings.name)
                             } else {
-                                viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                                viewModel.launchIntent(app)?.let { intent ->
+                                    if (!startActivitySafely(context, intent)) {
+                                        viewModel.showError("Could not open ${app.label}")
+                                    }
+                                }
                             }
                         }
                     )
@@ -404,7 +452,11 @@ fun AuraLauncherApp(
                         state = state,
                         onQuery = viewModel::setAppQuery,
                         onLaunchApp = { app ->
-                            viewModel.launchIntent(app)?.let { context.startActivity(it) }
+                            viewModel.launchIntent(app)?.let { intent ->
+                                if (!startActivitySafely(context, intent)) {
+                                    viewModel.showError("Could not open ${app.label}")
+                                }
+                            }
                         },
                         onOpenMiniApp = { miniApp ->
                             viewModel.openMiniApp(miniApp.id)
@@ -449,7 +501,7 @@ fun AuraLauncherApp(
                             showHomePrompt = true
                         },
                         onBackgroundListening = viewModel::setBackgroundListening,
-                        onSelectWallpaper = { wallpaperLauncher.launch("image/*") },
+                        onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onClearWallpaper = { viewModel.setWallpaper(null) },
                         onSetInteractionMode = viewModel::setInteractionMode,
                         onConfigureModels = { navController.navigate(Route.Models.name) },
@@ -587,7 +639,7 @@ private fun HomeScreen(
                                     onSelectWallpaper()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.onBackground,
                                     contentColor = MaterialTheme.colorScheme.background
@@ -605,7 +657,7 @@ private fun HomeScreen(
                                 onOpenSettings()
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -841,7 +893,7 @@ private fun AuraEyes(
                             brush = eyeBrush,
                             topLeft = Offset(originX + travelX, eyeY + travelY),
                             size = Size(eyeWidth, eyeHeight),
-                            cornerRadius = CornerRadius(16f, 16f)
+                            cornerRadius = CornerRadius(eyeWidth * 0.45f, eyeHeight * 0.45f)
                         )
                     }
                 }
@@ -855,6 +907,22 @@ private fun AuraEyes(
                             mode == AuraPresenceMode.Hearing -> 1f + (voiceLevel.coerceIn(0, 12) / 12f) * 0.45f
                             else -> 1f
                         }
+                        
+                        // Outer glow ring
+                        val glowBrush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = 0.12f * dotAlpha),
+                                secondaryColor.copy(alpha = 0.06f * dotAlpha),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = baseDotRadius * dotScale * 3.5f
+                        )
+                        drawCircle(
+                            brush = glowBrush,
+                            radius = baseDotRadius * dotScale * 3.5f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
                         
                         val dotBrush = Brush.radialGradient(
                             colors = listOf(
@@ -873,6 +941,45 @@ private fun AuraEyes(
                         )
                     }
                 } else {
+                    // Ambient glow halos behind each eye
+                    val glowAlpha = when (mode) {
+                        AuraPresenceMode.Thinking -> 0.18f * dotBreathe
+                        AuraPresenceMode.Hearing -> 0.22f
+                        AuraPresenceMode.Listening -> 0.14f
+                        AuraPresenceMode.Focused -> 0.12f
+                        AuraPresenceMode.Idle -> 0.06f
+                    }
+                    val glowRadius = eyeWidth * 1.6f
+                    
+                    // Left eye halo
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = glowAlpha),
+                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
+                                Color.Transparent
+                            ),
+                            center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
+                            radius = glowRadius
+                        ),
+                        radius = glowRadius,
+                        center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f)
+                    )
+                    // Right eye halo
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = glowAlpha),
+                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
+                                Color.Transparent
+                            ),
+                            center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
+                            radius = glowRadius
+                        ),
+                        radius = glowRadius,
+                        center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f)
+                    )
+                    
                     drawEye(leftEyeX, -1f)
                     drawEye(rightEyeX, 1f)
                 }
@@ -1033,7 +1140,7 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
         Box(
             modifier = Modifier
                 .size(38.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.background.copy(alpha = 0.4f)),
             contentAlignment = Alignment.Center
         ) {
@@ -1319,7 +1426,7 @@ private fun AuraStoreSection(
                 FilledTonalButton(
                     onClick = { onInstall(bundle) },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -1336,7 +1443,7 @@ private fun AuraStoreSection(
                 leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
                 placeholder = { Text("CREATE WITH AURA...") },
                 singleLine = true,
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(16.dp)
             )
             IconButton(
                 onClick = onCreate,
@@ -1395,16 +1502,22 @@ private fun MiniAppRuntimeScreen(
 ) {
     if (bundle == null) {
         ScreenShell(wallpaperUri = null) {
-            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back") }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
         }
         return
     }
-    val screen = bundle.screens.first()
+    val screen = bundle.screens.firstOrNull()
+    if (screen == null) {
+        ScreenShell(wallpaperUri = null) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+        }
+        return
+    }
     val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
     ScreenShell(wallpaperUri = null) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
-                Icon(Icons.Rounded.ArrowBack, "Back")
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
             }
             Box(
                 modifier = Modifier
@@ -1422,7 +1535,10 @@ private fun MiniAppRuntimeScreen(
         }
         Spacer(Modifier.height(18.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(screen.components, key = { it.type + it.title }) { component ->
+            itemsIndexed(
+                screen.components,
+                key = { index, component -> "$index:${component.type}:${component.title}" }
+            ) { _, component ->
                 MiniAppComponentView(bundle, component, records, primary, onRunAction, onDeleteRecord)
             }
         }
@@ -1442,10 +1558,13 @@ private fun MiniAppComponentView(
         "quick_action_grid" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
             LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(92.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), userScrollEnabled = false) {
-                items(component.items, key = { it.label }) { item ->
+                itemsIndexed(
+                    component.items,
+                    key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
+                ) { _, item ->
                     FilledTonalButton(
                         onClick = { item.actionId?.let { onRunAction(bundle.id, it) } },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.height(72.dp)
                     ) {
                         Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1538,33 +1657,144 @@ private fun AssistantScreen(
     onAssistantInput: (String) -> Unit,
     onSend: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("ASSISTANT", "Local assistant interface active.")
+        Header("ASSISTANT", "Your local AI conversation.")
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(vertical = 8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            reverseLayout = false
         ) {
-            items(state.messages) { message ->
+            itemsIndexed(
+                state.messages,
+                key = { index, message -> "$index:${message.role}:${message.text.hashCode()}" }
+            ) { _, message ->
                 val isUser = message.role == MessageRole.User
-                Card(
-                    shape = RoundedCornerShape(8.dp),
-                    border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isUser) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
-                        contentColor = if (isUser) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.fillMaxWidth(if (isUser) 0.86f else 1f)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
                 ) {
-                    Text(
-                        text = message.text,
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(if (isUser) 0.82f else 0.88f)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 20.dp,
+                                    topEnd = 20.dp,
+                                    bottomStart = if (isUser) 20.dp else 6.dp,
+                                    bottomEnd = if (isUser) 6.dp else 20.dp
+                                )
+                            )
+                            .background(
+                                if (isUser) {
+                                    Brush.linearGradient(
+                                        colors = if (isDark) listOf(Color(0xFF7C3AED), Color(0xFF6366F1))
+                                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                                    )
+                                } else {
+                                    Brush.linearGradient(
+                                        colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF18181B))
+                                        else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
+                                    )
+                                }
+                            )
+                            .then(
+                                if (!isUser) {
+                                    Modifier.border(
+                                        0.6.dp,
+                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        RoundedCornerShape(
+                                            topStart = 20.dp,
+                                            topEnd = 20.dp,
+                                            bottomStart = 6.dp,
+                                            bottomEnd = 20.dp
+                                        )
+                                    )
+                                } else Modifier
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isUser) Color.White
+                            else MaterialTheme.colorScheme.onSurface,
+                            lineHeight = 22.sp
+                        )
+                    }
+                }
+            }
+            // Typing indicator
+            if (state.loading) {
+                item {
+                    TypingIndicator(isDark = isDark)
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
+    }
+}
+
+@Composable
+private fun TypingIndicator(isDark: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing")
+    val dot1 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 1f at 200; 0f at 400; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot1"
+    )
+    val dot2 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 0f at 200; 1f at 400; 0f at 600; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot2"
+    )
+    val dot3 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 0f at 400; 1f at 600; 0f at 800; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot3"
+    )
+    Row(
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
+            .background(if (isDark) Color(0xFF1E1E22) else Color(0xFFFFFFFF))
+            .border(
+                0.6.dp,
+                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
+            )
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        listOf(dot1, dot2, dot3).forEach { dotAnim ->
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .scale(0.6f + dotAnim * 0.4f)
+                    .clip(CircleShape)
+                    .background(
+                        if (isDark) Color(0xFF8B5CF6).copy(alpha = 0.4f + dotAnim * 0.6f)
+                        else Color(0xFF6366F1).copy(alpha = 0.3f + dotAnim * 0.7f)
+                    )
+            )
+        }
     }
 }
 
@@ -1592,7 +1822,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         Button(
@@ -1600,7 +1830,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
                 onAddTodo(title)
                 title = ""
             },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.onBackground,
                 contentColor = MaterialTheme.colorScheme.background
@@ -1613,7 +1843,10 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
         val isDark = isSystemInDarkTheme()
         val separatorColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
         LazyColumn {
-            items(state.todos, key = { it.id }) { todo ->
+            itemsIndexed(
+                state.todos,
+                key = { index, todo -> "$index:${todo.id}" }
+            ) { _, todo ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1672,7 +1905,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
@@ -1687,7 +1920,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         Button(
@@ -1696,7 +1929,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 title = ""
                 content = ""
             },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.onBackground,
                 contentColor = MaterialTheme.colorScheme.background
@@ -1709,7 +1942,10 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
         val isDark = isSystemInDarkTheme()
         val separatorColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
         LazyColumn {
-            items(state.memories, key = { it.id }) { memory ->
+            itemsIndexed(
+                state.memories,
+                key = { index, memory -> "$index:${memory.id}" }
+            ) { _, memory ->
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1886,7 +2122,7 @@ private fun OnboardingHeader(
                 )
         ) {
             Icon(
-                imageVector = Icons.Rounded.ArrowBack,
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = "Back",
                 tint = MaterialTheme.colorScheme.onBackground
             )
@@ -2240,7 +2476,7 @@ private fun OnboardingScreen(
                                         // Recommended Capsule Badge
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(RoundedCornerShape(16.dp))
                                                 .background(if (isDark) Color(0xFF1E3A1E) else Color(0xFFE8F5E9))
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
@@ -2692,7 +2928,7 @@ private fun ModelsScreen(
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2712,7 +2948,7 @@ private fun ModelsScreen(
                             FilledTonalButton(
                                 onClick = { onProviderSelected(provider) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                                 colors = ButtonDefaults.filledTonalButtonColors(
                                     containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
@@ -2727,7 +2963,7 @@ private fun ModelsScreen(
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2750,7 +2986,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.googleModel,
@@ -2766,13 +3002,13 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2795,7 +3031,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.openAiModel,
@@ -2811,13 +3047,13 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2840,7 +3076,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.openRouterModel,
@@ -2856,12 +3092,12 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     Button(
                         onClick = onLoadOpenRouterModels,
                         enabled = !state.loadingModels,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.onBackground,
                             contentColor = MaterialTheme.colorScheme.background
@@ -2915,54 +3151,81 @@ private fun SettingsScreen(
         Header("SETTINGS", "System, model, and voice configuration.")
         Column(
             modifier = Modifier.verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                )
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("LOCAL-FIRST MODE", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Tasks, memories, and assistant context stay on this device right now.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+            // Status card
+            val isDark = isSystemInDarkTheme()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF161618))
+                            else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
+                        )
                     )
+                    .border(
+                        0.6.dp,
+                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .padding(18.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF22C55E))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("LOCAL-FIRST MODE", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "Data stays on this device.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("AI & Data")
+
             SettingsRow(
                 title = "Models",
-                subtitle = "Configure active LLM provider, API keys, and model parameters.",
+                subtitle = "LLM provider, API keys, and model parameters.",
                 icon = Icons.Rounded.Key,
                 onClick = onConfigureModels
             )
             SettingsRow(
                 title = "Tasks",
-                subtitle = "Manage list of todo items.",
+                subtitle = "Manage your todo items.",
                 icon = Icons.Rounded.CheckCircle,
                 onClick = onConfigureTasks
             )
             SettingsRow(
                 title = "Memories",
-                subtitle = "Manage stored assistant memory items.",
+                subtitle = "Stored assistant memory items.",
                 icon = Icons.Rounded.Layers,
                 onClick = onConfigureMemories
             )
 
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("System")
+
             val currentModeLabel = when (state.session.appMode) {
                 "launcher" -> "Home Launcher"
                 "normal" -> "Normal App"
-                "overlay" -> "Always-On Background Assistant"
+                "overlay" -> "Always-On Assistant"
                 else -> "Home Launcher"
             }
             SettingsRow(
                 title = "App Mode",
-                subtitle = "Active: $currentModeLabel. Tap to change.",
+                subtitle = currentModeLabel,
                 icon = Icons.Rounded.Apps,
                 onClick = { showAppModeDialog = true }
             )
@@ -2970,21 +3233,21 @@ private fun SettingsScreen(
             if (state.session.appMode == "launcher") {
                 SettingsRow(
                     title = "Default launcher",
-                    subtitle = "Open Android Home app settings.",
+                    subtitle = "Open Android Home settings.",
                     icon = Icons.Rounded.Home,
                     onClick = onOpenHomeSettings
                 )
             }
 
             SettingsRow(
-                title = "App permissions",
-                subtitle = "Microphone, notification, and location access.",
+                title = "Permissions",
+                subtitle = "Microphone, notification, and location.",
                 icon = Icons.Rounded.Mic,
                 onClick = onRequestVoicePermissions
             )
             SettingsRow(
-                title = "Interaction visualizer",
-                subtitle = "Active: ${state.session.interactionMode.uppercase()}",
+                title = "Interaction mode",
+                subtitle = state.session.interactionMode.replaceFirstChar { it.uppercase() },
                 icon = Icons.Rounded.RemoveRedEye,
                 onClick = {
                     val nextMode = if (state.session.interactionMode == "dot") "eyes" else "dot"
@@ -2992,39 +3255,61 @@ private fun SettingsScreen(
                 }
             )
 
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("Appearance")
+
             if (state.session.appMode == "launcher") {
                 SettingsRow(
-                    title = "Set custom wallpaper",
-                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
+                    title = "Wallpaper",
+                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active" else "None set",
                     icon = Icons.Rounded.Image,
                     onClick = onSelectWallpaper
                 )
                 if (state.session.wallpaperUri != null) {
                     SettingsRow(
-                        title = "Clear custom wallpaper",
-                        subtitle = "Reset to solid black/white background.",
+                        title = "Clear wallpaper",
+                        subtitle = "Reset to default background.",
                         icon = Icons.Rounded.Delete,
                         onClick = onClearWallpaper
                     )
                 }
             }
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                )
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("Voice")
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glassCard(shape = RoundedCornerShape(16.dp))
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
             ) {
                 Row(
-                    Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = if (isDark) listOf(Color(0xFF22C55E).copy(alpha = 0.15f), Color(0xFF16A34A).copy(alpha = 0.08f))
+                                    else listOf(Color(0xFF22C55E).copy(alpha = 0.12f), Color(0xFF16A34A).copy(alpha = 0.05f))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Mic,
+                            contentDescription = null,
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Background listening", fontWeight = FontWeight.Bold)
-                        Text("Opt-in foreground service.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        Text("Background listening", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Always-on voice service", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(
                         checked = state.session.backgroundListeningEnabled,
@@ -3032,12 +3317,17 @@ private fun SettingsScreen(
                     )
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+
             SettingsRow(
-                title = "Quit system",
-                subtitle = "Exit the launcher activity and move system task to back.",
+                title = "Quit Aura",
+                subtitle = "Exit and move to background.",
                 icon = Icons.Rounded.PowerSettingsNew,
                 onClick = onQuitApp
             )
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -3057,7 +3347,7 @@ private fun SettingsScreen(
                             onSetAppMode("launcher")
                             showAppModeDialog = false
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "launcher") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
@@ -3073,7 +3363,7 @@ private fun SettingsScreen(
                             onSetAppMode("normal")
                             showAppModeDialog = false
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "normal") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
@@ -3094,7 +3384,7 @@ private fun SettingsScreen(
                                 showPermissionExplanation = true
                             }
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "overlay") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
@@ -3131,7 +3421,7 @@ private fun SettingsScreen(
                         android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:${context.packageName}")
                     )
-                    context.startActivity(intent)
+                    startActivitySafely(context, intent)
                 }) {
                     Text("GO TO SETTINGS")
                 }
@@ -3169,49 +3459,82 @@ private fun rememberWallpaperPainter(uriString: String?): ImageBitmap? {
     return remember(uriString) {
         try {
             val uri = Uri.parse(uriString)
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = calculateBitmapSampleSize(options.outWidth, options.outHeight)
+            }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOptions)?.asImageBitmap()
+            }
+        } catch (_: Throwable) {
             null
         }
     }
 }
 
+private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimension: Int = 2048): Int {
+    if (width <= 0 || height <= 0) return 1
+    var sampleSize = 1
+    var sampledWidth = width
+    var sampledHeight = height
+    while (sampledWidth / 2 >= maxDimension || sampledHeight / 2 >= maxDimension) {
+        sampleSize *= 2
+        sampledWidth /= 2
+        sampledHeight /= 2
+    }
+    return sampleSize
+}
+
 fun Modifier.glassCard(
-    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(24.dp),
-    borderWidth: androidx.compose.ui.unit.Dp = 1.2.dp
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(20.dp),
+    borderWidth: androidx.compose.ui.unit.Dp = 0.8.dp
 ): Modifier = this.composed {
     val isDark = isSystemInDarkTheme()
     val bgBrush = if (isDark) {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color(0xFF1C1C1E), // Frosted Carbon Grey
-                Color(0xFF141416)  // Pitch Carbon Grey
-            )
+                Color(0xFF1E1E22),
+                Color(0xFF161618),
+                Color(0xFF131315)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     } else {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color(0xFFFFFFFF), // Crisp Clean White
-                Color(0xFFFAFAFC)
-            )
+                Color(0xFFFFFFFF),
+                Color(0xFFFCFCFD),
+                Color(0xFFF9F9FB)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     }
     val borderBrush = if (isDark) {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.02f)
-            )
+                Color.White.copy(alpha = 0.12f),
+                Color.White.copy(alpha = 0.04f),
+                Color.White.copy(alpha = 0.08f)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     } else {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color.Black.copy(alpha = 0.08f),
-                Color.Black.copy(alpha = 0.02f)
-            )
+                Color.Black.copy(alpha = 0.06f),
+                Color.Black.copy(alpha = 0.02f),
+                Color.Black.copy(alpha = 0.04f)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     }
     
@@ -3223,11 +3546,40 @@ fun Modifier.glassCard(
 
 @Composable
 private fun ScreenShell(
-    wallpaperUri: String? = null,
     modifier: Modifier = Modifier,
+    wallpaperUri: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
+    val isDark = isSystemInDarkTheme()
+    val infiniteTransition = rememberInfiniteTransition(label = "bg_mesh")
+    val drift1 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(18_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift1"
+    )
+    val drift2 by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(24_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift2"
+    )
+    val drift3 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(14_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift3"
+    )
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -3240,84 +3592,101 @@ private fun ScreenShell(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
-            val isDark = isSystemInDarkTheme()
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
         } else {
-            val isDark = isSystemInDarkTheme()
-            // Gorgeous premium space ambient mesh gradient
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val height = size.height
                 
-                // Deep background gradient aligned with new matte carbon / light themes
                 val bgBrush = Brush.verticalGradient(
                     colors = if (isDark) {
-                        listOf(Color(0xFF0F0F10), Color(0xFF151517), Color(0xFF0A0A0B))
+                        listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
                     } else {
-                        listOf(Color(0xFFF2F2F7), Color(0xFFE5E5EA), Color(0xFFD1D1D6))
+                        listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
                     }
                 )
                 drawRect(brush = bgBrush)
                 
-                // Slowly-drifting neon radial glow circles
                 if (isDark) {
-                    // Cosmic Violet blob at top-right
+                    // Large violet aurora — drifts slowly
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x388B5CF6), Color.Transparent),
-                            center = Offset(width * 0.8f, height * 0.2f),
-                            radius = width * 0.7f
+                            colors = listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent),
+                            center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
+                            radius = width * 0.8f
                         ),
-                        radius = width * 0.7f,
-                        center = Offset(width * 0.8f, height * 0.2f)
+                        radius = width * 0.8f,
+                        center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
                     )
                     
-                    // Electric Cyan blob at bottom-left
+                    // Electric cyan aurora — counter-drifts
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2B00F0FF), Color.Transparent),
-                            center = Offset(width * 0.15f, height * 0.8f),
-                            radius = width * 0.65f
+                            colors = listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent),
+                            center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
+                            radius = width * 0.75f
                         ),
-                        radius = width * 0.65f,
-                        center = Offset(width * 0.15f, height * 0.8f)
+                        radius = width * 0.75f,
+                        center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
                     )
                     
-                    // Neon Pink subtle blob at center-right
+                    // Warm rose accent — subtle center drift
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1FEC4899), Color.Transparent),
-                            center = Offset(width * 0.9f, height * 0.65f),
-                            radius = width * 0.45f
+                            colors = listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent),
+                            center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
+                            radius = width * 0.5f
                         ),
-                        radius = width * 0.45f,
-                        center = Offset(width * 0.9f, height * 0.65f)
-                    )
-                } else {
-                    // Soft Indigo blob top-right
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1A6366F1), Color.Transparent),
-                            center = Offset(width * 0.75f, height * 0.18f),
-                            radius = width * 0.6f
-                        ),
-                        radius = width * 0.6f,
-                        center = Offset(width * 0.75f, height * 0.18f)
+                        radius = width * 0.5f,
+                        center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
                     )
                     
-                    // Soft Teal blob bottom-left
+                    // Deep indigo whisper at bottom
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1F06B6D4), Color.Transparent),
-                            center = Offset(width * 0.2f, height * 0.78f),
+                            colors = listOf(Color(0x286366F1), Color.Transparent),
+                            center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
                             radius = width * 0.55f
                         ),
                         radius = width * 0.55f,
-                        center = Offset(width * 0.2f, height * 0.78f)
+                        center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
+                    )
+                } else {
+                    // Soft violet-indigo bloom
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent),
+                            center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
+                            radius = width * 0.7f
+                        ),
+                        radius = width * 0.7f,
+                        center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
+                    )
+                    
+                    // Soft teal bloom
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent),
+                            center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
+                            radius = width * 0.6f
+                        ),
+                        radius = width * 0.6f,
+                        center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
+                    )
+                    
+                    // Warm peach accent
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent),
+                            center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
+                            radius = width * 0.45f
+                        ),
+                        radius = width * 0.45f,
+                        center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
                     )
                 }
             }
@@ -3327,7 +3696,7 @@ private fun ScreenShell(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(20.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             content = content
         )
     }
@@ -3335,46 +3704,107 @@ private fun ScreenShell(
 
 @Composable
 private fun Header(title: String, subtitle: String) {
-    Text(title.uppercase(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-    Text(subtitle.uppercase(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.height(16.dp))
+    Column(modifier = Modifier.padding(bottom = 20.dp)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = (-0.5).sp
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            lineHeight = 20.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        val isDark = isSystemInDarkTheme()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.12f)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF06B6D4))
+                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                    )
+                )
+        )
+    }
 }
+
+private fun startActivitySafely(context: Context, intent: Intent): Boolean =
+    runCatching {
+        context.startActivity(intent)
+    }.isSuccess
 
 @Composable
 private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, onSend: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val isDark = isSystemInDarkTheme()
+    val hasText = value.isNotBlank()
+    val sendScale by animateFloatAsState(
+        targetValue = if (hasText) 1f else 0.85f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "send_scale"
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard(shape = RoundedCornerShape(28.dp))
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            placeholder = {
+                Text(
+                    "Ask Aura anything...",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                cursorColor = if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)
+            ),
+            shape = RoundedCornerShape(24.dp)
+        )
+        Spacer(Modifier.width(6.dp))
         Box(
             modifier = Modifier
-                .weight(1f)
-                .glassCard(shape = RoundedCornerShape(16.dp))
-        ) {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("ASK AURA...") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    cursorColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        IconButton(
-            onClick = onSend,
-            modifier = Modifier
-                .size(56.dp)
-                .glassCard(shape = RoundedCornerShape(16.dp))
+                .size(48.dp)
+                .scale(sendScale)
+                .clip(CircleShape)
+                .background(
+                    if (hasText) {
+                        Brush.linearGradient(
+                            colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                            else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+                            )
+                        )
+                    }
+                )
+                .clickable(onClick = onSend),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.Search,
                 contentDescription = "Send",
-                tint = MaterialTheme.colorScheme.primary
+                tint = if (hasText) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
@@ -3382,18 +3812,15 @@ private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, on
 
 @Composable
 private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+    Box(
+        modifier = modifier
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .padding(16.dp)
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column {
             Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text(label.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(label.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp)
         }
     }
 }
@@ -3407,48 +3834,60 @@ private fun AppInitial(app: AppInfo, modifier: Modifier = Modifier, onLaunchApp:
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)), RoundedCornerShape(8.dp)),
+                .glassCard(shape = RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(app.label.take(1).uppercase(), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.height(6.dp))
-        Text(app.label.uppercase(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+        Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 @Composable
 private fun AppRow(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onLaunchApp(app) },
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .clickable { onLaunchApp(app) }
+            .padding(14.dp)
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.onBackground),
                 contentAlignment = Alignment.Center
             ) {
                 Text(app.label.take(1).uppercase(), color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(12.dp))
-            Column {
-                Text(app.label, fontWeight = FontWeight.Bold)
+            Column(Modifier.weight(1f)) {
+                Text(app.label, fontWeight = FontWeight.SemiBold)
                 Text(app.packageName, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
             }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
+}
+
+@Composable
+private fun SettingsSectionLabel(label: String) {
+    Text(
+        text = label.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        letterSpacing = 1.2.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, top = 4.dp)
+    )
 }
 
 @Composable
@@ -3458,12 +3897,21 @@ private fun SettingsRow(
     icon: ImageVector? = null,
     onClick: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "settings_row_press"
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(pressScale)
             .glassCard(shape = RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(16.dp)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically
@@ -3472,22 +3920,41 @@ private fun SettingsRow(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .glassCard(shape = RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)),
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = if (isDark) listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
+                                ) else listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.03f)
+                                )
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(14.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold)
+                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(2.dp))
                 Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
