@@ -3280,84 +3280,101 @@ private fun ScreenShell(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
-            val isDark = isSystemInDarkTheme()
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
         } else {
-            val isDark = isSystemInDarkTheme()
-            // Gorgeous premium space ambient mesh gradient
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val height = size.height
                 
-                // Deep background gradient aligned with new matte carbon / light themes
                 val bgBrush = Brush.verticalGradient(
                     colors = if (isDark) {
-                        listOf(Color(0xFF0F0F10), Color(0xFF151517), Color(0xFF0A0A0B))
+                        listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
                     } else {
-                        listOf(Color(0xFFF2F2F7), Color(0xFFE5E5EA), Color(0xFFD1D1D6))
+                        listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
                     }
                 )
                 drawRect(brush = bgBrush)
                 
-                // Slowly-drifting neon radial glow circles
                 if (isDark) {
-                    // Cosmic Violet blob at top-right
+                    // Large violet aurora — drifts slowly
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x388B5CF6), Color.Transparent),
-                            center = Offset(width * 0.8f, height * 0.2f),
-                            radius = width * 0.7f
+                            colors = listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent),
+                            center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
+                            radius = width * 0.8f
                         ),
-                        radius = width * 0.7f,
-                        center = Offset(width * 0.8f, height * 0.2f)
+                        radius = width * 0.8f,
+                        center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
                     )
                     
-                    // Electric Cyan blob at bottom-left
+                    // Electric cyan aurora — counter-drifts
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2B00F0FF), Color.Transparent),
-                            center = Offset(width * 0.15f, height * 0.8f),
-                            radius = width * 0.65f
+                            colors = listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent),
+                            center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
+                            radius = width * 0.75f
                         ),
-                        radius = width * 0.65f,
-                        center = Offset(width * 0.15f, height * 0.8f)
+                        radius = width * 0.75f,
+                        center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
                     )
                     
-                    // Neon Pink subtle blob at center-right
+                    // Warm rose accent — subtle center drift
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1FEC4899), Color.Transparent),
-                            center = Offset(width * 0.9f, height * 0.65f),
-                            radius = width * 0.45f
+                            colors = listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent),
+                            center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
+                            radius = width * 0.5f
                         ),
-                        radius = width * 0.45f,
-                        center = Offset(width * 0.9f, height * 0.65f)
-                    )
-                } else {
-                    // Soft Indigo blob top-right
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1A6366F1), Color.Transparent),
-                            center = Offset(width * 0.75f, height * 0.18f),
-                            radius = width * 0.6f
-                        ),
-                        radius = width * 0.6f,
-                        center = Offset(width * 0.75f, height * 0.18f)
+                        radius = width * 0.5f,
+                        center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
                     )
                     
-                    // Soft Teal blob bottom-left
+                    // Deep indigo whisper at bottom
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1F06B6D4), Color.Transparent),
-                            center = Offset(width * 0.2f, height * 0.78f),
+                            colors = listOf(Color(0x286366F1), Color.Transparent),
+                            center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
                             radius = width * 0.55f
                         ),
                         radius = width * 0.55f,
-                        center = Offset(width * 0.2f, height * 0.78f)
+                        center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
+                    )
+                } else {
+                    // Soft violet-indigo bloom
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent),
+                            center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
+                            radius = width * 0.7f
+                        ),
+                        radius = width * 0.7f,
+                        center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
+                    )
+                    
+                    // Soft teal bloom
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent),
+                            center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
+                            radius = width * 0.6f
+                        ),
+                        radius = width * 0.6f,
+                        center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
+                    )
+                    
+                    // Warm peach accent
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent),
+                            center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
+                            radius = width * 0.45f
+                        ),
+                        radius = width * 0.45f,
+                        center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
                     )
                 }
             }
@@ -3367,7 +3384,7 @@ private fun ScreenShell(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(20.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             content = content
         )
     }
