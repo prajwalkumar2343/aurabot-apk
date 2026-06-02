@@ -1590,33 +1590,144 @@ private fun AssistantScreen(
     onAssistantInput: (String) -> Unit,
     onSend: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("ASSISTANT", "Local assistant interface active.")
+        Header("ASSISTANT", "Your local AI conversation.")
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(vertical = 8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            reverseLayout = false
         ) {
-            items(state.messages) { message ->
+            itemsIndexed(
+                state.messages,
+                key = { index, message -> "$index:${message.role}:${message.text.hashCode()}" }
+            ) { _, message ->
                 val isUser = message.role == MessageRole.User
-                Card(
-                    shape = RoundedCornerShape(8.dp),
-                    border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isUser) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
-                        contentColor = if (isUser) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.fillMaxWidth(if (isUser) 0.86f else 1f)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
                 ) {
-                    Text(
-                        text = message.text,
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(if (isUser) 0.82f else 0.88f)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 20.dp,
+                                    topEnd = 20.dp,
+                                    bottomStart = if (isUser) 20.dp else 6.dp,
+                                    bottomEnd = if (isUser) 6.dp else 20.dp
+                                )
+                            )
+                            .background(
+                                if (isUser) {
+                                    Brush.linearGradient(
+                                        colors = if (isDark) listOf(Color(0xFF7C3AED), Color(0xFF6366F1))
+                                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                                    )
+                                } else {
+                                    Brush.linearGradient(
+                                        colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF18181B))
+                                        else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
+                                    )
+                                }
+                            )
+                            .then(
+                                if (!isUser) {
+                                    Modifier.border(
+                                        0.6.dp,
+                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        RoundedCornerShape(
+                                            topStart = 20.dp,
+                                            topEnd = 20.dp,
+                                            bottomStart = 6.dp,
+                                            bottomEnd = 20.dp
+                                        )
+                                    )
+                                } else Modifier
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isUser) Color.White
+                            else MaterialTheme.colorScheme.onSurface,
+                            lineHeight = 22.sp
+                        )
+                    }
+                }
+            }
+            // Typing indicator
+            if (state.loading) {
+                item {
+                    TypingIndicator(isDark = isDark)
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
         AssistantComposer(state.assistantInput, onAssistantInput, onSend)
+    }
+}
+
+@Composable
+private fun TypingIndicator(isDark: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing")
+    val dot1 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 1f at 200; 0f at 400; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot1"
+    )
+    val dot2 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 0f at 200; 1f at 400; 0f at 600; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot2"
+    )
+    val dot3 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at 0; 0f at 400; 1f at 600; 0f at 800; 0f at 1200
+            }, repeatMode = RepeatMode.Restart
+        ), label = "dot3"
+    )
+    Row(
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
+            .background(if (isDark) Color(0xFF1E1E22) else Color(0xFFFFFFFF))
+            .border(
+                0.6.dp,
+                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
+            )
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        listOf(dot1, dot2, dot3).forEach { dotAnim ->
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .scale(0.6f + dotAnim * 0.4f)
+                    .clip(CircleShape)
+                    .background(
+                        if (isDark) Color(0xFF8B5CF6).copy(alpha = 0.4f + dotAnim * 0.6f)
+                        else Color(0xFF6366F1).copy(alpha = 0.3f + dotAnim * 0.7f)
+                    )
+            )
+        }
     }
 }
 
