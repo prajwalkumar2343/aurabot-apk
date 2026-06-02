@@ -303,42 +303,83 @@ fun AuraLauncherApp(
                 if (!state.isDefaultLauncher) {
                     val current = navController.currentBackStackEntryAsState().value?.destination?.route
                     val isDark = isSystemInDarkTheme()
-                    val borderColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        tonalElevation = 0.dp,
-                        modifier = Modifier.drawBehind {
-                            drawLine(
-                                color = borderColor,
-                                start = Offset(0f, 0f),
-                                end = Offset(size.width, 0f),
-                                strokeWidth = 1.dp.toPx()
-                            )
-                        }
+                    val routes = listOf(Route.Home, Route.Settings)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 60.dp, vertical = 20.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        val routes = listOf(Route.Home, Route.Settings)
-                        routes.forEach { route ->
-                            NavigationBarItem(
-                                selected = current == route.name,
-                                onClick = {
-                                    navController.navigate(route.name) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(routeIcon(route), contentDescription = route.title) },
-                                label = { Text(route.title) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                                    indicatorColor = Color.Transparent
+                        Row(
+                            modifier = Modifier
+                                .glassCard(shape = RoundedCornerShape(28.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            routes.forEach { route ->
+                                val selected = current == route.name
+                                val iconScale by animateFloatAsState(
+                                    targetValue = if (selected) 1.1f else 0.95f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    ),
+                                    label = "nav_icon_scale_${route.name}"
                                 )
-                            )
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .scale(iconScale)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (selected) {
+                                                if (isDark) Color.White.copy(alpha = 0.12f)
+                                                else Color.Black.copy(alpha = 0.08f)
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .clickable {
+                                            navController.navigate(route.name) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            routeIcon(route),
+                                            contentDescription = route.title,
+                                            modifier = Modifier.size(22.dp),
+                                            tint = if (selected) {
+                                                MaterialTheme.colorScheme.onBackground
+                                            } else {
+                                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f)
+                                            }
+                                        )
+                                        if (selected) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (isDark) Color(0xFF8B5CF6)
+                                                        else Color(0xFF6366F1)
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
