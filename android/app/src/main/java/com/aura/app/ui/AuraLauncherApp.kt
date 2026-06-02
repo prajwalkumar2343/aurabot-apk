@@ -1502,16 +1502,22 @@ private fun MiniAppRuntimeScreen(
 ) {
     if (bundle == null) {
         ScreenShell(wallpaperUri = null) {
-            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back") }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
         }
         return
     }
-    val screen = bundle.screens.first()
+    val screen = bundle.screens.firstOrNull()
+    if (screen == null) {
+        ScreenShell(wallpaperUri = null) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+        }
+        return
+    }
     val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
     ScreenShell(wallpaperUri = null) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
-                Icon(Icons.Rounded.ArrowBack, "Back")
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
             }
             Box(
                 modifier = Modifier
@@ -1529,7 +1535,10 @@ private fun MiniAppRuntimeScreen(
         }
         Spacer(Modifier.height(18.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(screen.components, key = { it.type + it.title }) { component ->
+            itemsIndexed(
+                screen.components,
+                key = { index, component -> "$index:${component.type}:${component.title}" }
+            ) { _, component ->
                 MiniAppComponentView(bundle, component, records, primary, onRunAction, onDeleteRecord)
             }
         }
@@ -1549,10 +1558,13 @@ private fun MiniAppComponentView(
         "quick_action_grid" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
             LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(92.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), userScrollEnabled = false) {
-                items(component.items, key = { it.label }) { item ->
+                itemsIndexed(
+                    component.items,
+                    key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
+                ) { _, item ->
                     FilledTonalButton(
                         onClick = { item.actionId?.let { onRunAction(bundle.id, it) } },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.height(72.dp)
                     ) {
                         Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
