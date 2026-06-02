@@ -3234,11 +3234,40 @@ fun Modifier.glassCard(
 
 @Composable
 private fun ScreenShell(
-    wallpaperUri: String? = null,
     modifier: Modifier = Modifier,
+    wallpaperUri: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
+    val isDark = isSystemInDarkTheme()
+    val infiniteTransition = rememberInfiniteTransition(label = "bg_mesh")
+    val drift1 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(18_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift1"
+    )
+    val drift2 by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(24_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift2"
+    )
+    val drift3 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(14_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drift3"
+    )
     Box(
         modifier = modifier
             .fillMaxSize()
