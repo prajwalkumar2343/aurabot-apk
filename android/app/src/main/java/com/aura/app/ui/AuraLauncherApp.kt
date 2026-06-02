@@ -639,7 +639,7 @@ private fun HomeScreen(
                                     onSelectWallpaper()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.onBackground,
                                     contentColor = MaterialTheme.colorScheme.background
@@ -657,7 +657,7 @@ private fun HomeScreen(
                                 onOpenSettings()
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -1140,7 +1140,7 @@ private fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
         Box(
             modifier = Modifier
                 .size(38.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.background.copy(alpha = 0.4f)),
             contentAlignment = Alignment.Center
         ) {
@@ -1426,7 +1426,7 @@ private fun AuraStoreSection(
                 FilledTonalButton(
                     onClick = { onInstall(bundle) },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -1443,7 +1443,7 @@ private fun AuraStoreSection(
                 leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
                 placeholder = { Text("CREATE WITH AURA...") },
                 singleLine = true,
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(16.dp)
             )
             IconButton(
                 onClick = onCreate,
@@ -1822,7 +1822,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         Button(
@@ -1830,7 +1830,7 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
                 onAddTodo(title)
                 title = ""
             },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.onBackground,
                 contentColor = MaterialTheme.colorScheme.background
@@ -1843,7 +1843,10 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
         val isDark = isSystemInDarkTheme()
         val separatorColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
         LazyColumn {
-            items(state.todos, key = { it.id }) { todo ->
+            itemsIndexed(
+                state.todos,
+                key = { index, todo -> "$index:${todo.id}" }
+            ) { _, todo ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1902,7 +1905,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
@@ -1917,7 +1920,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = MaterialTheme.colorScheme.onBackground
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
         Button(
@@ -1926,7 +1929,7 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                 title = ""
                 content = ""
             },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.onBackground,
                 contentColor = MaterialTheme.colorScheme.background
@@ -1939,7 +1942,10 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
         val isDark = isSystemInDarkTheme()
         val separatorColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
         LazyColumn {
-            items(state.memories, key = { it.id }) { memory ->
+            itemsIndexed(
+                state.memories,
+                key = { index, memory -> "$index:${memory.id}" }
+            ) { _, memory ->
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3453,49 +3459,82 @@ private fun rememberWallpaperPainter(uriString: String?): ImageBitmap? {
     return remember(uriString) {
         try {
             val uri = Uri.parse(uriString)
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = calculateBitmapSampleSize(options.outWidth, options.outHeight)
+            }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOptions)?.asImageBitmap()
+            }
+        } catch (_: Throwable) {
             null
         }
     }
 }
 
+private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimension: Int = 2048): Int {
+    if (width <= 0 || height <= 0) return 1
+    var sampleSize = 1
+    var sampledWidth = width
+    var sampledHeight = height
+    while (sampledWidth / 2 >= maxDimension || sampledHeight / 2 >= maxDimension) {
+        sampleSize *= 2
+        sampledWidth /= 2
+        sampledHeight /= 2
+    }
+    return sampleSize
+}
+
 fun Modifier.glassCard(
-    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(24.dp),
-    borderWidth: androidx.compose.ui.unit.Dp = 1.2.dp
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(20.dp),
+    borderWidth: androidx.compose.ui.unit.Dp = 0.8.dp
 ): Modifier = this.composed {
     val isDark = isSystemInDarkTheme()
     val bgBrush = if (isDark) {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color(0xFF1C1C1E), // Frosted Carbon Grey
-                Color(0xFF141416)  // Pitch Carbon Grey
-            )
+                Color(0xFF1E1E22),
+                Color(0xFF161618),
+                Color(0xFF131315)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     } else {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color(0xFFFFFFFF), // Crisp Clean White
-                Color(0xFFFAFAFC)
-            )
+                Color(0xFFFFFFFF),
+                Color(0xFFFCFCFD),
+                Color(0xFFF9F9FB)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     }
     val borderBrush = if (isDark) {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.02f)
-            )
+                Color.White.copy(alpha = 0.12f),
+                Color.White.copy(alpha = 0.04f),
+                Color.White.copy(alpha = 0.08f)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     } else {
-        Brush.verticalGradient(
+        Brush.linearGradient(
             colors = listOf(
-                Color.Black.copy(alpha = 0.08f),
-                Color.Black.copy(alpha = 0.02f)
-            )
+                Color.Black.copy(alpha = 0.06f),
+                Color.Black.copy(alpha = 0.02f),
+                Color.Black.copy(alpha = 0.04f)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
         )
     }
     
