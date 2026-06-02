@@ -3392,46 +3392,107 @@ private fun ScreenShell(
 
 @Composable
 private fun Header(title: String, subtitle: String) {
-    Text(title.uppercase(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-    Text(subtitle.uppercase(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.height(16.dp))
+    Column(modifier = Modifier.padding(bottom = 20.dp)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = (-0.5).sp
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            lineHeight = 20.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        val isDark = isSystemInDarkTheme()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.12f)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF06B6D4))
+                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                    )
+                )
+        )
+    }
 }
+
+private fun startActivitySafely(context: Context, intent: Intent): Boolean =
+    runCatching {
+        context.startActivity(intent)
+    }.isSuccess
 
 @Composable
 private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, onSend: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val isDark = isSystemInDarkTheme()
+    val hasText = value.isNotBlank()
+    val sendScale by animateFloatAsState(
+        targetValue = if (hasText) 1f else 0.85f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "send_scale"
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard(shape = RoundedCornerShape(28.dp))
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            placeholder = {
+                Text(
+                    "Ask Aura anything...",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                cursorColor = if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)
+            ),
+            shape = RoundedCornerShape(24.dp)
+        )
+        Spacer(Modifier.width(6.dp))
         Box(
             modifier = Modifier
-                .weight(1f)
-                .glassCard(shape = RoundedCornerShape(16.dp))
-        ) {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("ASK AURA...") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    cursorColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        IconButton(
-            onClick = onSend,
-            modifier = Modifier
-                .size(56.dp)
-                .glassCard(shape = RoundedCornerShape(16.dp))
+                .size(48.dp)
+                .scale(sendScale)
+                .clip(CircleShape)
+                .background(
+                    if (hasText) {
+                        Brush.linearGradient(
+                            colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                            else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+                            )
+                        )
+                    }
+                )
+                .clickable(onClick = onSend),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.Search,
                 contentDescription = "Send",
-                tint = MaterialTheme.colorScheme.primary
+                tint = if (hasText) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
