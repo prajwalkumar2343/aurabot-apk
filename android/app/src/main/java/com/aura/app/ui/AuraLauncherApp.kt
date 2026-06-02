@@ -2922,7 +2922,7 @@ private fun ModelsScreen(
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2942,7 +2942,7 @@ private fun ModelsScreen(
                             FilledTonalButton(
                                 onClick = { onProviderSelected(provider) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                                 colors = ButtonDefaults.filledTonalButtonColors(
                                     containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
@@ -2957,7 +2957,7 @@ private fun ModelsScreen(
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -2980,7 +2980,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.googleModel,
@@ -2996,13 +2996,13 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -3025,7 +3025,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.openAiModel,
@@ -3041,13 +3041,13 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -3070,7 +3070,7 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     OutlinedTextField(
                         value = state.llmSettings.openRouterModel,
@@ -3086,12 +3086,12 @@ private fun ModelsScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             cursorColor = MaterialTheme.colorScheme.onBackground
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     Button(
                         onClick = onLoadOpenRouterModels,
                         enabled = !state.loadingModels,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.onBackground,
                             contentColor = MaterialTheme.colorScheme.background
