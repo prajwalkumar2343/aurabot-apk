@@ -3500,18 +3500,15 @@ private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, on
 
 @Composable
 private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
+    Box(
+        modifier = modifier
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .padding(16.dp)
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column {
             Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text(label.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(label.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp)
         }
     }
 }
