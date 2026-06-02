@@ -3078,54 +3078,81 @@ private fun SettingsScreen(
         Header("SETTINGS", "System, model, and voice configuration.")
         Column(
             modifier = Modifier.verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                )
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("LOCAL-FIRST MODE", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Tasks, memories, and assistant context stay on this device right now.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+            // Status card
+            val isDark = isSystemInDarkTheme()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF161618))
+                            else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
+                        )
                     )
+                    .border(
+                        0.6.dp,
+                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .padding(18.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF22C55E))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("LOCAL-FIRST MODE", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "Data stays on this device.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("AI & Data")
+
             SettingsRow(
                 title = "Models",
-                subtitle = "Configure active LLM provider, API keys, and model parameters.",
+                subtitle = "LLM provider, API keys, and model parameters.",
                 icon = Icons.Rounded.Key,
                 onClick = onConfigureModels
             )
             SettingsRow(
                 title = "Tasks",
-                subtitle = "Manage list of todo items.",
+                subtitle = "Manage your todo items.",
                 icon = Icons.Rounded.CheckCircle,
                 onClick = onConfigureTasks
             )
             SettingsRow(
                 title = "Memories",
-                subtitle = "Manage stored assistant memory items.",
+                subtitle = "Stored assistant memory items.",
                 icon = Icons.Rounded.Layers,
                 onClick = onConfigureMemories
             )
 
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("System")
+
             val currentModeLabel = when (state.session.appMode) {
                 "launcher" -> "Home Launcher"
                 "normal" -> "Normal App"
-                "overlay" -> "Always-On Background Assistant"
+                "overlay" -> "Always-On Assistant"
                 else -> "Home Launcher"
             }
             SettingsRow(
                 title = "App Mode",
-                subtitle = "Active: $currentModeLabel. Tap to change.",
+                subtitle = currentModeLabel,
                 icon = Icons.Rounded.Apps,
                 onClick = { showAppModeDialog = true }
             )
@@ -3133,21 +3160,21 @@ private fun SettingsScreen(
             if (state.session.appMode == "launcher") {
                 SettingsRow(
                     title = "Default launcher",
-                    subtitle = "Open Android Home app settings.",
+                    subtitle = "Open Android Home settings.",
                     icon = Icons.Rounded.Home,
                     onClick = onOpenHomeSettings
                 )
             }
 
             SettingsRow(
-                title = "App permissions",
-                subtitle = "Microphone, notification, and location access.",
+                title = "Permissions",
+                subtitle = "Microphone, notification, and location.",
                 icon = Icons.Rounded.Mic,
                 onClick = onRequestVoicePermissions
             )
             SettingsRow(
-                title = "Interaction visualizer",
-                subtitle = "Active: ${state.session.interactionMode.uppercase()}",
+                title = "Interaction mode",
+                subtitle = state.session.interactionMode.replaceFirstChar { it.uppercase() },
                 icon = Icons.Rounded.RemoveRedEye,
                 onClick = {
                     val nextMode = if (state.session.interactionMode == "dot") "eyes" else "dot"
@@ -3155,39 +3182,61 @@ private fun SettingsScreen(
                 }
             )
 
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("Appearance")
+
             if (state.session.appMode == "launcher") {
                 SettingsRow(
-                    title = "Set custom wallpaper",
-                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active." else "None set.",
+                    title = "Wallpaper",
+                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active" else "None set",
                     icon = Icons.Rounded.Image,
                     onClick = onSelectWallpaper
                 )
                 if (state.session.wallpaperUri != null) {
                     SettingsRow(
-                        title = "Clear custom wallpaper",
-                        subtitle = "Reset to solid black/white background.",
+                        title = "Clear wallpaper",
+                        subtitle = "Reset to default background.",
                         icon = Icons.Rounded.Delete,
                         onClick = onClearWallpaper
                     )
                 }
             }
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                )
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionLabel("Voice")
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glassCard(shape = RoundedCornerShape(16.dp))
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
             ) {
                 Row(
-                    Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = if (isDark) listOf(Color(0xFF22C55E).copy(alpha = 0.15f), Color(0xFF16A34A).copy(alpha = 0.08f))
+                                    else listOf(Color(0xFF22C55E).copy(alpha = 0.12f), Color(0xFF16A34A).copy(alpha = 0.05f))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Mic,
+                            contentDescription = null,
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Background listening", fontWeight = FontWeight.Bold)
-                        Text("Opt-in foreground service.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        Text("Background listening", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Always-on voice service", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(
                         checked = state.session.backgroundListeningEnabled,
@@ -3195,12 +3244,17 @@ private fun SettingsScreen(
                     )
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+
             SettingsRow(
-                title = "Quit system",
-                subtitle = "Exit the launcher activity and move system task to back.",
+                title = "Quit Aura",
+                subtitle = "Exit and move to background.",
                 icon = Icons.Rounded.PowerSettingsNew,
                 onClick = onQuitApp
             )
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -3220,7 +3274,7 @@ private fun SettingsScreen(
                             onSetAppMode("launcher")
                             showAppModeDialog = false
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "launcher") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
@@ -3236,7 +3290,7 @@ private fun SettingsScreen(
                             onSetAppMode("normal")
                             showAppModeDialog = false
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "normal") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
@@ -3257,7 +3311,7 @@ private fun SettingsScreen(
                                 showPermissionExplanation = true
                             }
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
                         colors = CardDefaults.cardColors(
                             containerColor = if (state.session.appMode == "overlay") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
