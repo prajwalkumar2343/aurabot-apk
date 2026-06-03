@@ -10,6 +10,7 @@ DEFAULT_CONTEXT_FILES = ("README.md", "memory/PRD.md")
 ALLOWED_CONTEXT_FILES = {
     "README.md",
     "memory/PRD.md",
+    "memory/mini_app_builder_skill.md",
     "design_guidelines.json",
 }
 MAX_CONTEXT_CHARS = 1800
@@ -77,9 +78,11 @@ SKILL_CARDS = (
         summary="Create safe declarative Aura mini apps with schema-bound components and actions.",
         triggers=("build", "create", "make", "generate", "mini app"),
         detail=(
-            "Generated mini apps must stay declarative: no executable code, APKs, webviews, plugins, "
-            "remote URLs, or unsupported capabilities. Include dashboard, quick actions, history, "
-            "assistant intents, and local storage when useful."
+            "When the user asks to create, build, make, or generate a mini app, call create_mini_app "
+            "with a specific professional mini_app_prompt. Generated mini apps must stay declarative: "
+            "no executable code, APKs, webviews, plugins, remote URLs, or unsupported capabilities. "
+            "Include multiple screens, dashboard, quick actions, history, lists/settings/buttons when useful, "
+            "assistant intents, and local storage."
         ),
     ),
 )
@@ -191,7 +194,7 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
     lower_message = data.message.lower()
     wants_action = any(
         word in lower_message
-        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak")
+        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate")
     )
     if wants_action and not actions and any(word in reply.lower() for word in ("done", "blocked", "opened", "saved")):
         return "reply claimed a local action without calling the matching tool"
@@ -200,6 +203,8 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
     for action in actions:
         if action.type == "block_app" and (action.duration_minutes is None or action.duration_minutes <= 0):
             return "block_app requires a positive duration_minutes value"
+        if action.type == "create_mini_app" and not (action.mini_app_prompt or "").strip():
+            return "create_mini_app requires a specific mini_app_prompt value"
     return None
 
 

@@ -17,6 +17,7 @@ class ChatMiniAppIn(BaseModel):
     id: str
     name: str
     intents: List[str] = Field(default_factory=list)
+    actions: List[str] = Field(default_factory=list)
 
 class ChatActionOut(BaseModel):
     type: str
@@ -25,6 +26,8 @@ class ChatActionOut(BaseModel):
     duration_minutes: Optional[int] = None
     mini_app_id: Optional[str] = None
     mini_app_query: Optional[str] = None
+    mini_app_prompt: Optional[str] = None
+    open_after_create: Optional[bool] = None
     action_id: Optional[str] = None
     record_type: Optional[str] = None
     values: Optional[dict[str, str]] = None
