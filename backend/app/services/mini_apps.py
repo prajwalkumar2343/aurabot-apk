@@ -34,7 +34,8 @@ def mini_app_builder_system_prompt(repair_error: Optional[str] = None, previous_
         "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
         f"Supported component types: {components}. "
         "Use camelCase fields exactly matching the schema: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities. "
-        "Make the UI polished with dashboard blocks, quick actions, timeline/history, stats, and assistant intents when useful."
+        "Make the UI polished and app-like with at least two screens when useful, such as Dashboard plus Details, Plan, or Settings. "
+        "Use dashboard blocks, quick actions, timeline/history, chart, list, button, slider, settings, bottom_sheet, and assistant intents when useful."
     )
     if repair_error:
         prompt += (
@@ -163,8 +164,35 @@ def fallback_bundle(prompt: str) -> MiniAppBundle:
                         },
                         {"type": "chart", "title": "Last 7 Days", "metric": "weekly_count"},
                         {"type": "timeline", "title": "Activity", "source": "records"},
+                        {"type": "slider", "title": "Weekly Pace", "metric": "weekly_count"},
                     ],
-                }
+                },
+                {
+                    "id": "details",
+                    "title": "Details",
+                    "components": [
+                        {
+                            "type": "list",
+                            "title": "Shortcuts",
+                            "items": [
+                                {"label": "Log entry", "actionId": "quick_add", "value": "Capture the default item"},
+                                {"label": "Mark priority", "actionId": "mark_priority", "value": "Pin the most important thing"},
+                                {"label": "Save note", "actionId": "save_note", "value": "Keep a lightweight note"},
+                            ],
+                        },
+                        {"type": "button", "title": "Log now", "actionId": "quick_add"},
+                        {
+                            "type": "bottom_sheet",
+                            "title": "App note",
+                            "items": [
+                                {
+                                    "label": "This generated app starts with local capture, history, progress, and assistant actions."
+                                }
+                            ],
+                        },
+                        {"type": "settings", "title": "App setup"},
+                    ],
+                },
             ],
             "capabilities": ["local_storage", "assistant_actions"],
         }
