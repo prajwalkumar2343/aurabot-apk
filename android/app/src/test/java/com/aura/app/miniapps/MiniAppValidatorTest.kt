@@ -14,6 +14,19 @@ class MiniAppValidatorTest {
     }
 
     @Test
+    fun validatesCompleteBuiltInCatalog() {
+        val bundles = BuiltInMiniApps.all.map { MiniAppValidator.validate(it) }
+
+        assertEquals(listOf("Habit Tracker", "Focus Planner", "Spend Tracker"), bundles.map { it.metadata.name })
+        bundles.forEach { bundle ->
+            val componentTypes = bundle.screens.first().components.map { it.type }
+            assertEquals(true, componentTypes.contains("quick_action_grid"))
+            assertEquals(true, componentTypes.contains("timeline"))
+            assertEquals(true, componentTypes.contains("chart"))
+        }
+    }
+
+    @Test
     fun rejectsUnsupportedComponentsAndCapabilities() {
         val badComponent = BuiltInMiniApps.habitTracker.copy(
             screens = listOf(
