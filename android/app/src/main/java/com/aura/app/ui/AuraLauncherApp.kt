@@ -137,6 +137,7 @@ import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
+import com.aura.app.miniapps.MiniAppComponentItem
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
 import java.text.SimpleDateFormat
@@ -1638,13 +1639,15 @@ private fun MiniAppRuntimeScreen(
         }
         return
     }
-    val screen = bundle.screens.firstOrNull()
-    if (screen == null) {
+    val firstScreen = bundle.screens.firstOrNull()
+    if (firstScreen == null) {
         ScreenShell(wallpaperUri = null) {
             MiniAppMissingState(onBack, "This mini app has no screen yet")
         }
         return
     }
+    var selectedScreenId by remember(bundle.id) { mutableStateOf(firstScreen.id) }
+    val screen = bundle.screens.firstOrNull { it.id == selectedScreenId } ?: firstScreen
     val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
     val secondary = parseMiniAppColor(bundle.theme.secondary, MaterialTheme.colorScheme.tertiary)
     val today = remember(records) { records.count { isToday(it.createdAt) } }
@@ -1659,6 +1662,16 @@ private fun MiniAppRuntimeScreen(
         ) {
             item(key = "hero") {
                 MiniAppHeroCard(bundle, records.size, today, streak, primary, secondary)
+            }
+            if (bundle.screens.size > 1) {
+                item(key = "screens") {
+                    MiniAppScreenTabs(
+                        screens = bundle.screens,
+                        selectedScreenId = screen.id,
+                        primary = primary,
+                        onSelect = { selectedScreenId = it }
+                    )
+                }
             }
             itemsIndexed(
                 screen.components,
@@ -1678,6 +1691,45 @@ private fun MiniAppMissingState(onBack: () -> Unit, message: String) {
     Spacer(Modifier.height(18.dp))
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f), fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun MiniAppScreenTabs(
+    screens: List<com.aura.app.miniapps.MiniAppScreen>,
+    selectedScreenId: String,
+    primary: Color,
+    onSelect: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(20.dp))
+            .padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        screens.forEach { screen ->
+            val selected = screen.id == selectedScreenId
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(42.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(if (selected) primary.copy(alpha = 0.18f) else Color.Transparent)
+                    .clickable { onSelect(screen.id) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    screen.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black),
+                    color = if (selected) primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -1822,6 +1874,11 @@ private fun MiniAppComponentView(
         "quick_action_grid" -> MiniAppActionPanel(bundle, component, primary, secondary, onRunAction)
         "timeline" -> MiniAppTimelineCard(bundle, component, records, primary, onDeleteRecord)
         "chart" -> MiniAppChartCard(component, records, primary, secondary)
+        "list" -> MiniAppListCard(bundle, component, records, primary, onRunAction)
+        "button" -> MiniAppButtonCard(bundle, component, primary, onRunAction)
+        "settings" -> MiniAppSettingsCard(bundle, component, primary)
+        "slider" -> MiniAppSliderCard(component, records, primary, secondary)
+        "bottom_sheet" -> MiniAppInfoPanel(component, primary)
         "streak_view", "progress_ring", "dashboard_block" -> MiniAppMetricCard(component, records, primary)
         else -> MiniAppMetricCard(component, records, primary)
     }
@@ -1992,6 +2049,206 @@ private fun MiniAppChartCard(component: MiniAppComponent, records: List<MiniAppR
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniAppListCard(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    records: List<MiniAppRecord>,
+    primary: Color,
+    onRunAction: (String, String) -> Unit
+) {
+    val rows = component.items.ifEmpty {
+        records.take(5).map { record ->
+            MiniAppComponentItem(
+                label = record.values.values.joinToString(" / ").ifBlank { record.recordType },
+                value = formatMiniAppTime(record.createdAt)
+            )
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "Details" }, "${rows.size} items")
+        if (rows.isEmpty()) {
+            MiniAppInfoPanel(
+                MiniAppComponent("bottom_sheet", "No details yet"),
+                primary
+            )
+        } else {
+            rows.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.34f))
+                        .clickable(enabled = item.actionId != null) {
+                            item.actionId?.let { onRunAction(bundle.id, it) }
+                        }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(item.label.take(1).uppercase(), color = primary, fontWeight = FontWeight.Black)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(item.label, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        item.value?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (item.actionId != null) {
+                        Icon(Icons.Rounded.ChevronRight, "Run ${item.label}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppButtonCard(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    primary: Color,
+    onRunAction: (String, String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(primary.copy(alpha = 0.13f))
+            .border(BorderStroke(1.dp, primary.copy(alpha = 0.18f)), RoundedCornerShape(24.dp))
+            .clickable(enabled = component.actionId != null) {
+                component.actionId?.let { onRunAction(bundle.id, it) }
+            }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(primary.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.Check, null, tint = primary)
+        }
+        Text(
+            component.title.ifBlank { "Run action" },
+            modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Icon(Icons.Rounded.ChevronRight, "Run action", tint = primary)
+    }
+}
+
+@Composable
+private fun MiniAppSettingsCard(bundle: MiniAppBundle, component: MiniAppComponent, primary: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "Settings" }, "Local app")
+        MiniAppSettingsRow("Storage", "Local records on this phone", primary)
+        MiniAppSettingsRow("Assistant", if ("assistant_actions" in bundle.capabilities) "Voice actions enabled" else "Voice actions off", primary)
+        MiniAppSettingsRow("Schema", "${bundle.dataSchema.fields.size} fields / ${bundle.actions.size} actions", primary)
+    }
+}
+
+@Composable
+private fun MiniAppSettingsRow(label: String, value: String, primary: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(primary.copy(alpha = 0.11f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.Settings, null, tint = primary, modifier = Modifier.size(17.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, fontWeight = FontWeight.Black)
+            Text(value, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun MiniAppSliderCard(component: MiniAppComponent, records: List<MiniAppRecord>, primary: Color, secondary: Color) {
+    val progress = when (component.metric) {
+        "today_count" -> records.count { isToday(it.createdAt) }.coerceIn(0, 5) / 5f
+        "weekly_count" -> weeklyBuckets(records).sumOf { it.second }.coerceIn(0, 14) / 14f
+        else -> records.size.coerceIn(0, 10) / 10f
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "Progress" }, "${(progress * 100).toInt()}%")
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(14.dp)
+                .clip(CircleShape)
+                .background(secondary.copy(alpha = 0.16f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress.coerceIn(0.04f, 1f))
+                    .height(14.dp)
+                    .clip(CircleShape)
+                    .background(primary)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniAppInfoPanel(component: MiniAppComponent, primary: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(primary.copy(alpha = 0.08f))
+            .border(BorderStroke(1.dp, primary.copy(alpha = 0.14f)), RoundedCornerShape(22.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(component.title.ifBlank { "Note" }, fontWeight = FontWeight.Black)
+        val body = component.items.firstOrNull()?.value
+            ?: component.items.firstOrNull()?.label
+            ?: "This mini app keeps its state local and ready for assistant actions."
+        Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
