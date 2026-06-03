@@ -22,7 +22,11 @@ import com.aura.app.R
 import android.provider.Settings
 import com.aura.app.AuraApplication
 import com.aura.app.auraContainer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -38,9 +42,23 @@ class AuraListeningService : Service() {
     private var speechFrames = 0
     private var silenceFrames = 0
 
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    @Volatile
+    private var cachedAppMode = "launcher"
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        serviceScope.launch {
+            try {
+                val container = (application as AuraApplication).container
+                container.sessionStore.state.collect { sessionState ->
+                    cachedAppMode = sessionState.appMode
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,6 +90,7 @@ class AuraListeningService : Service() {
 
     override fun onDestroy() {
         stopListening()
+        serviceJob.cancel()
         super.onDestroy()
     }
 
@@ -134,7 +153,7 @@ class AuraListeningService : Service() {
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         if (minBufferSize <= 0) return false
 
-        val bufferSize = minBufferSize * 2
+        val bufferSize = maxOf(minBufferSize * 4, 4096)
         val audioRecord = AudioRecord(
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
             sampleRate,
@@ -158,6 +177,10 @@ class AuraListeningService : Service() {
                     val samplesRead = audioRecord.read(buffer, 0, buffer.size)
                     if (samplesRead > 0) {
                         processAudioFrame(buffer, samplesRead)
+                    } else if (samplesRead < 0) {
+                        Thread.sleep(100)
+                    } else {
+                        Thread.sleep(10)
                     }
                 }
             } catch (_: Exception) {
@@ -193,14 +216,15 @@ class AuraListeningService : Service() {
     }
 
     private fun processAudioFrame(buffer: ShortArray, samplesRead: Int) {
-        var sumSquares = 0.0
+        var sumSquares = 0L
         for (index in 0 until samplesRead) {
-            val normalized = buffer[index] / Short.MAX_VALUE.toDouble()
-            sumSquares += normalized * normalized
+            val sample = buffer[index].toLong()
+            sumSquares += sample * sample
         }
 
-        val rms = sqrt(sumSquares / samplesRead)
-        lastRms.set((rms * 1000).roundToInt())
+        val rawRms = sqrt(sumSquares.toDouble() / samplesRead)
+        val rms = rawRms * RAW_RMS_MULTIPLIER
+        lastRms.set((rawRms * RMS_TO_INT_MULTIPLIER).roundToInt())
 
         if (!isSpeechDetected.get()) {
             noiseFloor = if (noiseFloor == 0.0) rms else (noiseFloor * 0.96) + (rms * 0.04)
@@ -224,9 +248,7 @@ class AuraListeningService : Service() {
             emitEvent()
 
             try {
-                val container = (application as AuraApplication).container
-                val sessionState = runBlocking { container.sessionStore.state.first() }
-                if (sessionState.appMode == "overlay" && Settings.canDrawOverlays(this@AuraListeningService)) {
+                if (cachedAppMode == "overlay" && Settings.canDrawOverlays(this@AuraListeningService)) {
                     val launchIntent = Intent(this@AuraListeningService, LauncherActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("voice_triggered", true)
@@ -280,6 +302,9 @@ class AuraListeningService : Service() {
         private const val SPEECH_THRESHOLD_MULTIPLIER = 3.2
         private const val SPEECH_START_FRAMES = 3
         private const val SPEECH_END_FRAMES = 10
+
+        private const val RAW_RMS_MULTIPLIER = 1.0 / 32767.0
+        private const val RMS_TO_INT_MULTIPLIER = 1000.0 / 32767.0
 
         private val isRunning = AtomicBoolean(false)
         private val isSpeechDetected = AtomicBoolean(false)

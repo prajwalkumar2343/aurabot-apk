@@ -89,7 +89,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
 
     init {
-        refreshApps()
+        refreshApps(force = true)
         refreshMiniApps()
         refreshCloud()
     }
@@ -101,9 +101,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         localState.update { it.copy(currentEmotion = emotion, isSpeaking = false) }
     }
 
-    fun refreshApps() {
+    fun refreshApps(force: Boolean = false) {
         viewModelScope.launch {
-            val apps = container.appsRepository.loadLaunchableApps().toMutableList()
+            val apps = container.appsRepository.loadLaunchableApps(force).toMutableList()
             if (uiState.value.isDefaultLauncher) {
                 apps.add(
                     AppInfo(
@@ -611,7 +611,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setIsDefaultLauncher(isDefault: Boolean) {
         localState.update { it.copy(isDefaultLauncher = isDefault) }
-        refreshApps()
+        refreshApps(force = false)
     }
 
     fun setWallpaper(uri: String?) {

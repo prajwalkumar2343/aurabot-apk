@@ -121,6 +121,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -841,6 +846,50 @@ private fun AuraEyes(
     val eyeOpen by animateFloatAsState(eyeOpenTarget * blink, tween(420), label = "eye_open")
     val focusAmount by animateFloatAsState(focusAmountTarget, tween(420), label = "focus_amount")
 
+    val eyeColors = remember(primaryColor, secondaryColor) { listOf(primaryColor, secondaryColor) }
+    val dotGlowColors = remember(primaryColor, secondaryColor, dotAlpha) {
+        listOf(
+            primaryColor.copy(alpha = 0.12f * dotAlpha),
+            secondaryColor.copy(alpha = 0.06f * dotAlpha),
+            Color.Transparent
+        )
+    }
+    val dotColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor,
+            secondaryColor.copy(alpha = 0.35f),
+            Color.Transparent
+        )
+    }
+    val hearingHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.22f),
+            secondaryColor.copy(alpha = 0.22f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val listeningHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.14f),
+            secondaryColor.copy(alpha = 0.14f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val focusedHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.12f),
+            secondaryColor.copy(alpha = 0.12f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val idleHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.06f),
+            secondaryColor.copy(alpha = 0.06f * 0.3f),
+            Color.Transparent
+        )
+    }
+
     val statusText = when {
         isSpeaking -> emotion.uppercase()
         mode == AuraPresenceMode.Thinking -> "THINKING"
@@ -884,7 +933,7 @@ private fun AuraEyes(
                     val tilt = tiltDegrees * direction
 
                     val eyeBrush = Brush.linearGradient(
-                        colors = listOf(primaryColor, secondaryColor),
+                        colors = eyeColors,
                         start = Offset(originX + travelX, eyeY + travelY),
                         end = Offset(originX + travelX + eyeWidth, eyeY + travelY + eyeHeight)
                     )
@@ -911,11 +960,7 @@ private fun AuraEyes(
                         
                         // Outer glow ring
                         val glowBrush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = 0.12f * dotAlpha),
-                                secondaryColor.copy(alpha = 0.06f * dotAlpha),
-                                Color.Transparent
-                            ),
+                            colors = dotGlowColors,
                             center = Offset(size.width / 2f, size.height / 2f),
                             radius = baseDotRadius * dotScale * 3.5f
                         )
@@ -926,11 +971,7 @@ private fun AuraEyes(
                         )
                         
                         val dotBrush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor,
-                                secondaryColor.copy(alpha = 0.35f),
-                                Color.Transparent
-                            ),
+                            colors = dotColors,
                             center = Offset(size.width / 2f, size.height / 2f),
                             radius = baseDotRadius * dotScale * 1.3f
                         )
@@ -943,23 +984,23 @@ private fun AuraEyes(
                     }
                 } else {
                     // Ambient glow halos behind each eye
-                    val glowAlpha = when (mode) {
-                        AuraPresenceMode.Thinking -> 0.18f * dotBreathe
-                        AuraPresenceMode.Hearing -> 0.22f
-                        AuraPresenceMode.Listening -> 0.14f
-                        AuraPresenceMode.Focused -> 0.12f
-                        AuraPresenceMode.Idle -> 0.06f
+                    val haloColors = when (mode) {
+                        AuraPresenceMode.Thinking -> listOf(
+                            primaryColor.copy(alpha = 0.18f * dotBreathe),
+                            secondaryColor.copy(alpha = 0.18f * dotBreathe * 0.3f),
+                            Color.Transparent
+                        )
+                        AuraPresenceMode.Hearing -> hearingHaloColors
+                        AuraPresenceMode.Listening -> listeningHaloColors
+                        AuraPresenceMode.Focused -> focusedHaloColors
+                        AuraPresenceMode.Idle -> idleHaloColors
                     }
                     val glowRadius = eyeWidth * 1.6f
                     
                     // Left eye halo
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = glowAlpha),
-                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
-                                Color.Transparent
-                            ),
+                            colors = haloColors,
                             center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
                             radius = glowRadius
                         ),
@@ -969,11 +1010,7 @@ private fun AuraEyes(
                     // Right eye halo
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = glowAlpha),
-                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
-                                Color.Transparent
-                            ),
+                            colors = haloColors,
                             center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
                             radius = glowRadius
                         ),
@@ -1819,6 +1856,12 @@ private fun MiniAppHeroCard(
 
 @Composable
 private fun MiniAppProgressOrb(value: Int, primary: Color) {
+    val density = LocalDensity.current
+    val stroke = remember(density) {
+        Stroke(
+            width = with(density) { 8.dp.toPx() }
+        )
+    }
     Box(
         modifier = Modifier
             .size(72.dp)
@@ -1832,14 +1875,14 @@ private fun MiniAppProgressOrb(value: Int, primary: Color) {
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+                style = stroke
             )
             drawArc(
                 color = primary,
                 startAngle = -90f,
                 sweepAngle = (value.coerceIn(0, 7) / 7f) * 360f,
                 useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+                style = stroke
             )
         }
         Text(value.toString(), color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
@@ -2756,27 +2799,32 @@ private fun AuraAvatarFace(
 
         // Curved Smile
         val strokeColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.25f)
-        Canvas(
-            modifier = Modifier.size(width = (48 * sizeMultiplier).dp, height = (12 * sizeMultiplier).dp)
-        ) {
-            val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(0f, 0f)
-                quadraticTo(
-                    x1 = size.width / 2f,
-                    y1 = size.height,
-                    x2 = size.width,
-                    y2 = 0f
-                )
-            }
-            drawPath(
-                path = path,
-                color = strokeColor,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(
-                    width = (3 * sizeMultiplier).dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
-                )
-            )
-        }
+        Spacer(
+            modifier = Modifier
+                .size(width = (48 * sizeMultiplier).dp, height = (12 * sizeMultiplier).dp)
+                .drawWithCache {
+                    val path = Path().apply {
+                        moveTo(0f, 0f)
+                        quadraticTo(
+                            x1 = size.width / 2f,
+                            y1 = size.height,
+                            x2 = size.width,
+                            y2 = 0f
+                        )
+                    }
+                    val stroke = Stroke(
+                        width = (3 * sizeMultiplier).dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    onDrawBehind {
+                        drawPath(
+                            path = path,
+                            color = strokeColor,
+                            style = stroke
+                        )
+                    }
+                }
+        )
     }
 }
 
@@ -4231,13 +4279,17 @@ fun Modifier.glassCard(
 }
 
 @Composable
-private fun ScreenShell(
-    modifier: Modifier = Modifier,
-    wallpaperUri: String? = null,
-    content: @Composable ColumnScope.() -> Unit
+private fun MeshBackground(
+    isDark: Boolean,
+    bgBrush: Brush,
+    violetColors: List<Color>,
+    cyanColors: List<Color>,
+    roseColors: List<Color>,
+    indigoColors: List<Color>,
+    lightVioletColors: List<Color>,
+    lightTealColors: List<Color>,
+    lightPeachColors: List<Color>
 ) {
-    val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
-    val isDark = isSystemInDarkTheme()
     val infiniteTransition = rememberInfiniteTransition(label = "bg_mesh")
     val drift1 by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -4266,6 +4318,121 @@ private fun ScreenShell(
         ),
         label = "drift3"
     )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val width = size.width
+        val height = size.height
+        
+        drawRect(brush = bgBrush)
+        
+        if (isDark) {
+            // Large violet aurora — drifts slowly
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = violetColors,
+                    center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
+                    radius = width * 0.8f
+                ),
+                radius = width * 0.8f,
+                center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
+            )
+            
+            // Electric cyan aurora — counter-drifts
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = cyanColors,
+                    center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
+                    radius = width * 0.75f
+                ),
+                radius = width * 0.75f,
+                center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
+            )
+            
+            // Warm rose accent — subtle center drift
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = roseColors,
+                    center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
+                    radius = width * 0.5f
+                ),
+                radius = width * 0.5f,
+                center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
+            )
+            
+            // Deep indigo whisper at bottom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = indigoColors,
+                    center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
+                    radius = width * 0.55f
+                ),
+                radius = width * 0.55f,
+                center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
+            )
+        } else {
+            // Soft violet-indigo bloom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightVioletColors,
+                    center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
+                    radius = width * 0.7f
+                ),
+                radius = width * 0.7f,
+                center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
+            )
+            
+            // Soft teal bloom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightTealColors,
+                    center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
+                    radius = width * 0.6f
+                ),
+                radius = width * 0.6f,
+                center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
+            )
+            
+            // Warm peach accent
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightPeachColors,
+                    center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
+                    radius = width * 0.45f
+                ),
+                radius = width * 0.45f,
+                center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScreenShell(
+    modifier: Modifier = Modifier,
+    wallpaperUri: String? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
+    val isDark = isSystemInDarkTheme()
+
+    val bgBrush = remember(isDark) {
+        Brush.verticalGradient(
+            colors = if (isDark) {
+                listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
+            } else {
+                listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
+            }
+        )
+    }
+
+    val violetColors = remember { listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent) }
+    val cyanColors = remember { listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent) }
+    val roseColors = remember { listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent) }
+    val indigoColors = remember { listOf(Color(0x286366F1), Color.Transparent) }
+    val lightVioletColors = remember { listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent) }
+    val lightTealColors = remember { listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent) }
+    val lightPeachColors = remember { listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -4284,98 +4451,17 @@ private fun ScreenShell(
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
         } else {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                
-                val bgBrush = Brush.verticalGradient(
-                    colors = if (isDark) {
-                        listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
-                    } else {
-                        listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
-                    }
-                )
-                drawRect(brush = bgBrush)
-                
-                if (isDark) {
-                    // Large violet aurora — drifts slowly
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent),
-                            center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
-                            radius = width * 0.8f
-                        ),
-                        radius = width * 0.8f,
-                        center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
-                    )
-                    
-                    // Electric cyan aurora — counter-drifts
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent),
-                            center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
-                            radius = width * 0.75f
-                        ),
-                        radius = width * 0.75f,
-                        center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
-                    )
-                    
-                    // Warm rose accent — subtle center drift
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent),
-                            center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
-                            radius = width * 0.5f
-                        ),
-                        radius = width * 0.5f,
-                        center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
-                    )
-                    
-                    // Deep indigo whisper at bottom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x286366F1), Color.Transparent),
-                            center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
-                            radius = width * 0.55f
-                        ),
-                        radius = width * 0.55f,
-                        center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
-                    )
-                } else {
-                    // Soft violet-indigo bloom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent),
-                            center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
-                            radius = width * 0.7f
-                        ),
-                        radius = width * 0.7f,
-                        center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
-                    )
-                    
-                    // Soft teal bloom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent),
-                            center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
-                            radius = width * 0.6f
-                        ),
-                        radius = width * 0.6f,
-                        center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
-                    )
-                    
-                    // Warm peach accent
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent),
-                            center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
-                            radius = width * 0.45f
-                        ),
-                        radius = width * 0.45f,
-                        center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
-                    )
-                }
-            }
+            MeshBackground(
+                isDark = isDark,
+                bgBrush = bgBrush,
+                violetColors = violetColors,
+                cyanColors = cyanColors,
+                roseColors = roseColors,
+                indigoColors = indigoColors,
+                lightVioletColors = lightVioletColors,
+                lightTealColors = lightTealColors,
+                lightPeachColors = lightPeachColors
+            )
         }
         Column(
             modifier = Modifier

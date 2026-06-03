@@ -10,8 +10,13 @@ class AppsRepository(
     private val packageManager: PackageManager,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
-    suspend fun loadLaunchableApps(): List<AppInfo> = withContext(ioDispatcher) {
-        queryLaunchableApps()
+    private var cachedApps: List<AppInfo>? = null
+
+    suspend fun loadLaunchableApps(forceRefresh: Boolean = false): List<AppInfo> = withContext(ioDispatcher) {
+        if (cachedApps == null || forceRefresh) {
+            cachedApps = queryLaunchableApps()
+        }
+        cachedApps!!
     }
 
     private fun queryLaunchableApps(): List<AppInfo> {
