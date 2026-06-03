@@ -270,6 +270,22 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         replies += "Opened ${miniApp.name}."
                     }
                 }
+                "create_mini_app" -> {
+                    val prompt = action.mini_app_prompt?.trim().orEmpty()
+                    if (prompt.isBlank()) {
+                        replies += "I need a description to create a mini app."
+                    } else {
+                        try {
+                            val installed = buildInstallAndMaybeOpenMiniApp(
+                                prompt = prompt,
+                                openAfterCreate = action.open_after_create != false
+                            )
+                            replies += "Created ${installed.name}."
+                        } catch (error: Exception) {
+                            replies += error.message ?: "Could not create that mini app."
+                        }
+                    }
+                }
                 "create_mini_app_record" -> {
                     val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
                     if (miniApp == null) {
@@ -300,6 +316,28 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         return replies
     }
 
+    private suspend fun buildInstallAndMaybeOpenMiniApp(
+        prompt: String,
+        openAfterCreate: Boolean
+    ): MiniAppInstall {
+        val bundle = try {
+            container.assistantRepository.buildMiniApp(prompt)
+        } catch (_: Exception) {
+            localStarterMiniApp(prompt)
+        }
+        val installed = container.miniAppRepository.install(bundle)
+        val installedApps = container.miniAppRepository.listInstalled()
+        val records = if (openAfterCreate) container.miniAppRepository.records(bundle.id) else emptyList()
+        localState.update {
+            it.copy(
+                miniApps = installedApps,
+                activeMiniApp = if (openAfterCreate) bundle else it.activeMiniApp,
+                activeMiniAppRecords = if (openAfterCreate) records else it.activeMiniAppRecords
+            )
+        }
+        return installed
+    }
+
     fun refreshMiniApps() {
         viewModelScope.launch {
             try {
@@ -327,9 +365,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             try {
-                val bundle = container.assistantRepository.buildMiniApp(trimmed)
-                container.miniAppRepository.install(bundle)
-                refreshMiniApps()
+                buildInstallAndMaybeOpenMiniApp(trimmed, openAfterCreate = false)
                 return@launch
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not build mini app; created a local starter instead") }

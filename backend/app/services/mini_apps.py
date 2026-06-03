@@ -2,12 +2,15 @@ import json
 import re
 import uuid
 from fastapi import HTTPException
+from pathlib import Path
 from typing import Optional
 
 from app.models.chat import ChatIn
 from app.models.mini_apps import MiniAppBuildIn, MiniAppBundle
 from app.services.llm import call_gemini, call_openai, call_openrouter
 
+
+MINI_APP_BUILDER_SKILL_PATH = Path(__file__).resolve().parents[3] / "memory" / "mini_app_builder_skill.md"
 
 SUPPORTED_COMPONENTS = {
     "dashboard_block",
@@ -27,11 +30,22 @@ SUPPORTED_CAPABILITIES = {"local_storage", "assistant_actions", "notifications"}
 SUPPORTED_FIELDS = {"text", "number", "boolean", "date", "datetime"}
 
 
+def mini_app_builder_skill_prompt() -> str:
+    try:
+        return MINI_APP_BUILDER_SKILL_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return (
+            "Create one safe declarative Aura mini app bundle as JSON only. "
+            "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
+            "Build professional app-like bundles with multiple screens, quick actions, local storage, assistant intents, "
+            "charts, history, lists, settings, and direct buttons when useful."
+        )
+
+
 def mini_app_builder_system_prompt(repair_error: Optional[str] = None, previous_output: Optional[str] = None) -> str:
     components = ", ".join(sorted(SUPPORTED_COMPONENTS))
     prompt = (
-        "Create one safe declarative Aura mini app bundle as JSON only. "
-        "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
+        f"{mini_app_builder_skill_prompt()}\n\n"
         f"Supported component types: {components}. "
         "Use camelCase fields exactly matching the schema: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities. "
         "Make the UI polished and app-like with at least two screens when useful, such as Dashboard plus Details, Plan, or Settings. "

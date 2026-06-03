@@ -24,7 +24,7 @@ def test_skill_discovery_uses_progressive_disclosure():
         message="block Instagram and open my habit tracker",
         api_key="key",
         model="model",
-        mini_apps=[ChatMiniAppIn(id="builtin.habit_tracker", name="Habit Tracker", intents=["check_workout"])],
+        mini_apps=[ChatMiniAppIn(id="builtin.habit_tracker", name="Habit Tracker", intents=["mark_workout_done"], actions=["check_workout"])],
     )
 
     neutral_system = build_system_message(neutral, build_prompt_harness(neutral))
@@ -34,6 +34,7 @@ def test_skill_discovery_uses_progressive_disclosure():
     assert "launcher_actions: When the user asks to block" not in neutral_system
     assert "launcher_actions: When the user asks to block" in active_system
     assert "mini_app_actions: For installed mini apps" in active_system
+    assert "declared actions: check_workout" in active_system
 
 
 def test_planning_mode_auto_enables_plan_for_complex_requests():
@@ -65,5 +66,12 @@ def test_model_routing_selects_fast_or_deep_models_when_enabled():
 def test_repair_needed_detects_claimed_action_without_tool_call():
     chat = ChatIn(message="block Instagram", api_key="key", model="model")
     reason = repair_needed("Done, blocked it.", "Done, blocked it.", [], chat)
+
+    assert reason == "reply claimed a local action without calling the matching tool"
+
+
+def test_repair_needed_detects_mini_app_creation_without_tool_call():
+    chat = ChatIn(message="create a client tracker mini app", api_key="key", model="model")
+    reason = repair_needed("Done, created it.", "Done, created it.", [], chat)
 
     assert reason == "reply claimed a local action without calling the matching tool"

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 ASSISTANT_TOOL_NAMES = {
     "block_app",
+    "create_mini_app",
     "open_mini_app",
     "create_mini_app_record",
     "query_mini_app_records",
@@ -35,7 +36,10 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
     )
     apps = _context_list(f"- {item.label} ({item.package_name})" for item in data.apps[:80])
     mini_apps = _context_list(
-        f"- {item.name} ({item.id}); assistant intents: {', '.join(item.intents[:8]) or 'none'}"
+        (
+            f"- {item.name} ({item.id}); assistant intents: {', '.join(item.intents[:8]) or 'none'}; "
+            f"declared actions: {', '.join(item.actions[:12]) or 'none'}"
+        )
         for item in data.mini_apps[:40]
     )
     return (
@@ -47,14 +51,15 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Use the available tools when the user asks for an action Aura can perform locally. "
         "Do not claim an action has completed unless you request the matching tool. "
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
-        "Use mini app tools when the user asks to open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
+        "Use mini app tools when the user asks to create/build/generate an Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
+        "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that captures the user's requested workflow. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. "
         f"Planning mode is {harness.planning_mode}. "
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
@@ -90,6 +95,25 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["duration_minutes"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "create_mini_app",
+            "description": "Create, install, and optionally open a professional Aura mini app from a user request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mini_app_prompt": {
+                        "type": "string",
+                        "description": "A concise but specific prompt describing the mini app to build, including workflow, data to track, actions, and screens.",
+                    },
+                    "open_after_create": {
+                        "type": "boolean",
+                        "description": "Whether Aura should open the new mini app after installing it. Defaults to true.",
+                    },
+                },
+                "required": ["mini_app_prompt"],
                 "additionalProperties": False,
             },
         },
@@ -203,6 +227,8 @@ def _action_from_tool_call(name: str, args: Any) -> Optional[ChatActionOut]:
         duration_minutes=args.get("duration_minutes"),
         mini_app_id=args.get("mini_app_id"),
         mini_app_query=args.get("mini_app_query"),
+        mini_app_prompt=args.get("mini_app_prompt"),
+        open_after_create=args.get("open_after_create"),
         action_id=args.get("action_id"),
         record_type=args.get("record_type"),
         values=_coerce_values(args.get("values")),
@@ -244,6 +270,8 @@ def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
                 duration_minutes=item.get("duration_minutes"),
                 mini_app_id=item.get("mini_app_id"),
                 mini_app_query=item.get("mini_app_query"),
+                mini_app_prompt=item.get("mini_app_prompt"),
+                open_after_create=item.get("open_after_create"),
                 action_id=item.get("action_id"),
                 record_type=item.get("record_type"),
                 values=item.get("values") if isinstance(item.get("values"), dict) else None,

@@ -28,7 +28,12 @@ enum class LlmProvider(val wireValue: String, val label: String) {
 data class ChatMemoryItem(val title: String, val content: String)
 data class ChatTodoItem(val title: String, val done: Boolean)
 data class ChatAppItem(val label: String, val package_name: String)
-data class ChatMiniAppItem(val id: String, val name: String, val intents: List<String> = emptyList())
+data class ChatMiniAppItem(
+    val id: String,
+    val name: String,
+    val intents: List<String> = emptyList(),
+    val actions: List<String> = emptyList()
+)
 
 data class ChatRequest(
     val message: String,
@@ -48,6 +53,8 @@ data class ChatAction(
     val duration_minutes: Int? = null,
     val mini_app_id: String? = null,
     val mini_app_query: String? = null,
+    val mini_app_prompt: String? = null,
+    val open_after_create: Boolean? = null,
     val action_id: String? = null,
     val record_type: String? = null,
     val values: Map<String, String>? = null

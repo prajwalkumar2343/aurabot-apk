@@ -143,7 +143,8 @@ class AssistantRepository(
                     ChatMiniAppItem(
                         id = install.id,
                         name = install.name,
-                        intents = bundle?.assistantIntents?.map { it.name }.orEmpty()
+                        intents = bundle?.assistantIntents?.map { it.name }.orEmpty(),
+                        actions = bundle?.actions?.map { it.id }.orEmpty()
                     )
                 }
             )
