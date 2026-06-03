@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.mini_apps import fallback_bundle
+from app.services.mini_apps import fallback_bundle, mini_app_builder_system_prompt
 
 
 @pytest.fixture
@@ -48,6 +48,14 @@ def test_build_mini_app_validates_llm_bundle(client):
     data = response.json()
     assert data["bundle"]["id"] == "generated.habits"
     assert data["bundle"]["screens"][0]["components"][1]["type"] == "quick_action_grid"
+
+
+def test_builder_system_prompt_loads_skill_markdown():
+    prompt = mini_app_builder_system_prompt()
+
+    assert "Aura Mini App Builder Skill" in prompt
+    assert "Professional App Shape" in prompt
+    assert "Supported component types:" in prompt
 
 
 def test_build_mini_app_rejects_empty_prompt(client):

@@ -55,6 +55,7 @@ def test_assistant_tool_registry_exposes_intended_tools():
 
     assert names == {
         "block_app",
+        "create_mini_app",
         "open_mini_app",
         "create_mini_app_record",
         "query_mini_app_records",
@@ -62,6 +63,30 @@ def test_assistant_tool_registry_exposes_intended_tools():
     block_app = next(tool for tool in tools if tool["name"] == "block_app")
     assert block_app["parameters"]["required"] == ["duration_minutes"]
     assert block_app["parameters"]["properties"]["duration_minutes"]["maximum"] == 1440
+    create_mini_app = next(tool for tool in tools if tool["name"] == "create_mini_app")
+    assert create_mini_app["parameters"]["required"] == ["mini_app_prompt"]
+
+
+def test_parse_create_mini_app_assistant_action():
+    reply, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "{excited} Creating that mini app.",
+                "actions": [
+                    {
+                        "type": "create_mini_app",
+                        "mini_app_prompt": "Build a professional study planner with tasks, streaks, history, and settings.",
+                        "open_after_create": True,
+                    }
+                ],
+            }
+        )
+    )
+
+    assert reply == "{excited} Creating that mini app."
+    assert actions[0].type == "create_mini_app"
+    assert actions[0].mini_app_prompt.startswith("Build a professional study planner")
+    assert actions[0].open_after_create is True
 
 
 def test_openai_function_calls_are_converted_to_chat_actions():
