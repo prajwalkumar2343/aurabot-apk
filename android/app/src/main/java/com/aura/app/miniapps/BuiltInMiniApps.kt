@@ -47,7 +47,30 @@ object BuiltInMiniApps {
                         )
                     ),
                     MiniAppComponent("timeline", "History", source = "records"),
-                    MiniAppComponent("chart", "Last 7 Days", metric = "weekly_count")
+                    MiniAppComponent("chart", "Last 7 Days", metric = "weekly_count"),
+                    MiniAppComponent("slider", "Weekly Goal", metric = "weekly_count")
+                )
+            ),
+            MiniAppScreen(
+                id = "coach",
+                title = "Coach",
+                components = listOf(
+                    MiniAppComponent(
+                        "list",
+                        "Routine",
+                        items = listOf(
+                            MiniAppComponentItem("Hydration", "check_water", "Tiny daily baseline"),
+                            MiniAppComponentItem("Movement", "check_workout", "Protect your energy"),
+                            MiniAppComponentItem("Reading", "check_reading", "Keep the mind warm")
+                        )
+                    ),
+                    MiniAppComponent(
+                        "bottom_sheet",
+                        "Momentum note",
+                        items = listOf(MiniAppComponentItem("Streaks grow best when check-ins stay lightweight."))
+                    ),
+                    MiniAppComponent("button", "Log water now", actionId = "check_water"),
+                    MiniAppComponent("settings", "App setup")
                 )
             )
         ),
@@ -100,7 +123,30 @@ object BuiltInMiniApps {
                         )
                     ),
                     MiniAppComponent("chart", "Focus Rhythm", metric = "weekly_count"),
-                    MiniAppComponent("timeline", "Session Log", source = "records")
+                    MiniAppComponent("timeline", "Session Log", source = "records"),
+                    MiniAppComponent("slider", "Weekly Focus Pace", metric = "weekly_count")
+                )
+            ),
+            MiniAppScreen(
+                id = "plan",
+                title = "Plan",
+                components = listOf(
+                    MiniAppComponent(
+                        "list",
+                        "Focus Menu",
+                        items = listOf(
+                            MiniAppComponentItem("Deep Work", "plan_deep_work", "60 minute protected block"),
+                            MiniAppComponentItem("Admin Sweep", "plan_admin", "25 minute cleanup sprint"),
+                            MiniAppComponentItem("Win Log", "log_win", "Capture a completed outcome")
+                        )
+                    ),
+                    MiniAppComponent("button", "Start deep work", actionId = "plan_deep_work"),
+                    MiniAppComponent(
+                        "bottom_sheet",
+                        "Planning note",
+                        items = listOf(MiniAppComponentItem("Use Focus Planner when the day needs one next obvious block, not a giant plan."))
+                    ),
+                    MiniAppComponent("settings", "Planner setup")
                 )
             )
         ),
@@ -152,7 +198,30 @@ object BuiltInMiniApps {
                             MiniAppComponentItem("Groceries", "groceries")
                         )
                     ),
-                    MiniAppComponent("timeline", "Recent Expenses", source = "records")
+                    MiniAppComponent("timeline", "Recent Expenses", source = "records"),
+                    MiniAppComponent("slider", "Weekly Entry Pace", metric = "weekly_count")
+                )
+            ),
+            MiniAppScreen(
+                id = "categories",
+                title = "Categories",
+                components = listOf(
+                    MiniAppComponent(
+                        "list",
+                        "Quick Categories",
+                        items = listOf(
+                            MiniAppComponentItem("Food", "coffee", "Coffee, lunch, snacks"),
+                            MiniAppComponentItem("Travel", "transport", "Transit and rides"),
+                            MiniAppComponentItem("Home", "groceries", "Groceries and basics")
+                        )
+                    ),
+                    MiniAppComponent("button", "Log groceries", actionId = "groceries"),
+                    MiniAppComponent(
+                        "bottom_sheet",
+                        "Ledger note",
+                        items = listOf(MiniAppComponentItem("This is a quick local ledger, built for capture first and analysis later."))
+                    ),
+                    MiniAppComponent("settings", "Ledger setup")
                 )
             )
         ),
