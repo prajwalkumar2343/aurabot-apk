@@ -1399,57 +1399,128 @@ private fun AuraStoreSection(
     onInstall: (MiniAppBundle) -> Unit,
     onCreate: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Rounded.Store, null, tint = MaterialTheme.colorScheme.primary)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                RoundedCornerShape(28.dp)
+            )
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Store, null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Mini Apps",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "${installed.size} installed locally",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(
-                "AURA STORE",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f)
+                "Local",
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
             )
         }
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier.height(118.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            userScrollEnabled = false
-        ) {
-            items(installed, key = { it.id }) { miniApp ->
-                MiniAppIconCard(miniApp, onOpen)
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            builtIns.filterNot { builtIn -> installed.any { it.id == builtIn.id } }.take(2).forEach { bundle ->
-                FilledTonalButton(
-                    onClick = { onInstall(bundle) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(bundle.metadata.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (installed.isEmpty()) {
+            MiniAppEmptyStoreCard()
+        } else {
+            val visibleApps = installed.take(4)
+            val storeRows = ((visibleApps.size + 1) / 2).coerceAtLeast(1)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.height((storeRows * 146).dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                userScrollEnabled = false
+            ) {
+                items(visibleApps, key = { it.id }) { miniApp ->
+                    MiniAppIconCard(
+                        miniApp = miniApp,
+                        onOpen = onOpen
+                    )
                 }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        val available = builtIns.filterNot { builtIn -> installed.any { it.id == builtIn.id } }
+        if (available.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Available templates",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                available.take(2).forEach { bundle ->
+                    val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(primary.copy(alpha = 0.09f))
+                            .clickable { onInstall(bundle) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        MiniAppAvatar(bundle.icon.value, bundle.icon.background, primary, 42.dp, 12.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(bundle.metadata.name, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(bundle.metadata.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Icon(Icons.Rounded.Add, "Install ${bundle.metadata.name}", tint = primary)
+                    }
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = prompt,
                 onValueChange = onPrompt,
                 modifier = Modifier.weight(1f),
                 leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
-                placeholder = { Text("CREATE WITH AURA...") },
+                placeholder = { Text("Describe an app to create") },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    focusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.42f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.28f)
+                )
             )
-            IconButton(
+            FilledTonalButton(
                 onClick = onCreate,
-                modifier = Modifier
-                    .size(52.dp)
-                    .glassCard(shape = CircleShape)
+                modifier = Modifier.height(56.dp),
+                shape = RoundedCornerShape(18.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp)
             ) {
                 Icon(Icons.Rounded.Add, "Create Mini App")
             }
@@ -1458,36 +1529,97 @@ private fun AuraStoreSection(
 }
 
 @Composable
-private fun MiniAppIconCard(miniApp: MiniAppInstall, onOpen: (MiniAppInstall) -> Unit) {
-    Column(
+private fun MiniAppEmptyStoreCard() {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpen(miniApp) }
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .height(112.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.45f))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                RoundedCornerShape(22.dp)
+            )
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(58.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(parseMiniAppColor(miniApp.icon.background, MaterialTheme.colorScheme.primary)),
-            contentAlignment = Alignment.Center
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
+            Text("Create your first local mini app", fontWeight = FontWeight.Black)
+            Text("Templates and generated apps live here", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun MiniAppIconCard(
+    miniApp: MiniAppInstall,
+    onOpen: (MiniAppInstall) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val primary = parseMiniAppColor(miniApp.icon.background, MaterialTheme.colorScheme.primary)
+    Column(
+        modifier = modifier
+            .height(134.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(primary.copy(alpha = 0.24f), MaterialTheme.colorScheme.background.copy(alpha = 0.48f))
+                )
+            )
+            .border(BorderStroke(1.dp, primary.copy(alpha = 0.18f)), RoundedCornerShape(24.dp))
+            .clickable { onOpen(miniApp) }
+            .padding(14.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MiniAppAvatar(miniApp.icon.value, miniApp.icon.background, primary, 48.dp, 14.dp)
+            Icon(Icons.Rounded.ChevronRight, "Open ${miniApp.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                miniApp.icon.value.take(2).uppercase(),
-                color = Color.White,
-                fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.titleMedium
+                miniApp.name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                miniApp.category,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(7.dp))
+    }
+}
+
+@Composable
+private fun MiniAppAvatar(
+    value: String,
+    background: String,
+    fallback: Color,
+    size: androidx.compose.ui.unit.Dp,
+    radius: androidx.compose.ui.unit.Dp
+) {
+    val color = parseMiniAppColor(background, fallback)
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(radius))
+            .background(
+                Brush.linearGradient(
+                    listOf(color, color.copy(alpha = 0.72f))
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
         Text(
-            miniApp.name.uppercase(),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-            modifier = Modifier.fillMaxWidth()
+            value.take(2).uppercase(),
+            color = Color.White,
+            fontWeight = FontWeight.Black,
+            style = MaterialTheme.typography.titleMedium
         )
     }
 }
@@ -1502,46 +1634,177 @@ private fun MiniAppRuntimeScreen(
 ) {
     if (bundle == null) {
         ScreenShell(wallpaperUri = null) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+            MiniAppMissingState(onBack, "Mini app is not available")
         }
         return
     }
     val screen = bundle.screens.firstOrNull()
     if (screen == null) {
         ScreenShell(wallpaperUri = null) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+            MiniAppMissingState(onBack, "This mini app has no screen yet")
         }
         return
     }
     val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
+    val secondary = parseMiniAppColor(bundle.theme.secondary, MaterialTheme.colorScheme.tertiary)
+    val today = remember(records) { records.count { isToday(it.createdAt) } }
+    val streak = remember(records) { calculateStreak(records) }
     ScreenShell(wallpaperUri = null) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+        MiniAppTopBar(bundle, screen.title, primary, onBack)
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(bottom = 28.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            item(key = "hero") {
+                MiniAppHeroCard(bundle, records.size, today, streak, primary, secondary)
             }
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(parseMiniAppColor(bundle.icon.background, primary)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(bundle.icon.value.take(2).uppercase(), color = Color.White, fontWeight = FontWeight.Black)
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(bundle.metadata.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
-                Text(screen.title.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f))
-            }
-        }
-        Spacer(Modifier.height(18.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             itemsIndexed(
                 screen.components,
                 key = { index, component -> "$index:${component.type}:${component.title}" }
             ) { _, component ->
-                MiniAppComponentView(bundle, component, records, primary, onRunAction, onDeleteRecord)
+                MiniAppComponentView(bundle, component, records, primary, secondary, onRunAction, onDeleteRecord)
             }
         }
+    }
+}
+
+@Composable
+private fun MiniAppMissingState(onBack: () -> Unit, message: String) {
+    IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+    }
+    Spacer(Modifier.height(18.dp))
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f), fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun MiniAppTopBar(
+    bundle: MiniAppBundle,
+    screenTitle: String,
+    primary: Color,
+    onBack: () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        IconButton(onClick = onBack, modifier = Modifier.glassCard(shape = CircleShape)) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+        }
+        MiniAppAvatar(bundle.icon.value, bundle.icon.background, primary, 48.dp, 14.dp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                bundle.metadata.name,
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                screenTitle,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.58f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniAppHeroCard(
+    bundle: MiniAppBundle,
+    totalRecords: Int,
+    today: Int,
+    streak: Int,
+    primary: Color,
+    secondary: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(30.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(primary.copy(alpha = 0.32f), secondary.copy(alpha = 0.18f), MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                )
+            )
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.11f)), RoundedCornerShape(30.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    bundle.metadata.description.ifBlank { "A local app powered by Aura." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    bundle.metadata.category,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.38f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            MiniAppProgressOrb(today, primary)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            MiniAppHeroStat("Today", today.toString(), Modifier.weight(1f))
+            MiniAppHeroStat("Streak", streak.toString(), Modifier.weight(1f))
+            MiniAppHeroStat("Total", totalRecords.toString(), Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MiniAppProgressOrb(value: Int, primary: Color) {
+    Box(
+        modifier = Modifier
+            .size(72.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.38f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+            drawArc(
+                color = primary.copy(alpha = 0.2f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+            )
+            drawArc(
+                color = primary,
+                startAngle = -90f,
+                sweepAngle = (value.coerceIn(0, 7) / 7f) * 360f,
+                useCenter = false,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+            )
+        }
+        Text(value.toString(), color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+@Composable
+private fun MiniAppHeroStat(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.36f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black), color = MaterialTheme.colorScheme.onSurface)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1551,51 +1814,192 @@ private fun MiniAppComponentView(
     component: MiniAppComponent,
     records: List<MiniAppRecord>,
     primary: Color,
+    secondary: Color,
     onRunAction: (String, String) -> Unit,
     onDeleteRecord: (String, String) -> Unit
 ) {
     when (component.type) {
-        "quick_action_grid" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
-            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(92.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), userScrollEnabled = false) {
-                itemsIndexed(
-                    component.items,
-                    key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
-                ) { _, item ->
-                    FilledTonalButton(
-                        onClick = { item.actionId?.let { onRunAction(bundle.id, it) } },
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.height(72.dp)
-                    ) {
-                        Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        }
-        "timeline" -> Column(
-            modifier = Modifier.glassCard(shape = RoundedCornerShape(16.dp)).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(component.title.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
-            records.take(8).ifEmpty { listOf(null) }.forEach { record ->
-                if (record == null) {
-                    Text("No local records yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(primary))
-                        Column(Modifier.weight(1f)) {
-                            Text(record.values.values.joinToString(" · ").ifBlank { record.recordType }, fontWeight = FontWeight.Bold)
-                            Text(formatMiniAppTime(record.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        IconButton(onClick = { onDeleteRecord(bundle.id, record.id) }) {
-                            Icon(Icons.Rounded.Delete, "Delete", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-            }
-        }
-        "streak_view", "progress_ring", "dashboard_block", "chart" -> MiniAppMetricCard(component, records, primary)
+        "quick_action_grid" -> MiniAppActionPanel(bundle, component, primary, secondary, onRunAction)
+        "timeline" -> MiniAppTimelineCard(bundle, component, records, primary, onDeleteRecord)
+        "chart" -> MiniAppChartCard(component, records, primary, secondary)
+        "streak_view", "progress_ring", "dashboard_block" -> MiniAppMetricCard(component, records, primary)
         else -> MiniAppMetricCard(component, records, primary)
+    }
+}
+
+@Composable
+private fun MiniAppActionPanel(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    primary: Color,
+    secondary: Color,
+    onRunAction: (String, String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MiniAppSectionTitle(component.title.ifBlank { "Actions" }, "Tap to update")
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.height(104.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            userScrollEnabled = false
+        ) {
+            itemsIndexed(
+                component.items,
+                key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
+            ) { index, item ->
+                val color = if (index % 2 == 0) primary else secondary
+                Column(
+                    modifier = Modifier
+                        .height(92.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(color.copy(alpha = 0.12f))
+                        .border(BorderStroke(1.dp, color.copy(alpha = 0.18f)), RoundedCornerShape(22.dp))
+                        .clickable { item.actionId?.let { onRunAction(bundle.id, it) } }
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(color.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Check, null, tint = color, modifier = Modifier.size(17.dp))
+                    }
+                    Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppTimelineCard(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    records: List<MiniAppRecord>,
+    primary: Color,
+    onDeleteRecord: (String, String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "History" }, "${records.size} records")
+        if (records.isEmpty()) {
+            MiniAppEmptyTimeline(primary)
+        } else {
+            records.take(8).forEach { record ->
+                MiniAppTimelineRow(bundle, record, primary, onDeleteRecord)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppTimelineRow(
+    bundle: MiniAppBundle,
+    record: MiniAppRecord,
+    primary: Color,
+    onDeleteRecord: (String, String) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(Modifier.size(9.dp).clip(CircleShape).background(primary))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                record.values.values.joinToString(" / ").ifBlank { record.recordType },
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(formatMiniAppTime(record.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = { onDeleteRecord(bundle.id, record.id) }) {
+            Icon(Icons.Rounded.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun MiniAppEmptyTimeline(primary: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(primary.copy(alpha = 0.08f))
+            .padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(Icons.Rounded.CheckCircle, null, tint = primary)
+        Text("Nothing logged yet", fontWeight = FontWeight.Black)
+        Text("Use an action above to create the first record", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun MiniAppChartCard(component: MiniAppComponent, records: List<MiniAppRecord>, primary: Color, secondary: Color) {
+    val buckets = remember(records) { weeklyBuckets(records) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "Trend" }, "Last 7 days")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(104.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val peak = buckets.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+            buckets.forEachIndexed { index, bucket ->
+                val heightFraction = (bucket.second.toFloat() / peak.toFloat()).coerceIn(0.08f, 1f)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height((76 * heightFraction).dp)
+                            .clip(RoundedCornerShape(topStart = 9.dp, topEnd = 9.dp, bottomStart = 4.dp, bottomEnd = 4.dp))
+                            .background(if (index == buckets.lastIndex) primary else secondary.copy(alpha = 0.38f))
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(bucket.first, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppSectionTitle(title: String, subtitle: String) {
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1604,22 +2008,33 @@ private fun MiniAppMetricCard(component: MiniAppComponent, records: List<MiniApp
     val today = remember(records) { records.count { isToday(it.createdAt) } }
     val streak = remember(records) { calculateStreak(records) }
     val value = when (component.metric) {
-        "today_count" -> "$today"
-        "streak" -> "$streak"
-        "weekly_count" -> records.take(7).size.toString()
-        else -> records.size.toString()
+        "today_count" -> today
+        "streak" -> streak
+        "weekly_count" -> weeklyBuckets(records).sumOf { it.second }
+        else -> records.size
+    }
+    val label = when (component.metric) {
+        "today_count" -> "Logged today"
+        "streak" -> "Consecutive days"
+        "weekly_count" -> "This week"
+        else -> "Total records"
     }
     Row(
-        modifier = Modifier.glassCard(shape = RoundedCornerShape(16.dp)).padding(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box(Modifier.size(54.dp).clip(CircleShape).background(primary.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
-            Text(value, color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+        Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(primary.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+            Text(value.toString(), color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
         }
-        Column {
-            Text(component.title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-            Text("Stored locally on this phone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(component.title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -1637,6 +2052,20 @@ private fun formatMiniAppTime(value: Long): String =
 private fun isToday(value: Long): Boolean {
     val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
     return fmt.format(Date(value)) == fmt.format(Date())
+}
+
+private fun weeklyBuckets(records: List<MiniAppRecord>): List<Pair<String, Int>> {
+    val keyFormat = SimpleDateFormat("yyyyMMdd", Locale.US)
+    val labelFormat = SimpleDateFormat("E", Locale.getDefault())
+    val calendar = java.util.Calendar.getInstance()
+    calendar.add(java.util.Calendar.DATE, -6)
+    return (0..6).map {
+        val date = calendar.time
+        val key = keyFormat.format(date)
+        val label = labelFormat.format(date).take(1)
+        calendar.add(java.util.Calendar.DATE, 1)
+        label to records.count { record -> keyFormat.format(Date(record.createdAt)) == key }
+    }
 }
 
 private fun calculateStreak(records: List<MiniAppRecord>): Int {
