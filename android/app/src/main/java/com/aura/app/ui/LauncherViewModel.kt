@@ -398,7 +398,30 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                             )
                         ),
                         com.aura.app.miniapps.MiniAppComponent("chart", "Last 7 Days", metric = "weekly_count"),
-                        com.aura.app.miniapps.MiniAppComponent("timeline", "Activity", source = "records")
+                        com.aura.app.miniapps.MiniAppComponent("timeline", "Activity", source = "records"),
+                        com.aura.app.miniapps.MiniAppComponent("slider", "Weekly Pace", metric = "weekly_count")
+                    )
+                ),
+                com.aura.app.miniapps.MiniAppScreen(
+                    id = "details",
+                    title = "Details",
+                    components = listOf(
+                        com.aura.app.miniapps.MiniAppComponent(
+                            "list",
+                            "Shortcuts",
+                            items = listOf(
+                                com.aura.app.miniapps.MiniAppComponentItem("Log entry", "quick_add", "Capture the default item"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Mark priority", "mark_priority", "Pin the most important thing"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Save note", "save_note", "Keep a lightweight note")
+                            )
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent("button", "Log now", actionId = "quick_add"),
+                        com.aura.app.miniapps.MiniAppComponent(
+                            "bottom_sheet",
+                            "App note",
+                            items = listOf(com.aura.app.miniapps.MiniAppComponentItem("This generated app starts with local capture, history, progress, and assistant actions."))
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent("settings", "App setup")
                     )
                 )
             ),
