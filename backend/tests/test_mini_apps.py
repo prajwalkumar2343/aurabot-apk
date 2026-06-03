@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.mini_apps import fallback_bundle
 
 
 @pytest.fixture
@@ -90,3 +91,14 @@ def test_build_mini_app_rejects_forbidden_capability(client):
 
     assert response.status_code == 422
     assert "Unsupported capability" in response.json()["detail"]
+
+
+def test_fallback_bundle_has_real_app_structure():
+    bundle = fallback_bundle("focus planner for deep work")
+
+    assert bundle.metadata.category == "Productivity"
+    assert bundle.theme.primary == "#2563EB"
+    assert len(bundle.actions) == 3
+    component_types = [component.type for component in bundle.screens[0].components]
+    assert component_types == ["dashboard_block", "streak_view", "quick_action_grid", "chart", "timeline"]
+    assert len(bundle.screens[0].components[2].items) == 3
