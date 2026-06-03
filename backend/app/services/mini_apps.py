@@ -34,7 +34,8 @@ def mini_app_builder_system_prompt(repair_error: Optional[str] = None, previous_
         "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
         f"Supported component types: {components}. "
         "Use camelCase fields exactly matching the schema: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities. "
-        "Make the UI polished with dashboard blocks, quick actions, timeline/history, stats, and assistant intents when useful."
+        "Make the UI polished and app-like with at least two screens when useful, such as Dashboard plus Details, Plan, or Settings. "
+        "Use dashboard blocks, quick actions, timeline/history, chart, list, button, slider, settings, bottom_sheet, and assistant intents when useful."
     )
     if repair_error:
         prompt += (
@@ -105,27 +106,93 @@ def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
 
 
 def fallback_bundle(prompt: str) -> MiniAppBundle:
-    name = " ".join(prompt.strip().split()[:3]).title() or "Mini App"
+    cleaned = " ".join(prompt.strip().split())
+    name = " ".join(cleaned.split()[:3]).title() or "Mini App"
     slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or uuid.uuid4().hex[:8]
+    normalized = cleaned.lower()
+    if any(word in normalized for word in ("habit", "health", "water", "workout", "wellness")):
+        category = "Wellness"
+        primary = "#16A34A"
+    elif any(word in normalized for word in ("money", "spend", "expense", "budget", "finance")):
+        category = "Finance"
+        primary = "#0F766E"
+    elif any(word in normalized for word in ("focus", "task", "plan", "work", "study")):
+        category = "Productivity"
+        primary = "#2563EB"
+    else:
+        category = "Custom"
+        primary = "#7C3AED"
     return validate_mini_app_bundle(
         {
             "id": f"generated.{slug}",
             "version": 1,
-            "metadata": {"name": name, "description": f"Created from: {prompt}", "category": "Custom"},
-            "icon": {"type": "initial", "value": name[:1].upper(), "background": "#4F46E5"},
-            "dataSchema": {"recordType": "record", "fields": [{"name": "title", "type": "text", "required": True}]},
-            "actions": [{"id": "quick_add", "type": "create_record", "recordType": "record", "values": {"title": prompt}}],
-            "assistantIntents": [{"name": "quick_add", "utterances": [f"add to {name}"], "actionId": "quick_add"}],
+            "metadata": {"name": name, "description": f"A local {category.lower()} app created from: {cleaned}", "category": category},
+            "theme": {"primary": primary, "secondary": "#F59E0B", "surface": "#111827"},
+            "icon": {"type": "initial", "value": name[:1].upper(), "background": primary},
+            "dataSchema": {
+                "recordType": "entry",
+                "fields": [
+                    {"name": "title", "type": "text", "required": True},
+                    {"name": "status", "type": "text", "required": True},
+                    {"name": "note", "type": "text"},
+                ],
+            },
+            "actions": [
+                {"id": "quick_add", "type": "create_record", "recordType": "entry", "values": {"title": cleaned, "status": "Logged"}},
+                {"id": "mark_priority", "type": "create_record", "recordType": "entry", "values": {"title": "Priority", "status": cleaned}},
+                {"id": "save_note", "type": "create_record", "recordType": "entry", "values": {"title": "Note", "status": "Captured"}},
+            ],
+            "assistantIntents": [
+                {"name": "quick_add", "utterances": [f"add to {name}", f"log {name}"], "actionId": "quick_add"},
+                {"name": "show_dashboard", "utterances": [f"open {name}", f"show {name}"], "screenId": "dashboard"},
+            ],
             "screens": [
                 {
                     "id": "dashboard",
-                    "title": name,
+                    "title": "Dashboard",
                     "components": [
-                        {"type": "dashboard_block", "title": "Overview", "metric": "record_count"},
-                        {"type": "quick_action_grid", "title": "Actions", "items": [{"label": "Add", "actionId": "quick_add"}]},
-                        {"type": "timeline", "title": "History", "source": "records"},
+                        {"type": "dashboard_block", "title": "Today", "metric": "today_count"},
+                        {"type": "streak_view", "title": "Momentum", "metric": "streak"},
+                        {
+                            "type": "quick_action_grid",
+                            "title": "Actions",
+                            "items": [
+                                {"label": "Log", "actionId": "quick_add"},
+                                {"label": "Priority", "actionId": "mark_priority"},
+                                {"label": "Note", "actionId": "save_note"},
+                            ],
+                        },
+                        {"type": "chart", "title": "Last 7 Days", "metric": "weekly_count"},
+                        {"type": "timeline", "title": "Activity", "source": "records"},
+                        {"type": "slider", "title": "Weekly Pace", "metric": "weekly_count"},
                     ],
-                }
+                },
+                {
+                    "id": "details",
+                    "title": "Details",
+                    "components": [
+                        {
+                            "type": "list",
+                            "title": "Shortcuts",
+                            "items": [
+                                {"label": "Log entry", "actionId": "quick_add", "value": "Capture the default item"},
+                                {"label": "Mark priority", "actionId": "mark_priority", "value": "Pin the most important thing"},
+                                {"label": "Save note", "actionId": "save_note", "value": "Keep a lightweight note"},
+                            ],
+                        },
+                        {"type": "button", "title": "Log now", "actionId": "quick_add"},
+                        {
+                            "type": "bottom_sheet",
+                            "title": "App note",
+                            "items": [
+                                {
+                                    "label": "This generated app starts with local capture, history, progress, and assistant actions."
+                                }
+                            ],
+                        },
+                        {"type": "settings", "title": "App setup"},
+                    ],
+                },
             ],
             "capabilities": ["local_storage", "assistant_actions"],
         }

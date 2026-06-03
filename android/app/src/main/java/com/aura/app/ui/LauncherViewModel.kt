@@ -342,30 +342,90 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         val trimmed = prompt.trim()
         val slug = trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifBlank { "custom" }
         val name = trimmed.split(Regex("\\s+")).take(3).joinToString(" ").replaceFirstChar { it.uppercase() }
+        val normalized = trimmed.lowercase()
+        val category = when {
+            listOf("habit", "health", "water", "workout", "wellness").any { normalized.contains(it) } -> "Wellness"
+            listOf("money", "spend", "expense", "budget", "finance").any { normalized.contains(it) } -> "Finance"
+            listOf("focus", "task", "plan", "work", "study").any { normalized.contains(it) } -> "Productivity"
+            else -> "Custom"
+        }
+        val color = when (category) {
+            "Wellness" -> "#16A34A"
+            "Finance" -> "#0F766E"
+            "Productivity" -> "#2563EB"
+            else -> "#7C3AED"
+        }
         return MiniAppBundle(
             id = "local.$slug",
             metadata = com.aura.app.miniapps.MiniAppMetadata(
                 name = name,
-                description = "Created locally with Aura.",
-                category = "Custom"
+                description = "A local ${category.lowercase()} app created from: $trimmed",
+                category = category
             ),
-            icon = com.aura.app.miniapps.MiniAppIcon(value = name.take(1).uppercase(), background = "#7C3AED"),
+            theme = com.aura.app.miniapps.MiniAppTheme(primary = color, secondary = "#F59E0B", surface = "#111827"),
+            icon = com.aura.app.miniapps.MiniAppIcon(value = name.take(1).uppercase(), background = color),
             dataSchema = com.aura.app.miniapps.MiniAppDataSchema(
-                fields = listOf(com.aura.app.miniapps.MiniAppField("title", "text", required = true))
+                recordType = "entry",
+                fields = listOf(
+                    com.aura.app.miniapps.MiniAppField("title", "text", required = true),
+                    com.aura.app.miniapps.MiniAppField("status", "text", required = true),
+                    com.aura.app.miniapps.MiniAppField("note", "text")
+                )
             ),
-            actions = listOf(com.aura.app.miniapps.MiniAppAction("quick_add", "create_record", values = mapOf("title" to trimmed))),
-            assistantIntents = listOf(com.aura.app.miniapps.MiniAppAssistantIntent("quick_add", listOf("add to $name"), actionId = "quick_add")),
+            actions = listOf(
+                com.aura.app.miniapps.MiniAppAction("quick_add", "create_record", recordType = "entry", values = mapOf("title" to trimmed, "status" to "Logged")),
+                com.aura.app.miniapps.MiniAppAction("mark_priority", "create_record", recordType = "entry", values = mapOf("title" to "Priority", "status" to trimmed)),
+                com.aura.app.miniapps.MiniAppAction("save_note", "create_record", recordType = "entry", values = mapOf("title" to "Note", "status" to "Captured"))
+            ),
+            assistantIntents = listOf(
+                com.aura.app.miniapps.MiniAppAssistantIntent("quick_add", listOf("add to $name", "log $name"), actionId = "quick_add"),
+                com.aura.app.miniapps.MiniAppAssistantIntent("show_dashboard", listOf("open $name", "show $name"), screenId = "dashboard")
+            ),
             screens = listOf(
                 com.aura.app.miniapps.MiniAppScreen(
                     id = "dashboard",
-                    title = name,
+                    title = "Dashboard",
                     components = listOf(
-                        com.aura.app.miniapps.MiniAppComponent("dashboard_block", "Local Records", metric = "record_count"),
-                        com.aura.app.miniapps.MiniAppComponent("quick_action_grid", "Actions", items = listOf(com.aura.app.miniapps.MiniAppComponentItem("Add", "quick_add"))),
-                        com.aura.app.miniapps.MiniAppComponent("timeline", "History", source = "records")
+                        com.aura.app.miniapps.MiniAppComponent("dashboard_block", "Today", metric = "today_count"),
+                        com.aura.app.miniapps.MiniAppComponent("streak_view", "Momentum", metric = "streak"),
+                        com.aura.app.miniapps.MiniAppComponent(
+                            "quick_action_grid",
+                            "Actions",
+                            items = listOf(
+                                com.aura.app.miniapps.MiniAppComponentItem("Log", "quick_add"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Priority", "mark_priority"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Note", "save_note")
+                            )
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent("chart", "Last 7 Days", metric = "weekly_count"),
+                        com.aura.app.miniapps.MiniAppComponent("timeline", "Activity", source = "records"),
+                        com.aura.app.miniapps.MiniAppComponent("slider", "Weekly Pace", metric = "weekly_count")
+                    )
+                ),
+                com.aura.app.miniapps.MiniAppScreen(
+                    id = "details",
+                    title = "Details",
+                    components = listOf(
+                        com.aura.app.miniapps.MiniAppComponent(
+                            "list",
+                            "Shortcuts",
+                            items = listOf(
+                                com.aura.app.miniapps.MiniAppComponentItem("Log entry", "quick_add", "Capture the default item"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Mark priority", "mark_priority", "Pin the most important thing"),
+                                com.aura.app.miniapps.MiniAppComponentItem("Save note", "save_note", "Keep a lightweight note")
+                            )
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent("button", "Log now", actionId = "quick_add"),
+                        com.aura.app.miniapps.MiniAppComponent(
+                            "bottom_sheet",
+                            "App note",
+                            items = listOf(com.aura.app.miniapps.MiniAppComponentItem("This generated app starts with local capture, history, progress, and assistant actions."))
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent("settings", "App setup")
                     )
                 )
-            )
+            ),
+            capabilities = listOf("local_storage", "assistant_actions")
         )
     }
 
