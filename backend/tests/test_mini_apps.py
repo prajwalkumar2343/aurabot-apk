@@ -99,6 +99,9 @@ def test_fallback_bundle_has_real_app_structure():
     assert bundle.metadata.category == "Productivity"
     assert bundle.theme.primary == "#2563EB"
     assert len(bundle.actions) == 3
+    assert len(bundle.screens) == 2
     component_types = [component.type for component in bundle.screens[0].components]
-    assert component_types == ["dashboard_block", "streak_view", "quick_action_grid", "chart", "timeline"]
+    assert component_types == ["dashboard_block", "streak_view", "quick_action_grid", "chart", "timeline", "slider"]
     assert len(bundle.screens[0].components[2].items) == 3
+    detail_types = [component.type for component in bundle.screens[1].components]
+    assert detail_types == ["list", "button", "bottom_sheet", "settings"]
