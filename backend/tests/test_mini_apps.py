@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.mini_apps import fallback_bundle, mini_app_builder_system_prompt
+from app.services.mini_apps import compile_mini_app_bundle, fallback_bundle, mini_app_builder_system_prompt, react_fallback_bundle
 
 
 @pytest.fixture
@@ -36,6 +36,26 @@ def valid_bundle():
     }
 
 
+def valid_react_bundle():
+    return {
+        "id": "generated.react.notes",
+        "runtime": "react",
+        "metadata": {"name": "React Notes", "description": "Take notes", "category": "Productivity"},
+        "icon": {"type": "initial", "value": "R", "background": "#2563EB"},
+        "dataSchema": {"recordType": "note", "fields": [{"name": "title", "type": "text", "required": True}]},
+        "screens": [],
+        "actions": [],
+        "assistantIntents": [{"name": "open_notes", "utterances": ["open notes"], "screenId": "react"}],
+        "capabilities": ["local_storage", "assistant_actions", "react_runtime", "scoped_storage"],
+        "codeBundle": {
+            "entry": "App.jsx",
+            "appJsx": "export default function App({ records }) { return <main><h1>Notes</h1></main>; }",
+            "css": "body { margin: 0; }",
+            "allowedApis": ["records"],
+        },
+    }
+
+
 def build_payload(prompt="make me a habit tracker for workouts and water"):
     return {"prompt": prompt, "provider": "gemini", "api_key": "test", "model": "gemini-test"}
 
@@ -56,6 +76,7 @@ def test_builder_system_prompt_loads_skill_markdown():
     assert "Aura Mini App Builder Skill" in prompt
     assert "Professional App Shape" in prompt
     assert "Supported component types:" in prompt
+    assert "runtime to react" in mini_app_builder_system_prompt(runtime="react")
 
 
 def test_build_mini_app_rejects_empty_prompt(client):
@@ -99,6 +120,34 @@ def test_build_mini_app_rejects_forbidden_capability(client):
 
     assert response.status_code == 422
     assert "Unsupported capability" in response.json()["detail"]
+
+
+def test_build_mini_app_compiles_requested_react_bundle(client):
+    with patch("app.api.mini_apps.call_builder_llm", return_value=json.dumps(valid_react_bundle())):
+        response = client.post("/api/mini-apps/build", json={**build_payload("make a real notes app"), "runtime": "react"})
+
+    assert response.status_code == 200
+    bundle = response.json()["bundle"]
+    assert bundle["runtime"] == "react"
+    assert "window.__AuraMiniAppMount" in bundle["codeBundle"]["compiledJs"]
+
+
+def test_build_mini_app_rejects_react_code_with_blocked_browser_api(client):
+    bundle = valid_react_bundle()
+    bundle["codeBundle"]["appJsx"] = "export default function App() { fetch('https://example.com'); return <main />; }"
+    with patch("app.api.mini_apps.call_builder_llm", return_value=json.dumps(bundle)):
+        response = client.post("/api/mini-apps/build", json={**build_payload("make a real notes app"), "runtime": "react"})
+
+    assert response.status_code == 422
+    assert "Blocked React code pattern" in response.json()["detail"]
+
+
+def test_react_fallback_bundle_compiles():
+    bundle = compile_mini_app_bundle(react_fallback_bundle("field notes"))
+
+    assert bundle.runtime == "react"
+    assert bundle.codeBundle is not None
+    assert "window.__AuraMiniAppMount" in bundle.codeBundle.compiledJs
 
 
 def test_fallback_bundle_has_real_app_structure():
