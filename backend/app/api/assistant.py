@@ -2,9 +2,12 @@ import uuid
 import asyncio
 import requests
 import logging
-from fastapi import APIRouter, HTTPException
-from app.models.chat import ChatIn, ChatOut
+from fastapi import APIRouter, HTTPException, Depends
+from app.core.database import get_db
+from app.core.security import get_optional_current_user
+from app.models.chat import ChatIn, ChatOut, ChatMemoryIn
 from app.models.provider import OpenRouterModelsIn, ProviderModelsOut, ProviderModelOut
+from app.services.memory import get_memory_service
 from app.services.llm import (
     build_system_message,
     call_gemini,
@@ -29,12 +32,28 @@ def _call_provider(provider: str, data: ChatIn, system_message: str) -> str:
 
 
 @router.post("/assistant/chat", response_model=ChatOut)
-async def assistant_chat(data: ChatIn):
+async def assistant_chat(
+    data: ChatIn,
+    user=Depends(get_optional_current_user),
+    db=Depends(get_db),
+):
     if not data.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
 
-    harness = build_prompt_harness(data)
-    routed_data = data.model_copy(update={"model": harness.routed_model or data.model})
+    memory_context = list(data.memories)
+    if user:
+        try:
+            retrieved = await get_memory_service(db).search_memories(user["id"], data.message, 8)
+            memory_context = [
+                ChatMemoryIn(title=item.title, content=item.chunk_text)
+                for item in retrieved
+            ] or memory_context
+        except Exception:
+            logger.exception("Failed to retrieve cloud memories for chat")
+
+    contextual_data = data.model_copy(update={"memories": memory_context})
+    harness = build_prompt_harness(contextual_data)
+    routed_data = contextual_data.model_copy(update={"model": harness.routed_model or contextual_data.model})
     session_id = data.session_id or str(uuid.uuid4())
     system_message = build_system_message(routed_data, harness)
     provider = data.provider.lower().strip()

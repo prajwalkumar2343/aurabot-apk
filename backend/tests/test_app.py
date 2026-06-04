@@ -693,6 +693,65 @@ def test_57_memories_require_auth_guard(client):
     response = client.get("/api/memories")
     assert response.status_code == 401
 
+def test_57b_search_memories_keyword_fallback(client, test_user_token):
+    """57b. Memory search returns ranked keyword snippets for the authenticated user."""
+    user_id = mock_db.users.store[-1]["id"]
+    mock_db.memories.store.extend([
+        {
+            "id": "mem_relevant",
+            "user_id": user_id,
+            "title": "Doctor visit",
+            "content": "Dentist appointment is at 4pm on Friday",
+            "created_at": "2026-05-30",
+        },
+        {
+            "id": "mem_other",
+            "user_id": "other_user",
+            "title": "Doctor visit",
+            "content": "Private note from another account",
+            "created_at": "2026-05-30",
+        },
+    ])
+    response = client.post(
+        "/api/memories/search",
+        json={"query": "dentist Friday", "limit": 5},
+        headers={"Authorization": f"Bearer {test_user_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["memory_id"] == "mem_relevant"
+    assert data[0]["source_type"] == "keyword"
+
+@patch("app.services.memory.requests.post")
+def test_57c_create_memory_uses_supermemory_when_configured(mock_post, client, test_user_token):
+    """57c. Configured cloud memories are sent to Supermemory and mirrored locally."""
+    from app.core.config import settings
+
+    previous_key = settings.SUPERMEMORY_API_KEY
+    settings.SUPERMEMORY_API_KEY = "sm_test_key"
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "documentId": "doc_1",
+        "memories": [{"id": "mem_super", "memory": "Important meeting", "isStatic": False}],
+    }
+    mock_post.return_value = mock_response
+    try:
+        response = client.post(
+            "/api/memories",
+            json={"title": "Important meeting", "content": "Met John at 4pm"},
+            headers={"Authorization": f"Bearer {test_user_token}"},
+        )
+    finally:
+        settings.SUPERMEMORY_API_KEY = previous_key
+
+    assert response.status_code == 200
+    request = mock_post.call_args.kwargs
+    assert request["json"]["containerTag"].startswith("aura_user:")
+    assert request["json"]["memories"][0]["metadata"]["source"] == "aura_manual_memory"
+    assert mock_db.memories.store[-1]["supermemory_id"] == "mem_super"
+
 def test_58_create_extremely_long_memory(client, test_user_token):
     """58. Boundary check: handles huge data volumes efficiently."""
     long_content = "X" * 10000
@@ -975,6 +1034,45 @@ def test_79_assistant_chat_gemini(mock_post, client):
     })
     assert response.status_code == 200
     assert response.json()["reply"] == "{happy} Hello there!"
+
+@patch("app.services.llm.requests.post")
+def test_79b_assistant_chat_injects_authenticated_memory(mock_post, client, test_user_token):
+    """79b. Authenticated chat retrieves server memories and injects them into the prompt."""
+    user_id = mock_db.users.store[-1]["id"]
+    mock_db.memories.store.append({
+        "id": "mem_chat",
+        "user_id": user_id,
+        "title": "Passport",
+        "content": "Passport is in the blue drawer",
+        "created_at": "2026-05-30",
+    })
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [{
+            "content": {
+                "parts": [{"text": '{"reply":"{happy} It is in the blue drawer.","actions":[]}'}]
+            }
+        }]
+    }
+    mock_post.return_value = mock_response
+
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Where is my passport?",
+            "provider": "gemini",
+            "api_key": "dummy_key",
+            "model": "gemini-3",
+        },
+        headers={"Authorization": f"Bearer {test_user_token}"},
+    )
+
+    assert response.status_code == 200
+    payload = mock_post.call_args.kwargs["json"]
+    system_text = payload["systemInstruction"]["parts"][0]["text"]
+    assert "Passport" in system_text
+    assert "blue drawer" in system_text
 
 def test_80_assistant_chat_invalid_provider(client):
     """80. Chat yields 400 error if provider is unsupported."""

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from fastapi import Request, HTTPException, Depends
 import jwt
 import bcrypt
@@ -52,3 +53,9 @@ async def get_current_user(request: Request, db = Depends(get_db)) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+async def get_optional_current_user(request: Request, db = Depends(get_db)) -> Optional[dict]:
+    try:
+        return await get_current_user(request, db)
+    except HTTPException:
+        return None
