@@ -74,6 +74,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -156,6 +158,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -1787,7 +1790,7 @@ private fun MiniAppReactRuntimeScreen(
                         settings.allowFileAccess = false
                         settings.allowContentAccess = false
                         settings.mediaPlaybackRequiresUserGesture = true
-                        webViewClient = object : WebViewClient() {}
+                        webViewClient = AuraMiniAppWebViewClient()
                         addJavascriptInterface(
                             AuraMiniAppWebBridge(
                                 scope = scope,
@@ -1854,6 +1857,28 @@ private class AuraMiniAppWebBridge(
                 webViewProvider()?.evaluateJavascript("window.__AuraRuntimeResolve(${JSONObject.quote(payload)})", null)
             }
         }
+    }
+}
+
+private class AuraMiniAppWebViewClient : WebViewClient() {
+    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
+        request?.url?.let { uri ->
+            uri.scheme == "http" || uri.scheme == "https"
+        } == true && request?.url?.host != MINI_APP_ASSET_HOST
+
+    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+        val uri = request?.url ?: return super.shouldInterceptRequest(view, request)
+        val isRemote = uri.scheme == "http" || uri.scheme == "https"
+        val isTrustedShell = uri.host == MINI_APP_ASSET_HOST
+        return if (isRemote && !isTrustedShell) {
+            WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+        } else {
+            super.shouldInterceptRequest(view, request)
+        }
+    }
+
+    companion object {
+        private const val MINI_APP_ASSET_HOST = "appassets.androidplatform.net"
     }
 }
 
