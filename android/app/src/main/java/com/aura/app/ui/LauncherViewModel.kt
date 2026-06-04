@@ -496,6 +496,28 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    suspend fun listMiniAppRecordsForRuntime(miniAppId: String, recordType: String?): List<MiniAppRecord> =
+        container.miniAppRepository.records(miniAppId, recordType)
+
+    suspend fun createMiniAppRecordForRuntime(miniAppId: String, recordType: String, values: Map<String, String>): MiniAppRecord =
+        container.miniAppRepository.createRecord(miniAppId, recordType, values).also {
+            val records = container.miniAppRepository.records(miniAppId)
+            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        }
+
+    suspend fun updateMiniAppRecordForRuntime(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? =
+        container.miniAppRepository.updateRecord(miniAppId, recordId, values).also {
+            val records = container.miniAppRepository.records(miniAppId)
+            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        }
+
+    suspend fun deleteMiniAppRecordForRuntime(miniAppId: String, recordId: String): Boolean {
+        container.miniAppRepository.deleteRecord(miniAppId, recordId)
+        val records = container.miniAppRepository.records(miniAppId)
+        localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        return true
+    }
+
     fun deleteMiniAppRecord(miniAppId: String, recordId: String) {
         viewModelScope.launch {
             container.miniAppRepository.deleteRecord(miniAppId, recordId)
