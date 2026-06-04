@@ -10,6 +10,7 @@ object MiniAppValidator {
         "progress_ring",
         "streak_view",
         "chart",
+        "form",
         "list",
         "bottom_sheet",
         "button",

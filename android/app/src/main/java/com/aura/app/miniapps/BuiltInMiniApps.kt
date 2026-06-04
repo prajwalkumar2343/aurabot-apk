@@ -56,6 +56,11 @@ object BuiltInMiniApps {
                 title = "Coach",
                 components = listOf(
                     MiniAppComponent(
+                        "form",
+                        "Custom Check-in",
+                        items = listOf(MiniAppComponentItem("Save check-in"))
+                    ),
+                    MiniAppComponent(
                         "list",
                         "Routine",
                         items = listOf(
@@ -132,6 +137,11 @@ object BuiltInMiniApps {
                 title = "Plan",
                 components = listOf(
                     MiniAppComponent(
+                        "form",
+                        "Custom Session",
+                        items = listOf(MiniAppComponentItem("Save session"))
+                    ),
+                    MiniAppComponent(
                         "list",
                         "Focus Menu",
                         items = listOf(
@@ -206,6 +216,11 @@ object BuiltInMiniApps {
                 id = "categories",
                 title = "Categories",
                 components = listOf(
+                    MiniAppComponent(
+                        "form",
+                        "New Expense",
+                        items = listOf(MiniAppComponentItem("Save expense"))
+                    ),
                     MiniAppComponent(
                         "list",
                         "Quick Categories",

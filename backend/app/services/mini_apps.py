@@ -19,6 +19,7 @@ SUPPORTED_COMPONENTS = {
     "progress_ring",
     "streak_view",
     "chart",
+    "form",
     "list",
     "bottom_sheet",
     "button",
@@ -185,6 +186,7 @@ def fallback_bundle(prompt: str) -> MiniAppBundle:
                     "id": "details",
                     "title": "Details",
                     "components": [
+                        {"type": "form", "title": "Custom Entry", "items": [{"label": "Save entry"}]},
                         {
                             "type": "list",
                             "title": "Shortcuts",
