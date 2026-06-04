@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import uuid
@@ -111,7 +112,7 @@ class MemoryService:
 
     async def _create_supermemory(self, user_id: str, memory_id: str, data: MemoryCreate) -> Optional[str]:
         try:
-            response = requests.post(
+            response = await _post_supermemory(
                 f"{_base_url()}/v4/memories",
                 headers=_headers(),
                 json={
@@ -143,7 +144,7 @@ class MemoryService:
 
     async def _forget_supermemory(self, supermemory_id: str) -> None:
         try:
-            response = requests.post(
+            response = await _post_supermemory(
                 f"{_base_url()}/v4/memories/{supermemory_id}/forget",
                 headers={"Authorization": f"Bearer {settings.SUPERMEMORY_API_KEY}"},
                 timeout=20,
@@ -155,7 +156,7 @@ class MemoryService:
 
     async def _search_supermemory(self, user_id: str, query: str, limit: int) -> list[MemorySearchOut]:
         try:
-            response = requests.post(
+            response = await _post_supermemory(
                 f"{_base_url()}/v4/search",
                 headers=_headers(),
                 json={
@@ -219,6 +220,10 @@ class MemoryService:
 
 def get_memory_service(db=None) -> MemoryService:
     return MemoryService(db)
+
+
+async def _post_supermemory(url: str, **kwargs):
+    return await asyncio.to_thread(requests.post, url, **kwargs)
 
 
 async def init_memory_backend() -> None:
