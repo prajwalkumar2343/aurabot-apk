@@ -73,6 +73,7 @@ async def startup():
         await db.users.create_index("id", unique=True)
         await db.memories.create_index([("user_id", 1), ("created_at", -1)])
         await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+        await db.mini_app_records.create_index([("user_id", 1), ("mini_app_id", 1), ("record_type", 1), ("created_at", -1)])
         await db.login_attempts.create_index("identifier")
         logger.info("Database indexes verified/created successfully.")
     except Exception as e:
