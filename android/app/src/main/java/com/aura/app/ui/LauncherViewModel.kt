@@ -443,6 +443,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     title = "Details",
                     components = listOf(
                         com.aura.app.miniapps.MiniAppComponent(
+                            "form",
+                            "Custom Entry",
+                            items = listOf(com.aura.app.miniapps.MiniAppComponentItem("Save entry"))
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent(
                             "list",
                             "Shortcuts",
                             items = listOf(
@@ -480,6 +485,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun runMiniAppAction(miniAppId: String, actionId: String) {
         viewModelScope.launch {
             container.miniAppRepository.runAction(miniAppId, actionId)
+            openMiniApp(miniAppId)
+        }
+    }
+
+    fun createMiniAppRecord(miniAppId: String, recordType: String, values: Map<String, String>) {
+        viewModelScope.launch {
+            container.miniAppRepository.createRecord(miniAppId, recordType, values)
             openMiniApp(miniAppId)
         }
     }

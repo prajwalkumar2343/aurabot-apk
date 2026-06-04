@@ -143,6 +143,7 @@ import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
 import com.aura.app.miniapps.MiniAppComponentItem
+import com.aura.app.miniapps.MiniAppField
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
 import java.text.SimpleDateFormat
@@ -483,6 +484,7 @@ fun AuraLauncherApp(
                             navController.popBackStack()
                         },
                         onRunAction = viewModel::runMiniAppAction,
+                        onCreateRecord = viewModel::createMiniAppRecord,
                         onDeleteRecord = viewModel::deleteMiniAppRecord
                     )
                 }
@@ -1668,6 +1670,7 @@ private fun MiniAppRuntimeScreen(
     records: List<MiniAppRecord>,
     onBack: () -> Unit,
     onRunAction: (String, String) -> Unit,
+    onCreateRecord: (String, String, Map<String, String>) -> Unit,
     onDeleteRecord: (String, String) -> Unit
 ) {
     if (bundle == null) {
@@ -1714,7 +1717,7 @@ private fun MiniAppRuntimeScreen(
                 screen.components,
                 key = { index, component -> "$index:${component.type}:${component.title}" }
             ) { _, component ->
-                MiniAppComponentView(bundle, component, records, primary, secondary, onRunAction, onDeleteRecord)
+                MiniAppComponentView(bundle, component, records, primary, secondary, onRunAction, onCreateRecord, onDeleteRecord)
             }
         }
     }
@@ -1911,9 +1914,11 @@ private fun MiniAppComponentView(
     primary: Color,
     secondary: Color,
     onRunAction: (String, String) -> Unit,
+    onCreateRecord: (String, String, Map<String, String>) -> Unit,
     onDeleteRecord: (String, String) -> Unit
 ) {
     when (component.type) {
+        "form" -> MiniAppFormCard(bundle, component, primary, onCreateRecord)
         "quick_action_grid" -> MiniAppActionPanel(bundle, component, primary, secondary, onRunAction)
         "timeline" -> MiniAppTimelineCard(bundle, component, records, primary, onDeleteRecord)
         "chart" -> MiniAppChartCard(component, records, primary, secondary)
@@ -1974,6 +1979,119 @@ private fun MiniAppActionPanel(
         }
     }
 }
+
+@Composable
+private fun MiniAppFormCard(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    primary: Color,
+    onCreateRecord: (String, String, Map<String, String>) -> Unit
+) {
+    val schema = bundle.dataSchema
+    val fields = schema.fields
+    var values by remember(bundle.id, component.title) {
+        mutableStateOf(fields.associate { it.name to (it.defaultValue ?: "") })
+    }
+    var error by remember(bundle.id, component.title) { mutableStateOf<String?>(null) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "New entry" }, schema.recordType)
+        if (fields.isEmpty()) {
+            MiniAppInfoPanel(MiniAppComponent("bottom_sheet", "No fields configured"), primary)
+        } else {
+            fields.forEach { field ->
+                MiniAppFieldInput(
+                    field = field,
+                    value = values[field.name].orEmpty(),
+                    primary = primary,
+                    onChange = { updated -> values = values + (field.name to updated) }
+                )
+            }
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+            }
+            Button(
+                onClick = {
+                    val missing = fields.firstOrNull { it.required && values[it.name].isNullOrBlank() }
+                    if (missing != null) {
+                        error = "${formatMiniAppFieldLabel(missing.name)} is required"
+                    } else {
+                        val cleaned = fields.associate { field ->
+                            field.name to values[field.name].orEmpty().ifBlank { field.defaultValue.orEmpty() }
+                        }
+                        onCreateRecord(bundle.id, schema.recordType, cleaned)
+                        values = fields.associate { it.name to (it.defaultValue ?: "") }
+                        error = null
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primary, contentColor = Color.White)
+            ) {
+                Text(component.items.firstOrNull()?.label ?: "Save entry", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppFieldInput(
+    field: MiniAppField,
+    value: String,
+    primary: Color,
+    onChange: (String) -> Unit
+) {
+    val label = formatMiniAppFieldLabel(field.name) + if (field.required) " *" else ""
+    if (field.type == "boolean") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.34f))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold)
+                Text(if (value.equals("true", ignoreCase = true)) "Enabled" else "Disabled", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = value.equals("true", ignoreCase = true),
+                onCheckedChange = { onChange(it.toString()) }
+            )
+        }
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            placeholder = { Text(field.defaultValue ?: field.type) },
+            singleLine = field.type != "text",
+            minLines = if (field.type == "text") 2 else 1,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                focusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.24f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.16f)
+            )
+        )
+    }
+}
+
+private fun formatMiniAppFieldLabel(value: String): String =
+    value.replace('_', ' ').split(" ").filter { it.isNotBlank() }.joinToString(" ") {
+        it.replaceFirstChar { char -> char.uppercase() }
+    }.ifBlank { "Field" }
 
 @Composable
 private fun MiniAppTimelineCard(
