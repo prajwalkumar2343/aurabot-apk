@@ -73,6 +73,10 @@ import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
+import android.webkit.JavascriptInterface
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import android.content.Context
 import android.content.pm.PackageManager
@@ -105,8 +109,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -146,6 +152,10 @@ import com.aura.app.miniapps.MiniAppComponentItem
 import com.aura.app.miniapps.MiniAppField
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
+import com.google.gson.Gson
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -485,7 +495,11 @@ fun AuraLauncherApp(
                         },
                         onRunAction = viewModel::runMiniAppAction,
                         onCreateRecord = viewModel::createMiniAppRecord,
-                        onDeleteRecord = viewModel::deleteMiniAppRecord
+                        onDeleteRecord = viewModel::deleteMiniAppRecord,
+                        onReactListRecords = viewModel::listMiniAppRecordsForRuntime,
+                        onReactCreateRecord = viewModel::createMiniAppRecordForRuntime,
+                        onReactUpdateRecord = viewModel::updateMiniAppRecordForRuntime,
+                        onReactDeleteRecord = viewModel::deleteMiniAppRecordForRuntime
                     )
                 }
                 composable(Route.Assistant.name) {
@@ -1671,12 +1685,27 @@ private fun MiniAppRuntimeScreen(
     onBack: () -> Unit,
     onRunAction: (String, String) -> Unit,
     onCreateRecord: (String, String, Map<String, String>) -> Unit,
-    onDeleteRecord: (String, String) -> Unit
+    onDeleteRecord: (String, String) -> Unit,
+    onReactListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    onReactCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    onReactUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    onReactDeleteRecord: suspend (String, String) -> Boolean
 ) {
     if (bundle == null) {
         ScreenShell(wallpaperUri = null) {
             MiniAppMissingState(onBack, "Mini app is not available")
         }
+        return
+    }
+    if (bundle.runtime == "react") {
+        MiniAppReactRuntimeScreen(
+            bundle = bundle,
+            onBack = onBack,
+            onListRecords = onReactListRecords,
+            onCreateRecord = onReactCreateRecord,
+            onUpdateRecord = onReactUpdateRecord,
+            onDeleteRecord = onReactDeleteRecord
+        )
         return
     }
     val firstScreen = bundle.screens.firstOrNull()
@@ -1722,6 +1751,215 @@ private fun MiniAppRuntimeScreen(
         }
     }
 }
+
+@Composable
+private fun MiniAppReactRuntimeScreen(
+    bundle: MiniAppBundle,
+    onBack: () -> Unit,
+    onListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    onCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    onUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    onDeleteRecord: suspend (String, String) -> Boolean
+) {
+    val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
+    val scope = rememberCoroutineScope()
+    val gson = remember { Gson() }
+    var webView by remember(bundle.id) { mutableStateOf<WebView?>(null) }
+    val html = remember(bundle.id, bundle.codeBundle?.compiledJs, bundle.codeBundle?.css) {
+        buildMiniAppReactHtml(bundle)
+    }
+    ScreenShell(wallpaperUri = null) {
+        MiniAppTopBar(bundle, "React App", primary, onBack)
+        Spacer(Modifier.height(14.dp))
+        key(bundle.id, html) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
+                factory = { context ->
+                    WebView(context).apply {
+                        webView = this
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = false
+                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.mediaPlaybackRequiresUserGesture = true
+                        webViewClient = object : WebViewClient() {}
+                        addJavascriptInterface(
+                            AuraMiniAppWebBridge(
+                                scope = scope,
+                                gson = gson,
+                                webViewProvider = { webView },
+                                miniAppId = bundle.id,
+                                onListRecords = onListRecords,
+                                onCreateRecord = onCreateRecord,
+                                onUpdateRecord = onUpdateRecord,
+                                onDeleteRecord = onDeleteRecord
+                            ),
+                            "AuraNativeBridge"
+                        )
+                        loadDataWithBaseURL("https://appassets.androidplatform.net/mini-apps/${bundle.id}/", html, "text/html", "UTF-8", null)
+                    }
+                },
+                update = { view ->
+                    webView = view
+                }
+            )
+        }
+    }
+}
+
+private class AuraMiniAppWebBridge(
+    private val scope: CoroutineScope,
+    private val gson: Gson,
+    private val webViewProvider: () -> WebView?,
+    private val miniAppId: String,
+    private val onListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    private val onCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    private val onUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    private val onDeleteRecord: suspend (String, String) -> Boolean
+) {
+    @JavascriptInterface
+    fun postMessage(raw: String) {
+        scope.launch {
+            val response = runCatching {
+                val request = gson.fromJson(raw, MiniAppBridgeRequest::class.java)
+                val result = when (request.method) {
+                    "records.list" -> onListRecords(miniAppId, request.recordType).map { it.bridgeMap() }
+                    "records.create" -> onCreateRecord(
+                        miniAppId,
+                        request.recordType?.takeIf { it.isNotBlank() } ?: "record",
+                        request.values.coerceBridgeValues()
+                    ).bridgeMap()
+                    "records.update" -> {
+                        val recordId = request.recordId?.takeIf { it.isNotBlank() } ?: error("recordId is required")
+                        onUpdateRecord(miniAppId, recordId, request.values.coerceBridgeValues())?.bridgeMap()
+                            ?: error("Record not found")
+                    }
+                    "records.delete" -> {
+                        val recordId = request.recordId?.takeIf { it.isNotBlank() } ?: error("recordId is required")
+                        mapOf("deleted" to onDeleteRecord(miniAppId, recordId))
+                    }
+                    else -> error("Unsupported method: ${request.method}")
+                }
+                mapOf("id" to request.id, "ok" to true, "result" to result)
+            }.getOrElse { error ->
+                mapOf("id" to extractBridgeRequestId(raw, gson), "ok" to false, "error" to (error.message ?: "Runtime request failed"))
+            }
+            val payload = gson.toJson(response)
+            webViewProvider()?.post {
+                webViewProvider()?.evaluateJavascript("window.__AuraRuntimeResolve(${JSONObject.quote(payload)})", null)
+            }
+        }
+    }
+}
+
+private data class MiniAppBridgeRequest(
+    val id: String = "",
+    val method: String = "",
+    val recordType: String? = null,
+    val recordId: String? = null,
+    val values: Map<String, Any?>? = null
+)
+
+private fun extractBridgeRequestId(raw: String, gson: Gson): String =
+    runCatching { gson.fromJson(raw, MiniAppBridgeRequest::class.java).id }.getOrDefault("")
+
+private fun Map<String, Any?>?.coerceBridgeValues(): Map<String, String> =
+    this.orEmpty().entries.take(60).associate { (key, value) ->
+        key.take(80) to when (value) {
+            null -> ""
+            is String -> value.take(4000)
+            is Number, is Boolean -> value.toString()
+            else -> gsonSafeString(value).take(4000)
+        }
+    }.filterKeys { it.isNotBlank() }
+
+private fun gsonSafeString(value: Any): String = runCatching { Gson().toJson(value) }.getOrElse { value.toString() }
+
+private fun MiniAppRecord.bridgeMap(): Map<String, Any> =
+    mapOf(
+        "id" to id,
+        "miniAppId" to miniAppId,
+        "recordType" to recordType,
+        "values" to values,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
+    )
+
+private fun buildMiniAppReactHtml(bundle: MiniAppBundle): String {
+    val code = bundle.codeBundle
+    val css = code?.css.orEmpty().escapeScriptEnd()
+    val compiled = code?.compiledJs.orEmpty().escapeScriptEnd()
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <style>
+    html, body, #root { min-height: 100%; margin: 0; }
+    body { background: #f7f8fb; overflow-x: hidden; }
+    button, input, textarea, select { font: inherit; }
+    $css
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    (function() {
+      var seq = 0;
+      var pending = {};
+      function request(method, payload) {
+        var id = String(++seq);
+        var message = Object.assign({ id: id, method: method }, payload || {});
+        return new Promise(function(resolve, reject) {
+          pending[id] = { resolve: resolve, reject: reject };
+          window.AuraNativeBridge.postMessage(JSON.stringify(message));
+          window.setTimeout(function() {
+            if (pending[id]) {
+              delete pending[id];
+              reject(new Error("Aura request timed out"));
+            }
+          }, 12000);
+        });
+      }
+      window.__AuraRuntimeResolve = function(raw) {
+        var message = JSON.parse(raw);
+        var slot = pending[message.id];
+        if (!slot) return;
+        delete pending[message.id];
+        if (message.ok) slot.resolve(message.result);
+        else slot.reject(new Error(message.error || "Aura request failed"));
+      };
+      window.aura = {
+        theme: ${JSONObject.quote(bundle.theme.primary)},
+        records: {
+          list: function(recordType) { return request("records.list", { recordType: recordType || null }); },
+          create: function(recordType, values) { return request("records.create", { recordType: recordType || "record", values: values || {} }); },
+          update: function(recordId, values) { return request("records.update", { recordId: recordId, values: values || {} }); },
+          delete: function(recordId) { return request("records.delete", { recordId: recordId }); }
+        }
+      };
+    })();
+  </script>
+  <script>$compiled</script>
+  <script>
+    if (window.__AuraMiniAppMount) {
+      window.__AuraMiniAppMount(document.getElementById("root"), window.aura);
+    } else {
+      document.getElementById("root").innerHTML = "<main style='padding:18px;font-family:system-ui'>React mini app did not expose a mount function.</main>";
+    }
+  </script>
+</body>
+</html>
+""".trimIndent()
+}
+
+private fun String.escapeScriptEnd(): String = replace("</script", "<\\/script", ignoreCase = true)
 
 @Composable
 private fun MiniAppMissingState(onBack: () -> Unit, message: String) {
