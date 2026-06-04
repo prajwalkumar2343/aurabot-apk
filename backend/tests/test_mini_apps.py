@@ -112,4 +112,4 @@ def test_fallback_bundle_has_real_app_structure():
     assert component_types == ["dashboard_block", "streak_view", "quick_action_grid", "chart", "timeline", "slider"]
     assert len(bundle.screens[0].components[2].items) == 3
     detail_types = [component.type for component in bundle.screens[1].components]
-    assert detail_types == ["list", "button", "bottom_sheet", "settings"]
+    assert detail_types == ["form", "list", "button", "bottom_sheet", "settings"]

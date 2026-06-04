@@ -26,6 +26,7 @@ class MiniAppValidatorTest {
             assertEquals(true, componentTypes.contains("chart"))
             assertEquals(true, bundle.screens.flatMap { it.components }.any { it.type == "settings" })
             assertEquals(true, bundle.screens.flatMap { it.components }.any { it.type == "list" })
+            assertEquals(true, bundle.screens.flatMap { it.components }.any { it.type == "form" })
         }
     }
 
