@@ -46,4 +46,37 @@ class MiniAppValidatorTest {
             MiniAppValidator.validate(badCapability)
         }
     }
+
+    @Test
+    fun validatesReactMiniAppBundle() {
+        val bundle = MiniAppBundle(
+            id = "generated.react.notes",
+            runtime = "react",
+            metadata = MiniAppMetadata("React Notes", "Take notes", "Productivity"),
+            capabilities = listOf("local_storage", "assistant_actions", "react_runtime", "scoped_storage"),
+            codeBundle = MiniAppCodeBundle(
+                entry = "App.jsx",
+                appJsx = "export default function App() { return <main />; }",
+                compiledJs = "window.__AuraMiniAppMount = function() {};",
+                allowedApis = listOf("records")
+            )
+        )
+
+        assertEquals("react", MiniAppValidator.validate(bundle).runtime)
+    }
+
+    @Test
+    fun rejectsReactMiniAppWithoutCompiledCode() {
+        val bundle = MiniAppBundle(
+            id = "generated.react.bad",
+            runtime = "react",
+            metadata = MiniAppMetadata("Broken"),
+            capabilities = listOf("react_runtime"),
+            codeBundle = MiniAppCodeBundle(appJsx = "export default function App() { return <main />; }")
+        )
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(bundle)
+        }
+    }
 }
