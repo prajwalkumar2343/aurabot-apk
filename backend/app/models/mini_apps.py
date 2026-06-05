@@ -68,9 +68,18 @@ class MiniAppAssistantIntent(BaseModel):
     screenId: Optional[str] = None
 
 
+class MiniAppCodeBundle(BaseModel):
+    entry: str = "App.jsx"
+    appJsx: str
+    css: str = ""
+    compiledJs: str = ""
+    allowedApis: list[str] = Field(default_factory=lambda: ["records"])
+
+
 class MiniAppBundle(BaseModel):
     id: str
     version: int = 1
+    runtime: str = "native"
     metadata: MiniAppMetadata
     theme: MiniAppTheme = Field(default_factory=MiniAppTheme)
     icon: MiniAppIcon = Field(default_factory=MiniAppIcon)
@@ -79,6 +88,25 @@ class MiniAppBundle(BaseModel):
     actions: list[MiniAppAction] = Field(default_factory=list)
     assistantIntents: list[MiniAppAssistantIntent] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=lambda: ["local_storage"])
+    codeBundle: Optional[MiniAppCodeBundle] = None
+
+
+class MiniAppRecordCreate(BaseModel):
+    recordType: str = "record"
+    values: dict[str, object] = Field(default_factory=dict)
+
+
+class MiniAppRecordUpdate(BaseModel):
+    values: dict[str, object] = Field(default_factory=dict)
+
+
+class MiniAppRecordOut(BaseModel):
+    id: str
+    miniAppId: str
+    recordType: str
+    values: dict[str, object] = Field(default_factory=dict)
+    createdAt: str
+    updatedAt: str
 
 
 class MiniAppBuildIn(BaseModel):
@@ -86,6 +114,7 @@ class MiniAppBuildIn(BaseModel):
     provider: str = "gemini"
     api_key: str
     model: str
+    runtime: Optional[str] = None
 
 
 class MiniAppBuildOut(BaseModel):

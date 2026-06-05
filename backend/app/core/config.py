@@ -12,6 +12,8 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings:
     MONGO_URL: str = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
     DB_NAME: str = os.environ.get("DB_NAME", "aura_assistant")
+    SUPERMEMORY_API_KEY: str = os.environ.get("SUPERMEMORY_API_KEY", "")
+    SUPERMEMORY_BASE_URL: str = os.environ.get("SUPERMEMORY_BASE_URL", "https://api.supermemory.ai")
     JWT_SECRET: str = os.environ.get("JWT_SECRET", "super_secret_default_jwt_key_please_change_in_production")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_MIN: int = 60 * 24  # 1 day (mobile)

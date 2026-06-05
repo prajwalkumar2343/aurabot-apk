@@ -3,6 +3,7 @@ package com.aura.app.miniapps
 data class MiniAppBundle(
     val id: String,
     val version: Int = 1,
+    val runtime: String = "native",
     val metadata: MiniAppMetadata,
     val theme: MiniAppTheme = MiniAppTheme(),
     val icon: MiniAppIcon = MiniAppIcon(),
@@ -10,7 +11,8 @@ data class MiniAppBundle(
     val screens: List<MiniAppScreen> = emptyList(),
     val actions: List<MiniAppAction> = emptyList(),
     val assistantIntents: List<MiniAppAssistantIntent> = emptyList(),
-    val capabilities: List<String> = listOf("local_storage")
+    val capabilities: List<String> = listOf("local_storage"),
+    val codeBundle: MiniAppCodeBundle? = null
 )
 
 data class MiniAppMetadata(
@@ -77,6 +79,14 @@ data class MiniAppAssistantIntent(
     val utterances: List<String> = emptyList(),
     val actionId: String? = null,
     val screenId: String? = null
+)
+
+data class MiniAppCodeBundle(
+    val entry: String = "App.jsx",
+    val appJsx: String = "",
+    val css: String = "",
+    val compiledJs: String = "",
+    val allowedApis: List<String> = listOf("records")
 )
 
 data class MiniAppInstall(

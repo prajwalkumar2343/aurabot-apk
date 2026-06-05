@@ -73,6 +73,12 @@ import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import android.content.Context
 import android.content.pm.PackageManager
@@ -105,8 +111,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -121,6 +129,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -138,8 +151,14 @@ import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
 import com.aura.app.miniapps.MiniAppComponentItem
+import com.aura.app.miniapps.MiniAppField
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
+import com.google.gson.Gson
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -478,7 +497,12 @@ fun AuraLauncherApp(
                             navController.popBackStack()
                         },
                         onRunAction = viewModel::runMiniAppAction,
-                        onDeleteRecord = viewModel::deleteMiniAppRecord
+                        onCreateRecord = viewModel::createMiniAppRecord,
+                        onDeleteRecord = viewModel::deleteMiniAppRecord,
+                        onReactListRecords = viewModel::listMiniAppRecordsForRuntime,
+                        onReactCreateRecord = viewModel::createMiniAppRecordForRuntime,
+                        onReactUpdateRecord = viewModel::updateMiniAppRecordForRuntime,
+                        onReactDeleteRecord = viewModel::deleteMiniAppRecordForRuntime
                     )
                 }
                 composable(Route.Assistant.name) {
@@ -841,6 +865,50 @@ private fun AuraEyes(
     val eyeOpen by animateFloatAsState(eyeOpenTarget * blink, tween(420), label = "eye_open")
     val focusAmount by animateFloatAsState(focusAmountTarget, tween(420), label = "focus_amount")
 
+    val eyeColors = remember(primaryColor, secondaryColor) { listOf(primaryColor, secondaryColor) }
+    val dotGlowColors = remember(primaryColor, secondaryColor, dotAlpha) {
+        listOf(
+            primaryColor.copy(alpha = 0.12f * dotAlpha),
+            secondaryColor.copy(alpha = 0.06f * dotAlpha),
+            Color.Transparent
+        )
+    }
+    val dotColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor,
+            secondaryColor.copy(alpha = 0.35f),
+            Color.Transparent
+        )
+    }
+    val hearingHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.22f),
+            secondaryColor.copy(alpha = 0.22f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val listeningHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.14f),
+            secondaryColor.copy(alpha = 0.14f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val focusedHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.12f),
+            secondaryColor.copy(alpha = 0.12f * 0.3f),
+            Color.Transparent
+        )
+    }
+    val idleHaloColors = remember(primaryColor, secondaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.06f),
+            secondaryColor.copy(alpha = 0.06f * 0.3f),
+            Color.Transparent
+        )
+    }
+
     val statusText = when {
         isSpeaking -> emotion.uppercase()
         mode == AuraPresenceMode.Thinking -> "THINKING"
@@ -884,7 +952,7 @@ private fun AuraEyes(
                     val tilt = tiltDegrees * direction
 
                     val eyeBrush = Brush.linearGradient(
-                        colors = listOf(primaryColor, secondaryColor),
+                        colors = eyeColors,
                         start = Offset(originX + travelX, eyeY + travelY),
                         end = Offset(originX + travelX + eyeWidth, eyeY + travelY + eyeHeight)
                     )
@@ -911,11 +979,7 @@ private fun AuraEyes(
                         
                         // Outer glow ring
                         val glowBrush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = 0.12f * dotAlpha),
-                                secondaryColor.copy(alpha = 0.06f * dotAlpha),
-                                Color.Transparent
-                            ),
+                            colors = dotGlowColors,
                             center = Offset(size.width / 2f, size.height / 2f),
                             radius = baseDotRadius * dotScale * 3.5f
                         )
@@ -926,11 +990,7 @@ private fun AuraEyes(
                         )
                         
                         val dotBrush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor,
-                                secondaryColor.copy(alpha = 0.35f),
-                                Color.Transparent
-                            ),
+                            colors = dotColors,
                             center = Offset(size.width / 2f, size.height / 2f),
                             radius = baseDotRadius * dotScale * 1.3f
                         )
@@ -943,23 +1003,23 @@ private fun AuraEyes(
                     }
                 } else {
                     // Ambient glow halos behind each eye
-                    val glowAlpha = when (mode) {
-                        AuraPresenceMode.Thinking -> 0.18f * dotBreathe
-                        AuraPresenceMode.Hearing -> 0.22f
-                        AuraPresenceMode.Listening -> 0.14f
-                        AuraPresenceMode.Focused -> 0.12f
-                        AuraPresenceMode.Idle -> 0.06f
+                    val haloColors = when (mode) {
+                        AuraPresenceMode.Thinking -> listOf(
+                            primaryColor.copy(alpha = 0.18f * dotBreathe),
+                            secondaryColor.copy(alpha = 0.18f * dotBreathe * 0.3f),
+                            Color.Transparent
+                        )
+                        AuraPresenceMode.Hearing -> hearingHaloColors
+                        AuraPresenceMode.Listening -> listeningHaloColors
+                        AuraPresenceMode.Focused -> focusedHaloColors
+                        AuraPresenceMode.Idle -> idleHaloColors
                     }
                     val glowRadius = eyeWidth * 1.6f
                     
                     // Left eye halo
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = glowAlpha),
-                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
-                                Color.Transparent
-                            ),
+                            colors = haloColors,
                             center = Offset(leftEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
                             radius = glowRadius
                         ),
@@ -969,11 +1029,7 @@ private fun AuraEyes(
                     // Right eye halo
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = glowAlpha),
-                                secondaryColor.copy(alpha = glowAlpha * 0.3f),
-                                Color.Transparent
-                            ),
+                            colors = haloColors,
                             center = Offset(rightEyeX + eyeWidth / 2f, eyeY + eyeHeight / 2f),
                             radius = glowRadius
                         ),
@@ -1631,12 +1687,28 @@ private fun MiniAppRuntimeScreen(
     records: List<MiniAppRecord>,
     onBack: () -> Unit,
     onRunAction: (String, String) -> Unit,
-    onDeleteRecord: (String, String) -> Unit
+    onCreateRecord: (String, String, Map<String, String>) -> Unit,
+    onDeleteRecord: (String, String) -> Unit,
+    onReactListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    onReactCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    onReactUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    onReactDeleteRecord: suspend (String, String) -> Boolean
 ) {
     if (bundle == null) {
         ScreenShell(wallpaperUri = null) {
             MiniAppMissingState(onBack, "Mini app is not available")
         }
+        return
+    }
+    if (bundle.runtime == "react") {
+        MiniAppReactRuntimeScreen(
+            bundle = bundle,
+            onBack = onBack,
+            onListRecords = onReactListRecords,
+            onCreateRecord = onReactCreateRecord,
+            onUpdateRecord = onReactUpdateRecord,
+            onDeleteRecord = onReactDeleteRecord
+        )
         return
     }
     val firstScreen = bundle.screens.firstOrNull()
@@ -1677,11 +1749,242 @@ private fun MiniAppRuntimeScreen(
                 screen.components,
                 key = { index, component -> "$index:${component.type}:${component.title}" }
             ) { _, component ->
-                MiniAppComponentView(bundle, component, records, primary, secondary, onRunAction, onDeleteRecord)
+                MiniAppComponentView(bundle, component, records, primary, secondary, onRunAction, onCreateRecord, onDeleteRecord)
             }
         }
     }
 }
+
+@Composable
+private fun MiniAppReactRuntimeScreen(
+    bundle: MiniAppBundle,
+    onBack: () -> Unit,
+    onListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    onCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    onUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    onDeleteRecord: suspend (String, String) -> Boolean
+) {
+    val primary = parseMiniAppColor(bundle.theme.primary, MaterialTheme.colorScheme.primary)
+    val scope = rememberCoroutineScope()
+    val gson = remember { Gson() }
+    var webView by remember(bundle.id) { mutableStateOf<WebView?>(null) }
+    val html = remember(bundle.id, bundle.codeBundle?.compiledJs, bundle.codeBundle?.css) {
+        buildMiniAppReactHtml(bundle)
+    }
+    ScreenShell(wallpaperUri = null) {
+        MiniAppTopBar(bundle, "React App", primary, onBack)
+        Spacer(Modifier.height(14.dp))
+        key(bundle.id, html) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
+                factory = { context ->
+                    WebView(context).apply {
+                        webView = this
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = false
+                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.mediaPlaybackRequiresUserGesture = true
+                        webViewClient = AuraMiniAppWebViewClient()
+                        addJavascriptInterface(
+                            AuraMiniAppWebBridge(
+                                scope = scope,
+                                gson = gson,
+                                webViewProvider = { webView },
+                                miniAppId = bundle.id,
+                                onListRecords = onListRecords,
+                                onCreateRecord = onCreateRecord,
+                                onUpdateRecord = onUpdateRecord,
+                                onDeleteRecord = onDeleteRecord
+                            ),
+                            "AuraNativeBridge"
+                        )
+                        loadDataWithBaseURL("https://appassets.androidplatform.net/mini-apps/${bundle.id}/", html, "text/html", "UTF-8", null)
+                    }
+                },
+                update = { view ->
+                    webView = view
+                }
+            )
+        }
+    }
+}
+
+private class AuraMiniAppWebBridge(
+    private val scope: CoroutineScope,
+    private val gson: Gson,
+    private val webViewProvider: () -> WebView?,
+    private val miniAppId: String,
+    private val onListRecords: suspend (String, String?) -> List<MiniAppRecord>,
+    private val onCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
+    private val onUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
+    private val onDeleteRecord: suspend (String, String) -> Boolean
+) {
+    @JavascriptInterface
+    fun postMessage(raw: String) {
+        scope.launch {
+            val response = runCatching {
+                val request = gson.fromJson(raw, MiniAppBridgeRequest::class.java)
+                val result = when (request.method) {
+                    "records.list" -> onListRecords(miniAppId, request.recordType).map { it.bridgeMap() }
+                    "records.create" -> onCreateRecord(
+                        miniAppId,
+                        request.recordType?.takeIf { it.isNotBlank() } ?: "record",
+                        request.values.coerceBridgeValues()
+                    ).bridgeMap()
+                    "records.update" -> {
+                        val recordId = request.recordId?.takeIf { it.isNotBlank() } ?: error("recordId is required")
+                        onUpdateRecord(miniAppId, recordId, request.values.coerceBridgeValues())?.bridgeMap()
+                            ?: error("Record not found")
+                    }
+                    "records.delete" -> {
+                        val recordId = request.recordId?.takeIf { it.isNotBlank() } ?: error("recordId is required")
+                        mapOf("deleted" to onDeleteRecord(miniAppId, recordId))
+                    }
+                    else -> error("Unsupported method: ${request.method}")
+                }
+                mapOf("id" to request.id, "ok" to true, "result" to result)
+            }.getOrElse { error ->
+                mapOf("id" to extractBridgeRequestId(raw, gson), "ok" to false, "error" to (error.message ?: "Runtime request failed"))
+            }
+            val payload = gson.toJson(response)
+            webViewProvider()?.post {
+                webViewProvider()?.evaluateJavascript("window.__AuraRuntimeResolve(${JSONObject.quote(payload)})", null)
+            }
+        }
+    }
+}
+
+private class AuraMiniAppWebViewClient : WebViewClient() {
+    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
+        request?.url?.let { uri ->
+            uri.scheme == "http" || uri.scheme == "https"
+        } == true && request?.url?.host != MINI_APP_ASSET_HOST
+
+    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+        val uri = request?.url ?: return super.shouldInterceptRequest(view, request)
+        val isRemote = uri.scheme == "http" || uri.scheme == "https"
+        val isTrustedShell = uri.host == MINI_APP_ASSET_HOST
+        return if (isRemote && !isTrustedShell) {
+            WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+        } else {
+            super.shouldInterceptRequest(view, request)
+        }
+    }
+
+    companion object {
+        private const val MINI_APP_ASSET_HOST = "appassets.androidplatform.net"
+    }
+}
+
+private data class MiniAppBridgeRequest(
+    val id: String = "",
+    val method: String = "",
+    val recordType: String? = null,
+    val recordId: String? = null,
+    val values: Map<String, Any?>? = null
+)
+
+private fun extractBridgeRequestId(raw: String, gson: Gson): String =
+    runCatching { gson.fromJson(raw, MiniAppBridgeRequest::class.java).id }.getOrDefault("")
+
+private fun Map<String, Any?>?.coerceBridgeValues(): Map<String, String> =
+    this.orEmpty().entries.take(60).associate { (key, value) ->
+        key.take(80) to when (value) {
+            null -> ""
+            is String -> value.take(4000)
+            is Number, is Boolean -> value.toString()
+            else -> gsonSafeString(value).take(4000)
+        }
+    }.filterKeys { it.isNotBlank() }
+
+private fun gsonSafeString(value: Any): String = runCatching { Gson().toJson(value) }.getOrElse { value.toString() }
+
+private fun MiniAppRecord.bridgeMap(): Map<String, Any> =
+    mapOf(
+        "id" to id,
+        "miniAppId" to miniAppId,
+        "recordType" to recordType,
+        "values" to values,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
+    )
+
+private fun buildMiniAppReactHtml(bundle: MiniAppBundle): String {
+    val code = bundle.codeBundle
+    val css = code?.css.orEmpty().escapeScriptEnd()
+    val compiled = code?.compiledJs.orEmpty().escapeScriptEnd()
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <style>
+    html, body, #root { min-height: 100%; margin: 0; }
+    body { background: #f7f8fb; overflow-x: hidden; }
+    button, input, textarea, select { font: inherit; }
+    $css
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    (function() {
+      var seq = 0;
+      var pending = {};
+      function request(method, payload) {
+        var id = String(++seq);
+        var message = Object.assign({ id: id, method: method }, payload || {});
+        return new Promise(function(resolve, reject) {
+          pending[id] = { resolve: resolve, reject: reject };
+          window.AuraNativeBridge.postMessage(JSON.stringify(message));
+          window.setTimeout(function() {
+            if (pending[id]) {
+              delete pending[id];
+              reject(new Error("Aura request timed out"));
+            }
+          }, 12000);
+        });
+      }
+      window.__AuraRuntimeResolve = function(raw) {
+        var message = JSON.parse(raw);
+        var slot = pending[message.id];
+        if (!slot) return;
+        delete pending[message.id];
+        if (message.ok) slot.resolve(message.result);
+        else slot.reject(new Error(message.error || "Aura request failed"));
+      };
+      window.aura = {
+        theme: ${JSONObject.quote(bundle.theme.primary)},
+        records: {
+          list: function(recordType) { return request("records.list", { recordType: recordType || null }); },
+          create: function(recordType, values) { return request("records.create", { recordType: recordType || "record", values: values || {} }); },
+          update: function(recordId, values) { return request("records.update", { recordId: recordId, values: values || {} }); },
+          delete: function(recordId) { return request("records.delete", { recordId: recordId }); }
+        }
+      };
+    })();
+  </script>
+  <script>$compiled</script>
+  <script>
+    if (window.__AuraMiniAppMount) {
+      window.__AuraMiniAppMount(document.getElementById("root"), window.aura);
+    } else {
+      document.getElementById("root").innerHTML = "<main style='padding:18px;font-family:system-ui'>React mini app did not expose a mount function.</main>";
+    }
+  </script>
+</body>
+</html>
+""".trimIndent()
+}
+
+private fun String.escapeScriptEnd(): String = replace("</script", "<\\/script", ignoreCase = true)
 
 @Composable
 private fun MiniAppMissingState(onBack: () -> Unit, message: String) {
@@ -1819,6 +2122,12 @@ private fun MiniAppHeroCard(
 
 @Composable
 private fun MiniAppProgressOrb(value: Int, primary: Color) {
+    val density = LocalDensity.current
+    val stroke = remember(density) {
+        Stroke(
+            width = with(density) { 8.dp.toPx() }
+        )
+    }
     Box(
         modifier = Modifier
             .size(72.dp)
@@ -1832,14 +2141,14 @@ private fun MiniAppProgressOrb(value: Int, primary: Color) {
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+                style = stroke
             )
             drawArc(
                 color = primary,
                 startAngle = -90f,
                 sweepAngle = (value.coerceIn(0, 7) / 7f) * 360f,
                 useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8.dp.toPx())
+                style = stroke
             )
         }
         Text(value.toString(), color = primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
@@ -1868,9 +2177,11 @@ private fun MiniAppComponentView(
     primary: Color,
     secondary: Color,
     onRunAction: (String, String) -> Unit,
+    onCreateRecord: (String, String, Map<String, String>) -> Unit,
     onDeleteRecord: (String, String) -> Unit
 ) {
     when (component.type) {
+        "form" -> MiniAppFormCard(bundle, component, primary, onCreateRecord)
         "quick_action_grid" -> MiniAppActionPanel(bundle, component, primary, secondary, onRunAction)
         "timeline" -> MiniAppTimelineCard(bundle, component, records, primary, onDeleteRecord)
         "chart" -> MiniAppChartCard(component, records, primary, secondary)
@@ -1931,6 +2242,119 @@ private fun MiniAppActionPanel(
         }
     }
 }
+
+@Composable
+private fun MiniAppFormCard(
+    bundle: MiniAppBundle,
+    component: MiniAppComponent,
+    primary: Color,
+    onCreateRecord: (String, String, Map<String, String>) -> Unit
+) {
+    val schema = bundle.dataSchema
+    val fields = schema.fields
+    var values by remember(bundle.id, component.title) {
+        mutableStateOf(fields.associate { it.name to (it.defaultValue ?: "") })
+    }
+    var error by remember(bundle.id, component.title) { mutableStateOf<String?>(null) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MiniAppSectionTitle(component.title.ifBlank { "New entry" }, schema.recordType)
+        if (fields.isEmpty()) {
+            MiniAppInfoPanel(MiniAppComponent("bottom_sheet", "No fields configured"), primary)
+        } else {
+            fields.forEach { field ->
+                MiniAppFieldInput(
+                    field = field,
+                    value = values[field.name].orEmpty(),
+                    primary = primary,
+                    onChange = { updated -> values = values + (field.name to updated) }
+                )
+            }
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+            }
+            Button(
+                onClick = {
+                    val missing = fields.firstOrNull { it.required && values[it.name].isNullOrBlank() }
+                    if (missing != null) {
+                        error = "${formatMiniAppFieldLabel(missing.name)} is required"
+                    } else {
+                        val cleaned = fields.associate { field ->
+                            field.name to values[field.name].orEmpty().ifBlank { field.defaultValue.orEmpty() }
+                        }
+                        onCreateRecord(bundle.id, schema.recordType, cleaned)
+                        values = fields.associate { it.name to (it.defaultValue ?: "") }
+                        error = null
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primary, contentColor = Color.White)
+            ) {
+                Text(component.items.firstOrNull()?.label ?: "Save entry", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppFieldInput(
+    field: MiniAppField,
+    value: String,
+    primary: Color,
+    onChange: (String) -> Unit
+) {
+    val label = formatMiniAppFieldLabel(field.name) + if (field.required) " *" else ""
+    if (field.type == "boolean") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.34f))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold)
+                Text(if (value.equals("true", ignoreCase = true)) "Enabled" else "Disabled", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = value.equals("true", ignoreCase = true),
+                onCheckedChange = { onChange(it.toString()) }
+            )
+        }
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            placeholder = { Text(field.defaultValue ?: field.type) },
+            singleLine = field.type != "text",
+            minLines = if (field.type == "text") 2 else 1,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                focusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.24f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.16f)
+            )
+        )
+    }
+}
+
+private fun formatMiniAppFieldLabel(value: String): String =
+    value.replace('_', ' ').split(" ").filter { it.isNotBlank() }.joinToString(" ") {
+        it.replaceFirstChar { char -> char.uppercase() }
+    }.ifBlank { "Field" }
 
 @Composable
 private fun MiniAppTimelineCard(
@@ -2756,27 +3180,32 @@ private fun AuraAvatarFace(
 
         // Curved Smile
         val strokeColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.25f)
-        Canvas(
-            modifier = Modifier.size(width = (48 * sizeMultiplier).dp, height = (12 * sizeMultiplier).dp)
-        ) {
-            val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(0f, 0f)
-                quadraticTo(
-                    x1 = size.width / 2f,
-                    y1 = size.height,
-                    x2 = size.width,
-                    y2 = 0f
-                )
-            }
-            drawPath(
-                path = path,
-                color = strokeColor,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(
-                    width = (3 * sizeMultiplier).dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
-                )
-            )
-        }
+        Spacer(
+            modifier = Modifier
+                .size(width = (48 * sizeMultiplier).dp, height = (12 * sizeMultiplier).dp)
+                .drawWithCache {
+                    val path = Path().apply {
+                        moveTo(0f, 0f)
+                        quadraticTo(
+                            x1 = size.width / 2f,
+                            y1 = size.height,
+                            x2 = size.width,
+                            y2 = 0f
+                        )
+                    }
+                    val stroke = Stroke(
+                        width = (3 * sizeMultiplier).dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    onDrawBehind {
+                        drawPath(
+                            path = path,
+                            color = strokeColor,
+                            style = stroke
+                        )
+                    }
+                }
+        )
     }
 }
 
@@ -4231,13 +4660,17 @@ fun Modifier.glassCard(
 }
 
 @Composable
-private fun ScreenShell(
-    modifier: Modifier = Modifier,
-    wallpaperUri: String? = null,
-    content: @Composable ColumnScope.() -> Unit
+private fun MeshBackground(
+    isDark: Boolean,
+    bgBrush: Brush,
+    violetColors: List<Color>,
+    cyanColors: List<Color>,
+    roseColors: List<Color>,
+    indigoColors: List<Color>,
+    lightVioletColors: List<Color>,
+    lightTealColors: List<Color>,
+    lightPeachColors: List<Color>
 ) {
-    val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
-    val isDark = isSystemInDarkTheme()
     val infiniteTransition = rememberInfiniteTransition(label = "bg_mesh")
     val drift1 by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -4266,6 +4699,121 @@ private fun ScreenShell(
         ),
         label = "drift3"
     )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val width = size.width
+        val height = size.height
+        
+        drawRect(brush = bgBrush)
+        
+        if (isDark) {
+            // Large violet aurora — drifts slowly
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = violetColors,
+                    center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
+                    radius = width * 0.8f
+                ),
+                radius = width * 0.8f,
+                center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
+            )
+            
+            // Electric cyan aurora — counter-drifts
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = cyanColors,
+                    center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
+                    radius = width * 0.75f
+                ),
+                radius = width * 0.75f,
+                center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
+            )
+            
+            // Warm rose accent — subtle center drift
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = roseColors,
+                    center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
+                    radius = width * 0.5f
+                ),
+                radius = width * 0.5f,
+                center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
+            )
+            
+            // Deep indigo whisper at bottom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = indigoColors,
+                    center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
+                    radius = width * 0.55f
+                ),
+                radius = width * 0.55f,
+                center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
+            )
+        } else {
+            // Soft violet-indigo bloom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightVioletColors,
+                    center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
+                    radius = width * 0.7f
+                ),
+                radius = width * 0.7f,
+                center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
+            )
+            
+            // Soft teal bloom
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightTealColors,
+                    center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
+                    radius = width * 0.6f
+                ),
+                radius = width * 0.6f,
+                center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
+            )
+            
+            // Warm peach accent
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = lightPeachColors,
+                    center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
+                    radius = width * 0.45f
+                ),
+                radius = width * 0.45f,
+                center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScreenShell(
+    modifier: Modifier = Modifier,
+    wallpaperUri: String? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
+    val isDark = isSystemInDarkTheme()
+
+    val bgBrush = remember(isDark) {
+        Brush.verticalGradient(
+            colors = if (isDark) {
+                listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
+            } else {
+                listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
+            }
+        )
+    }
+
+    val violetColors = remember { listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent) }
+    val cyanColors = remember { listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent) }
+    val roseColors = remember { listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent) }
+    val indigoColors = remember { listOf(Color(0x286366F1), Color.Transparent) }
+    val lightVioletColors = remember { listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent) }
+    val lightTealColors = remember { listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent) }
+    val lightPeachColors = remember { listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -4284,98 +4832,17 @@ private fun ScreenShell(
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
         } else {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                
-                val bgBrush = Brush.verticalGradient(
-                    colors = if (isDark) {
-                        listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
-                    } else {
-                        listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
-                    }
-                )
-                drawRect(brush = bgBrush)
-                
-                if (isDark) {
-                    // Large violet aurora — drifts slowly
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent),
-                            center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f)),
-                            radius = width * 0.8f
-                        ),
-                        radius = width * 0.8f,
-                        center = Offset(width * (0.65f + drift1 * 0.25f), height * (0.12f + drift2 * 0.15f))
-                    )
-                    
-                    // Electric cyan aurora — counter-drifts
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent),
-                            center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f)),
-                            radius = width * 0.75f
-                        ),
-                        radius = width * 0.75f,
-                        center = Offset(width * (0.1f + drift2 * 0.2f), height * (0.7f + drift3 * 0.18f))
-                    )
-                    
-                    // Warm rose accent — subtle center drift
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent),
-                            center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f)),
-                            radius = width * 0.5f
-                        ),
-                        radius = width * 0.5f,
-                        center = Offset(width * (0.8f + drift3 * 0.15f), height * (0.55f + drift1 * 0.2f))
-                    )
-                    
-                    // Deep indigo whisper at bottom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x286366F1), Color.Transparent),
-                            center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f),
-                            radius = width * 0.55f
-                        ),
-                        radius = width * 0.55f,
-                        center = Offset(width * (0.4f + drift1 * 0.15f), height * 0.92f)
-                    )
-                } else {
-                    // Soft violet-indigo bloom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent),
-                            center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f)),
-                            radius = width * 0.7f
-                        ),
-                        radius = width * 0.7f,
-                        center = Offset(width * (0.7f + drift1 * 0.2f), height * (0.1f + drift2 * 0.12f))
-                    )
-                    
-                    // Soft teal bloom
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent),
-                            center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f)),
-                            radius = width * 0.6f
-                        ),
-                        radius = width * 0.6f,
-                        center = Offset(width * (0.15f + drift2 * 0.2f), height * (0.72f + drift3 * 0.15f))
-                    )
-                    
-                    // Warm peach accent
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent),
-                            center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f)),
-                            radius = width * 0.45f
-                        ),
-                        radius = width * 0.45f,
-                        center = Offset(width * (0.85f + drift3 * 0.1f), height * (0.6f + drift1 * 0.15f))
-                    )
-                }
-            }
+            MeshBackground(
+                isDark = isDark,
+                bgBrush = bgBrush,
+                violetColors = violetColors,
+                cyanColors = cyanColors,
+                roseColors = roseColors,
+                indigoColors = indigoColors,
+                lightVioletColors = lightVioletColors,
+                lightTealColors = lightTealColors,
+                lightPeachColors = lightPeachColors
+            )
         }
         Column(
             modifier = Modifier

@@ -28,6 +28,9 @@ interface MiniAppDao {
     @Query("SELECT * FROM mini_app_records WHERE miniAppId = :miniAppId AND recordType = :recordType ORDER BY createdAt DESC")
     suspend fun recordsByType(miniAppId: String, recordType: String): List<MiniAppRecordEntity>
 
+    @Query("SELECT * FROM mini_app_records WHERE id = :recordId AND miniAppId = :miniAppId LIMIT 1")
+    suspend fun record(miniAppId: String, recordId: String): MiniAppRecordEntity?
+
     @Query("DELETE FROM mini_app_records WHERE id = :recordId AND miniAppId = :miniAppId")
     suspend fun deleteRecord(miniAppId: String, recordId: String)
 

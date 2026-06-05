@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import com.aura.app.ui.AuraLauncherApp
 import com.aura.app.ui.LauncherViewModel
 import com.aura.app.ui.theme.AuraTheme
@@ -24,6 +26,12 @@ class LauncherActivity : ComponentActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            viewModel.refreshApps(force = true)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +54,22 @@ class LauncherActivity : ComponentActivity() {
         super.onResume()
         val isDefault = isDefaultLauncher(this)
         viewModel.setIsDefaultLauncher(isDefault)
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        registerReceiver(packageReceiver, filter)
+    }
+
+    override fun onPause() {
+        try {
+            unregisterReceiver(packageReceiver)
+        } catch (_: Exception) {
+        }
+        super.onPause()
     }
 
     private fun isDefaultLauncher(context: Context): Boolean {

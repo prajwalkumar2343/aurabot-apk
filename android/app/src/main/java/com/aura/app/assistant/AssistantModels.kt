@@ -72,7 +72,8 @@ data class MiniAppBuildRequest(
     val prompt: String,
     val provider: String,
     val api_key: String,
-    val model: String
+    val model: String,
+    val runtime: String = "react"
 )
 data class MiniAppBuildResponse(val bundle: MiniAppBundle)
 

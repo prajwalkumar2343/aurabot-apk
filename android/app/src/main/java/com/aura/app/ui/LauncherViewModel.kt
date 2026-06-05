@@ -89,7 +89,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LauncherUiState())
 
     init {
-        refreshApps()
+        refreshApps(force = true)
         refreshMiniApps()
         refreshCloud()
     }
@@ -101,9 +101,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         localState.update { it.copy(currentEmotion = emotion, isSpeaking = false) }
     }
 
-    fun refreshApps() {
+    fun refreshApps(force: Boolean = false) {
         viewModelScope.launch {
-            val apps = container.appsRepository.loadLaunchableApps().toMutableList()
+            val apps = container.appsRepository.loadLaunchableApps(force).toMutableList()
             if (uiState.value.isDefaultLauncher) {
                 apps.add(
                     AppInfo(
@@ -443,6 +443,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     title = "Details",
                     components = listOf(
                         com.aura.app.miniapps.MiniAppComponent(
+                            "form",
+                            "Custom Entry",
+                            items = listOf(com.aura.app.miniapps.MiniAppComponentItem("Save entry"))
+                        ),
+                        com.aura.app.miniapps.MiniAppComponent(
                             "list",
                             "Shortcuts",
                             items = listOf(
@@ -482,6 +487,35 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             container.miniAppRepository.runAction(miniAppId, actionId)
             openMiniApp(miniAppId)
         }
+    }
+
+    fun createMiniAppRecord(miniAppId: String, recordType: String, values: Map<String, String>) {
+        viewModelScope.launch {
+            container.miniAppRepository.createRecord(miniAppId, recordType, values)
+            openMiniApp(miniAppId)
+        }
+    }
+
+    suspend fun listMiniAppRecordsForRuntime(miniAppId: String, recordType: String?): List<MiniAppRecord> =
+        container.miniAppRepository.records(miniAppId, recordType)
+
+    suspend fun createMiniAppRecordForRuntime(miniAppId: String, recordType: String, values: Map<String, String>): MiniAppRecord =
+        container.miniAppRepository.createRecord(miniAppId, recordType, values).also {
+            val records = container.miniAppRepository.records(miniAppId)
+            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        }
+
+    suspend fun updateMiniAppRecordForRuntime(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? =
+        container.miniAppRepository.updateRecord(miniAppId, recordId, values).also {
+            val records = container.miniAppRepository.records(miniAppId)
+            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        }
+
+    suspend fun deleteMiniAppRecordForRuntime(miniAppId: String, recordId: String): Boolean {
+        container.miniAppRepository.deleteRecord(miniAppId, recordId)
+        val records = container.miniAppRepository.records(miniAppId)
+        localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        return true
     }
 
     fun deleteMiniAppRecord(miniAppId: String, recordId: String) {
@@ -611,7 +645,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setIsDefaultLauncher(isDefault: Boolean) {
         localState.update { it.copy(isDefaultLauncher = isDefault) }
-        refreshApps()
+        refreshApps(force = false)
     }
 
     fun setWallpaper(uri: String?) {

@@ -10,6 +10,7 @@ object MiniAppValidator {
         "progress_ring",
         "streak_view",
         "chart",
+        "form",
         "list",
         "bottom_sheet",
         "button",
@@ -17,8 +18,10 @@ object MiniAppValidator {
         "settings"
     )
     private val supportedActions = setOf("create_record", "query_records", "open_screen", "update_record", "delete_record")
-    private val supportedCapabilities = setOf("local_storage", "assistant_actions", "notifications")
+    private val supportedCapabilities = setOf("local_storage", "assistant_actions", "notifications", "react_runtime", "scoped_storage")
     private val supportedFieldTypes = setOf("text", "number", "boolean", "date", "datetime")
+    private val supportedRuntimes = setOf("native", "react")
+    private val supportedCodeApis = setOf("records")
 
     fun validate(bundle: MiniAppBundle): MiniAppBundle {
         fun requireNamed(value: String, field: String) {
@@ -27,7 +30,16 @@ object MiniAppValidator {
 
         requireNamed(bundle.id, "id")
         requireNamed(bundle.metadata.name, "metadata.name")
-        if (bundle.screens.isEmpty()) throw MiniAppValidationException("At least one screen is required")
+        if (bundle.runtime !in supportedRuntimes) throw MiniAppValidationException("Unsupported runtime: ${bundle.runtime}")
+        if (bundle.runtime == "native" && bundle.screens.isEmpty()) throw MiniAppValidationException("At least one screen is required")
+        if (bundle.runtime == "react") {
+            val code = bundle.codeBundle ?: throw MiniAppValidationException("React mini apps require codeBundle")
+            if (code.entry != "App.jsx") throw MiniAppValidationException("React codeBundle entry must be App.jsx")
+            if (code.compiledJs.isBlank()) throw MiniAppValidationException("React mini apps require compiledJs")
+            code.allowedApis.forEach {
+                if (it !in supportedCodeApis) throw MiniAppValidationException("Unsupported React API: $it")
+            }
+        }
         bundle.capabilities.forEach {
             if (it !in supportedCapabilities) throw MiniAppValidationException("Unsupported capability: $it")
         }

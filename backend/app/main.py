@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import db_manager, get_db
 from app.core.security import hash_password, verify_password
+from app.services.memory import init_memory_backend, close_memory_backend
 
 # Import API routers
 from app.api.auth import router as auth_router
@@ -72,6 +73,7 @@ async def startup():
         await db.users.create_index("id", unique=True)
         await db.memories.create_index([("user_id", 1), ("created_at", -1)])
         await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+        await db.mini_app_records.create_index([("user_id", 1), ("mini_app_id", 1), ("record_type", 1), ("created_at", -1)])
         await db.login_attempts.create_index("identifier")
         logger.info("Database indexes verified/created successfully.")
     except Exception as e:
@@ -101,6 +103,13 @@ async def startup():
     except Exception as e:
         logger.error(f"Failed to seed/verify admin user on startup: {e}")
 
+    try:
+        await init_memory_backend()
+        logger.info("Memory backend verified successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize memory backend: {e}")
+
 @app.on_event("shutdown")
 async def shutdown():
+    await close_memory_backend()
     db_manager.close()

@@ -1,0 +1,13 @@
+{
+  "name": "aura-mini-app-builder",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Build-time tooling for Aura generated React mini apps.",
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0"
+  }
+}

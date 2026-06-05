@@ -80,6 +80,17 @@ class MiniAppRepository(
     suspend fun records(miniAppId: String): List<MiniAppRecord> =
         dao.records(miniAppId).map { it.record() }
 
+    suspend fun records(miniAppId: String, recordType: String?): List<MiniAppRecord> =
+        if (recordType.isNullOrBlank()) records(miniAppId) else dao.recordsByType(miniAppId, recordType).map { it.record() }
+
+    suspend fun updateRecord(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? {
+        val existing = dao.record(miniAppId, recordId) ?: return null
+        val now = clock()
+        dao.upsertRecord(existing.copy(valuesJson = gson.toJson(values), updatedAt = now))
+        dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_updated", gson.toJson(values), now))
+        return dao.record(miniAppId, recordId)?.record()
+    }
+
     suspend fun deleteRecord(miniAppId: String, recordId: String) {
         dao.deleteRecord(miniAppId, recordId)
         dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_deleted", """{"id":"$recordId"}""", clock()))

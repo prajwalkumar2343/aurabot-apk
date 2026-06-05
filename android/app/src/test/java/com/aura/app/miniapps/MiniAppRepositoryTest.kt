@@ -23,6 +23,10 @@ class MiniAppRepositoryTest {
         assertEquals(1, records.size)
         assertEquals("Workout", records.first().values["habit"])
 
+        val updated = repository.updateRecord("builtin.habit_tracker", records.first().id, mapOf("habit" to "Workout", "note" to "Done"))
+        assertEquals("Done", updated?.values?.get("note"))
+        assertEquals(1, repository.records("builtin.habit_tracker", updated?.recordType).size)
+
         repository.deleteRecord("builtin.habit_tracker", records.first().id)
         assertTrue(repository.records("builtin.habit_tracker").isEmpty())
     }
@@ -47,6 +51,8 @@ private class FakeMiniAppDao : MiniAppDao {
         records.values.filter { it.miniAppId == miniAppId }.sortedByDescending { it.createdAt }
     override suspend fun recordsByType(miniAppId: String, recordType: String): List<MiniAppRecordEntity> =
         records(miniAppId).filter { it.recordType == recordType }
+    override suspend fun record(miniAppId: String, recordId: String): MiniAppRecordEntity? =
+        records[recordId]?.takeIf { it.miniAppId == miniAppId }
     override suspend fun deleteRecord(miniAppId: String, recordId: String) {
         if (records[recordId]?.miniAppId == miniAppId) records.remove(recordId)
     }
