@@ -65,6 +65,8 @@ def test_assistant_tool_registry_exposes_intended_tools():
     assert block_app["parameters"]["properties"]["duration_minutes"]["maximum"] == 1440
     create_mini_app = next(tool for tool in tools if tool["name"] == "create_mini_app")
     assert create_mini_app["parameters"]["required"] == ["mini_app_prompt"]
+    assert "React runtime" in create_mini_app["description"]
+    assert "runtime react" in create_mini_app["parameters"]["properties"]["mini_app_prompt"]["description"]
 
 
 def test_parse_create_mini_app_assistant_action():

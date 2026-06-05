@@ -5,17 +5,26 @@ description: Prompt skill for creating professional Aura mini apps that can be i
 
 # Aura Mini App Builder Skill
 
-Create one safe declarative Aura mini app bundle as JSON only.
+Create one safe Aura mini app bundle as JSON only. Aura supports native declarative bundles and React runtime bundles; prefer the React runtime for user-requested "real apps", custom workflows, polished tools, or any mini app created from the assistant chat flow unless the caller explicitly asks for the native declarative runtime.
 
 ## Hard Rules
 
 - Return only a JSON object matching the Aura mini app schema.
-- Do not include executable code, scripts, webviews, APKs, plugins, remote URLs, iframes, HTML, or unsupported capabilities.
-- Keep all behavior declarative through screens, components, actions, assistantIntents, dataSchema, and capabilities.
+- For React runtime apps, set runtime to react and include codeBundle with entry App.jsx, appJsx source, css, allowedApis, and no compiledJs; Aura compiles the source.
+- React appJsx must declare `export default function App(props)` and use only React plus provided Aura APIs from props such as records.list, records.create, records.update, and records.delete.
+- For native runtime apps, keep behavior declarative through screens, components, actions, assistantIntents, dataSchema, and capabilities.
+- Do not include APKs, webviews, plugins, remote URLs, iframes, HTML pages, unsupported capabilities, imported packages, fetch/network calls, cookies, localStorage, sessionStorage, indexedDB, WebSocket, eval, new Function, script tags, or global message listeners.
 - Include a schema-driven form for apps where the user should enter their own data, not only canned quick actions.
-- Use camelCase fields exactly: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities.
+- Use camelCase fields exactly: id, version, runtime, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities, codeBundle.
 - Every component actionId and assistant intent actionId must reference an action declared in actions.
-- Prefer local_storage and assistant_actions capabilities.
+- Prefer local_storage and assistant_actions capabilities. Add react_runtime and scoped_storage for React runtime apps.
+
+## Runtime Choice
+
+- Use React runtime when the user asks Aura to build, create, make, or generate a mini app from chat and the request sounds like an actual custom app or workflow.
+- Use native declarative runtime only when the user explicitly asks for a native/declarative mini app or when the requested app is a simple local tracker well served by schema-bound components.
+- React runtime apps may have screens and actions for metadata/assistant integration, but their primary UI lives in codeBundle.appJsx and codeBundle.css.
+- Native runtime apps must include screens and supported components because they do not have codeBundle UI.
 
 ## Professional App Shape
 

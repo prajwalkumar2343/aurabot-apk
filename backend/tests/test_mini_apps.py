@@ -76,7 +76,20 @@ def test_builder_system_prompt_loads_skill_markdown():
     assert "Aura Mini App Builder Skill" in prompt
     assert "Professional App Shape" in prompt
     assert "Supported component types:" in prompt
+    assert "runtime, metadata" in prompt
+    assert "codeBundle" in prompt
+    assert "Generated mini apps must stay declarative" not in prompt
     assert "runtime to react" in mini_app_builder_system_prompt(runtime="react")
+    react_prompt = mini_app_builder_system_prompt(runtime="react")
+    assert "entry App.jsx, appJsx source, css, allowedApis" in react_prompt
+    assert "react_runtime and scoped_storage" in react_prompt
+
+
+def test_builder_system_prompt_can_request_native_runtime():
+    prompt = mini_app_builder_system_prompt(runtime="native")
+
+    assert "The requested runtime is native" in prompt
+    assert "omit codeBundle" in prompt
 
 
 def test_build_mini_app_rejects_empty_prompt(client):

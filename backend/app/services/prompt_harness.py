@@ -75,14 +75,14 @@ SKILL_CARDS = (
     ),
     SkillCard(
         name="mini_app_builder",
-        summary="Create safe declarative Aura mini apps with schema-bound components and actions.",
+        summary="Create safe Aura mini apps, usually as React runtime apps for assistant-built custom tools.",
         triggers=("build", "create", "make", "generate", "mini app"),
         detail=(
             "When the user asks to create, build, make, or generate a mini app, call create_mini_app "
-            "with a specific professional mini_app_prompt. Generated mini apps must stay declarative: "
-            "no executable code, APKs, webviews, plugins, remote URLs, or unsupported capabilities. "
-            "Include multiple screens, dashboard, quick actions, history, lists/settings/buttons when useful, "
-            "assistant intents, and local storage."
+            "with a specific professional mini_app_prompt that asks for runtime react unless the user explicitly "
+            "requested a native/declarative mini app. The prompt should describe the workflow, data model, polished "
+            "React UI, local records, assistant intents, and any helpful screens/actions. Do not ask for APKs, "
+            "webviews, plugins, remote URLs, network calls, browser storage APIs, or unsupported capabilities."
         ),
     ),
 )
