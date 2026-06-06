@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from app.services.prompt_harness import DEFAULT_GEMINI_FAST_MODEL
 
 # Define directories
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -20,7 +21,7 @@ class Settings:
     REFRESH_DAYS: int = 30
     
     # LLM Settings
-    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_FAST_MODEL)
     GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", os.environ.get("EMERGENT_LLM_KEY", ""))
     
     # Admin Settings

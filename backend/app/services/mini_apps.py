@@ -62,10 +62,12 @@ def mini_app_builder_skill_prompt() -> str:
         return MINI_APP_BUILDER_SKILL_PATH.read_text(encoding="utf-8").strip()
     except OSError:
         return (
-            "Create one safe declarative Aura mini app bundle as JSON only. "
-            "Do not include executable code, scripts, URLs, webviews, APKs, plugins, or unsupported capabilities. "
-            "Build professional app-like bundles with multiple screens, quick actions, local storage, assistant intents, "
-            "charts, history, lists, settings, and direct buttons when useful."
+            "Create one safe Aura mini app bundle as JSON only. Prefer the React runtime for user-requested "
+            "real apps, custom workflows, polished tools, or mini apps created from assistant chat unless the "
+            "caller explicitly asks for native declarative output. React bundles include codeBundle.appJsx and "
+            "css source that Aura compiles; native bundles use schema-bound screens and components. Do not include "
+            "URLs, webviews, APKs, plugins, imported packages, network calls, browser storage APIs, script tags, "
+            "or unsupported capabilities."
         )
 
 
@@ -75,17 +77,27 @@ def mini_app_builder_system_prompt(
     runtime: Optional[str] = None,
 ) -> str:
     components = ", ".join(sorted(SUPPORTED_COMPONENTS))
-    runtime_rule = (
-        "The requested runtime is react. Set runtime to react and include codeBundle with App.jsx source and CSS. "
-        if runtime == "react"
-        else ""
-    )
+    if runtime == "react":
+        runtime_rule = (
+            "The requested runtime is react. Set runtime to react and include codeBundle with entry App.jsx, "
+            "appJsx source, css, allowedApis, and empty/omitted compiledJs. "
+        )
+    elif runtime == "native":
+        runtime_rule = (
+            "The requested runtime is native. Set runtime to native, omit codeBundle, and build the UI with "
+            "supported declarative screens and components. "
+        )
+    else:
+        runtime_rule = (
+            "Choose runtime react for real apps, custom workflows, polished tools, or assistant-chat mini app "
+            "creation; choose native only for explicitly declarative/simple tracker requests. "
+        )
     prompt = (
         f"{mini_app_builder_skill_prompt()}\n\n"
         f"Supported component types: {components}. "
         f"{runtime_rule}"
-        "Use camelCase fields exactly matching the schema: id, version, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities. "
-        "When the user asks for a real app or React mini app, set runtime to react and include codeBundle with appJsx and css. "
+        "Use camelCase fields exactly matching the schema: id, version, runtime, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities, codeBundle. "
+        "When creating React mini apps, set runtime to react, include react_runtime and scoped_storage capabilities, and include codeBundle with appJsx and css. "
         "React code must declare `export default function App(props)` and use only React plus the provided Aura APIs from props: records.list, records.create, records.update, records.delete. "
         "Do not import packages, fetch URLs, use cookies, localStorage, sessionStorage, indexedDB, WebSocket, eval, new Function, script tags, or global message listeners. "
         "Make the UI polished and app-like with at least two screens when useful, such as Dashboard plus Details, Plan, or Settings. "

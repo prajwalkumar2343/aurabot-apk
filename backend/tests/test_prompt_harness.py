@@ -3,6 +3,7 @@ from app.services.llm import build_system_message
 from app.services.prompt_harness import (
     build_prompt_harness,
     load_context_files,
+    normalize_model_id,
     repair_needed,
     route_model,
 )
@@ -37,6 +38,15 @@ def test_skill_discovery_uses_progressive_disclosure():
     assert "declared actions: check_workout" in active_system
 
 
+def test_mini_app_builder_skill_guides_assistant_toward_react_runtime():
+    chat = ChatIn(message="create a client tracker mini app", api_key="key", model="model")
+    system = build_system_message(chat, build_prompt_harness(chat))
+
+    assert "mini_app_builder: When the user asks to create" in system
+    assert "asks for runtime react" in system
+    assert "Generated mini apps must stay declarative" not in system
+
+
 def test_planning_mode_auto_enables_plan_for_complex_requests():
     simple = build_prompt_harness(ChatIn(message="hi", api_key="key", model="model"))
     complex_request = build_prompt_harness(ChatIn(message="build a morning workflow", api_key="key", model="model"))
@@ -61,6 +71,25 @@ def test_model_routing_selects_fast_or_deep_models_when_enabled():
     assert "fast" in fast_reason
     assert deep_model == "gemini-2.5-pro"
     assert "deep" in deep_reason
+
+
+def test_gemini_model_names_are_normalized_for_google_api_routes():
+    assert normalize_model_id("gemini", "gemini/gemini-2.5-flash") == "gemini-2.5-flash"
+    assert normalize_model_id("gemini", "models/gemini-2.5-flash") == "gemini-2.5-flash"
+    assert normalize_model_id("openrouter", "google/gemini-2.5-flash") == "google/gemini-2.5-flash"
+
+    explicit, reason = route_model(
+        ChatIn(
+            message="hi",
+            provider="gemini",
+            api_key="key",
+            model="gemini/gemini-2.5-flash",
+            model_route="off",
+        ),
+        "off",
+    )
+    assert explicit == "gemini-2.5-flash"
+    assert reason == "model routing disabled"
 
 
 def test_repair_needed_detects_claimed_action_without_tool_call():

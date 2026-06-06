@@ -30,6 +30,36 @@ class MiniAppRepositoryTest {
         repository.deleteRecord("builtin.habit_tracker", records.first().id)
         assertTrue(repository.records("builtin.habit_tracker").isEmpty())
     }
+
+    @Test
+    fun builtInReactSmokeAppInstallsAndSupportsLocalCrud() = runTest {
+        val dao = FakeMiniAppDao()
+        val repository = MiniAppRepository(dao, clock = { 2000L })
+
+        repository.ensureBuiltInsInstalled()
+        val installed = repository.listInstalled()
+        assertEquals(true, installed.any { it.id == "builtin.react_field_notes" && it.name == "Field Notes" })
+
+        val bundle = repository.bundle("builtin.react_field_notes")
+        assertEquals("react", bundle?.runtime)
+
+        val created = repository.createRecord(
+            miniAppId = "builtin.react_field_notes",
+            recordType = "field_note",
+            values = mapOf("title" to "Smoke record", "status" to "Open", "note" to "Created locally")
+        )
+        assertEquals("Smoke record", repository.records("builtin.react_field_notes", "field_note").first().values["title"])
+
+        val updated = repository.updateRecord(
+            miniAppId = "builtin.react_field_notes",
+            recordId = created.id,
+            values = mapOf("title" to "Smoke record", "status" to "Done", "note" to "Updated locally")
+        )
+        assertEquals("Done", updated?.values?.get("status"))
+
+        repository.deleteRecord("builtin.react_field_notes", created.id)
+        assertTrue(repository.records("builtin.react_field_notes").isEmpty())
+    }
 }
 
 private class FakeMiniAppDao : MiniAppDao {

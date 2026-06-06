@@ -17,8 +17,8 @@ class MiniAppValidatorTest {
     fun validatesCompleteBuiltInCatalog() {
         val bundles = BuiltInMiniApps.all.map { MiniAppValidator.validate(it) }
 
-        assertEquals(listOf("Habit Tracker", "Focus Planner", "Spend Tracker"), bundles.map { it.metadata.name })
-        bundles.forEach { bundle ->
+        assertEquals(listOf("Habit Tracker", "Focus Planner", "Spend Tracker", "Field Notes"), bundles.map { it.metadata.name })
+        bundles.filter { it.runtime == "native" }.forEach { bundle ->
             val componentTypes = bundle.screens.first().components.map { it.type }
             assertEquals(true, bundle.screens.size >= 2)
             assertEquals(true, componentTypes.contains("quick_action_grid"))
@@ -28,6 +28,23 @@ class MiniAppValidatorTest {
             assertEquals(true, bundle.screens.flatMap { it.components }.any { it.type == "list" })
             assertEquals(true, bundle.screens.flatMap { it.components }.any { it.type == "form" })
         }
+    }
+
+    @Test
+    fun validatesBuiltInReactSmokeApp() {
+        val bundle = MiniAppValidator.validate(BuiltInMiniApps.fieldNotesReact)
+
+        assertEquals("builtin.react_field_notes", bundle.id)
+        assertEquals("react", bundle.runtime)
+        assertEquals("Field Notes", bundle.metadata.name)
+        assertEquals("field_note", bundle.dataSchema.recordType)
+        assertEquals(listOf("local_storage", "assistant_actions", "react_runtime", "scoped_storage"), bundle.capabilities)
+        assertEquals(listOf("records"), bundle.codeBundle?.allowedApis)
+        assertEquals(true, bundle.codeBundle?.compiledJs?.contains("window.__AuraMiniAppMount") == true)
+        assertEquals(true, bundle.codeBundle?.compiledJs?.contains("aura.records.create") == true)
+        assertEquals(true, bundle.codeBundle?.compiledJs?.contains("aura.records.update") == true)
+        assertEquals(true, bundle.codeBundle?.compiledJs?.contains("aura.records.delete") == true)
+        assertEquals(true, bundle.codeBundle?.compiledJs?.contains("data-view") == true)
     }
 
     @Test

@@ -14,6 +14,8 @@ ALLOWED_CONTEXT_FILES = {
     "design_guidelines.json",
 }
 MAX_CONTEXT_CHARS = 1800
+DEFAULT_GEMINI_FAST_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_DEEP_MODEL = "gemini-2.5-pro"
 
 
 @dataclass(frozen=True)
@@ -75,14 +77,14 @@ SKILL_CARDS = (
     ),
     SkillCard(
         name="mini_app_builder",
-        summary="Create safe declarative Aura mini apps with schema-bound components and actions.",
+        summary="Create safe Aura mini apps, usually as React runtime apps for assistant-built custom tools.",
         triggers=("build", "create", "make", "generate", "mini app"),
         detail=(
             "When the user asks to create, build, make, or generate a mini app, call create_mini_app "
-            "with a specific professional mini_app_prompt. Generated mini apps must stay declarative: "
-            "no executable code, APKs, webviews, plugins, remote URLs, or unsupported capabilities. "
-            "Include multiple screens, dashboard, quick actions, history, lists/settings/buttons when useful, "
-            "assistant intents, and local storage."
+            "with a specific professional mini_app_prompt that asks for runtime react unless the user explicitly "
+            "requested a native/declarative mini app. The prompt should describe the workflow, data model, polished "
+            "React UI, local records, assistant intents, and any helpful screens/actions. Do not ask for APKs, "
+            "webviews, plugins, remote URLs, network calls, browser storage APIs, or unsupported capabilities."
         ),
     ),
 )
@@ -142,20 +144,31 @@ def resolve_planning_mode(data: ChatIn) -> str:
 def route_model(data: ChatIn, planning_mode: str) -> tuple[str, str]:
     route = (data.model_route or "off").lower().strip()
     if route == "off" and data.model.lower().strip() != "auto":
-        return data.model, "model routing disabled"
+        return normalize_model_id(data.provider, data.model), "model routing disabled"
 
     provider = data.provider.lower().strip()
     complex_request = planning_mode == "plan" or any(
         word in data.message.lower() for word in ("build", "implement", "debug", "repair", "generate")
     )
     routes = {
-        "gemini": ("gemini-2.5-flash", "gemini-2.5-pro"),
+        "gemini": (DEFAULT_GEMINI_FAST_MODEL, DEFAULT_GEMINI_DEEP_MODEL),
         "openai": ("gpt-4.1-mini", "gpt-4.1"),
         "openrouter": ("openai/gpt-4.1-mini", "openai/gpt-4.1"),
     }
     fast_model, deep_model = routes.get(provider, (data.model, data.model))
     routed = deep_model if complex_request else fast_model
     return routed, f"routed to {'deep' if complex_request else 'fast'} {provider} model"
+
+
+def normalize_model_id(provider: str, model: str) -> str:
+    model_id = (model or "").strip()
+    provider_id = (provider or "").lower().strip()
+    if provider_id == "gemini":
+        if model_id.startswith("models/"):
+            model_id = model_id.removeprefix("models/")
+        if model_id.startswith("gemini/"):
+            model_id = model_id.removeprefix("gemini/")
+    return model_id
 
 
 def build_prompt_harness(data: ChatIn) -> PromptHarness:

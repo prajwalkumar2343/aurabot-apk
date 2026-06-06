@@ -11,6 +11,7 @@ from app.services.prompt_harness import (
     format_activated_skills,
     format_context_snippets,
     format_skill_summaries,
+    normalize_model_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Do not claim an action has completed unless you request the matching tool. "
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
-        "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that captures the user's requested workflow. "
+        "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. "
         f"Planning mode is {harness.planning_mode}. "
@@ -100,13 +101,13 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "create_mini_app",
-            "description": "Create, install, and optionally open a professional Aura mini app from a user request.",
+            "description": "Create, install, and optionally open a professional Aura mini app from a user request. Ask for a React runtime mini app unless the user explicitly requested native/declarative output.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mini_app_prompt": {
                         "type": "string",
-                        "description": "A concise but specific prompt describing the mini app to build, including workflow, data to track, actions, and screens.",
+                        "description": "A concise but specific prompt describing the mini app to build. Include runtime react for normal assistant-built apps, plus workflow, data to track, polished React UI, local records, actions, and assistant intents.",
                     },
                     "open_after_create": {
                         "type": "boolean",
@@ -322,6 +323,7 @@ def _extract_gemini_text(payload: dict) -> str:
 def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = False) -> str:
     if not data.api_key:
         raise HTTPException(status_code=400, detail="Gemini API Key is required")
+    model = normalize_model_id("gemini", data.model)
     try:
         payload = {
             "contents": [
@@ -339,7 +341,7 @@ def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = F
             payload["systemInstruction"] = {"parts": [{"text": system_message}]}
             payload["tools"] = gemini_assistant_tools()
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{data.model}:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={
                 "x-goog-api-key": data.api_key,
                 "Content-Type": "application/json",
