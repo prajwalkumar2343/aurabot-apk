@@ -143,12 +143,14 @@ def test_gemini_chat_uses_tool_harness(mock_post):
         ]
     }
     mock_post.return_value = mock_response
-    chat = ChatIn(message="open habit tracker", api_key="key", model="gemini-test")
+    chat = ChatIn(message="open habit tracker", api_key="key", model="gemini/gemini-test")
 
     raw = call_gemini(chat, "system prompt", use_assistant_tools=True)
+    request_url = mock_post.call_args.args[0]
     request_payload = mock_post.call_args.kwargs["json"]
     reply, actions = parse_tool_response(raw)
 
+    assert request_url.endswith("/models/gemini-test:generateContent")
     assert request_payload["systemInstruction"]["parts"][0]["text"] == "system prompt"
     assert request_payload["contents"][0]["parts"][0]["text"] == "open habit tracker"
     assert request_payload["tools"][0]["functionDeclarations"][0]["name"] == "block_app"
@@ -243,3 +245,59 @@ def test_assistant_chat_repairs_claimed_action_without_tool_call(mock_post):
     assert mock_post.call_count == 2
     assert response.json()["reply"] == "{neutral} Blocking it now."
     assert response.json()["actions"][0]["type"] == "block_app"
+
+
+@patch("app.services.llm.requests.post")
+def test_assistant_chat_returns_gemini_mini_app_tool_actions(mock_post):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"text": "{happy} Logged it."},
+                        {
+                            "functionCall": {
+                                "name": "create_mini_app_record",
+                                "args": {
+                                    "mini_app_id": "builtin.habit_tracker",
+                                    "action_id": "check_workout",
+                                    "record_type": "habit_checkin",
+                                    "values": {"habit": "Workout", "done": True},
+                                },
+                            }
+                        },
+                    ]
+                }
+            }
+        ]
+    }
+    mock_post.return_value = mock_response
+
+    response = client().post(
+        "/api/assistant/chat",
+        json={
+            "message": "log workout in habit tracker",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "models/gemini-2.5-flash",
+            "mini_apps": [
+                {
+                    "id": "builtin.habit_tracker",
+                    "name": "Habit Tracker",
+                    "intents": ["mark_workout_done"],
+                    "actions": ["check_workout"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_post.call_args.args[0].endswith("/models/gemini-2.5-flash:generateContent")
+    action = response.json()["actions"][0]
+    assert response.json()["reply"] == "{happy} Logged it."
+    assert action["type"] == "create_mini_app_record"
+    assert action["mini_app_id"] == "builtin.habit_tracker"
+    assert action["action_id"] == "check_workout"
+    assert action["values"] == {"habit": "Workout", "done": "True"}

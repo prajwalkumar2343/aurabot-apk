@@ -3,6 +3,7 @@ import logging
 import requests
 from fastapi import HTTPException
 from app.core.config import settings
+from app.services.prompt_harness import normalize_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,10 @@ def transcribe_audio(audio_base64: str, mime_type: str = "audio/m4a") -> str:
     if not settings.GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="Gemini API Key is not configured for transcription")
 
+    model = normalize_model_id("gemini", settings.GEMINI_MODEL)
     try:
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_MODEL}:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={
                 "x-goog-api-key": settings.GEMINI_API_KEY,
                 "Content-Type": "application/json",

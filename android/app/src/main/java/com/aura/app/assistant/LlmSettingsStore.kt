@@ -8,11 +8,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.llmSettingsDataStore by preferencesDataStore(name = "aura_llm_settings")
+const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 data class LlmSettingsState(
     val provider: LlmProvider = LlmProvider.Gemini,
     val googleApiKey: String = "",
-    val googleModel: String = "gemini-3-flash-preview",
+    val googleModel: String = DEFAULT_GEMINI_MODEL,
     val openAiApiKey: String = "",
     val openAiModel: String = "gpt-4.1-mini",
     val openRouterApiKey: String = "",
@@ -46,7 +47,7 @@ class LlmSettingsStore(private val context: Context) {
         LlmSettingsState(
             provider = LlmProvider.fromWireValue(prefs[providerKey]),
             googleApiKey = prefs[googleApiKeyKey] ?: "",
-            googleModel = prefs[googleModelKey] ?: "gemini-3-flash-preview",
+            googleModel = prefs[googleModelKey] ?: DEFAULT_GEMINI_MODEL,
             openAiApiKey = prefs[openAiApiKeyKey] ?: "",
             openAiModel = prefs[openAiModelKey] ?: "gpt-4.1-mini",
             openRouterApiKey = prefs[openRouterApiKeyKey] ?: "",

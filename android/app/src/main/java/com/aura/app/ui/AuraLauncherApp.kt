@@ -130,6 +130,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -146,6 +147,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
 import com.aura.app.apps.AppInfo
+import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
 import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
@@ -580,6 +582,7 @@ private fun HomeScreen(
     ScreenShell(
         wallpaperUri = state.session.wallpaperUri,
         modifier = Modifier
+            .testTag("aura-home-screen")
             .pointerInput(Unit) {
                 detectTapGestures(
                     onLongPress = {
@@ -1256,19 +1259,21 @@ private fun AppsScreen(
 
     ScreenShell(
         wallpaperUri = state.session.wallpaperUri,
-        modifier = Modifier.pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragStart = { totalDrag = 0f },
-                onDragEnd = {
-                    if (totalDrag > 150f) {
-                        onSwipeRight()
+        modifier = Modifier
+            .testTag("aura-apps-screen")
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onDragEnd = {
+                        if (totalDrag > 150f) {
+                            onSwipeRight()
+                        }
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDrag += dragAmount
                     }
-                },
-                onHorizontalDrag = { _, dragAmount ->
-                    totalDrag += dragAmount
-                }
-            )
-        }
+                )
+            }
     ) {
 
         
@@ -1779,6 +1784,7 @@ private fun MiniAppReactRuntimeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    .testTag("field-notes-react-webview")
                     .clip(RoundedCornerShape(26.dp))
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
                 factory = { context ->
@@ -3311,7 +3317,7 @@ private fun OnboardingScreen(
     var showApiKey by remember { mutableStateOf(false) }
     
     // Initialize default model IDs
-    var modelIdInput by remember { mutableStateOf("gemini-3-flash-preview") }
+    var modelIdInput by remember { mutableStateOf(DEFAULT_GEMINI_MODEL) }
     
     // Step 3: Background Listening state
     var bgListeningEnabled by remember { mutableStateOf(false) }
@@ -3554,7 +3560,7 @@ private fun OnboardingScreen(
                                 .glassCard(shape = RoundedCornerShape(20.dp), borderWidth = if (isGemini) 2.dp else 1.2.dp)
                                 .clickable {
                                     selectedProvider = LlmProvider.Gemini
-                                    modelIdInput = "gemini-3-flash-preview"
+                                    modelIdInput = DEFAULT_GEMINI_MODEL
                                 }
                                 .background(if (isGemini) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f) else Color.Transparent)
                                 .padding(16.dp)

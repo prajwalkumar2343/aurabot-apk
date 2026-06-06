@@ -14,6 +14,8 @@ ALLOWED_CONTEXT_FILES = {
     "design_guidelines.json",
 }
 MAX_CONTEXT_CHARS = 1800
+DEFAULT_GEMINI_FAST_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_DEEP_MODEL = "gemini-2.5-pro"
 
 
 @dataclass(frozen=True)
@@ -142,20 +144,31 @@ def resolve_planning_mode(data: ChatIn) -> str:
 def route_model(data: ChatIn, planning_mode: str) -> tuple[str, str]:
     route = (data.model_route or "off").lower().strip()
     if route == "off" and data.model.lower().strip() != "auto":
-        return data.model, "model routing disabled"
+        return normalize_model_id(data.provider, data.model), "model routing disabled"
 
     provider = data.provider.lower().strip()
     complex_request = planning_mode == "plan" or any(
         word in data.message.lower() for word in ("build", "implement", "debug", "repair", "generate")
     )
     routes = {
-        "gemini": ("gemini-2.5-flash", "gemini-2.5-pro"),
+        "gemini": (DEFAULT_GEMINI_FAST_MODEL, DEFAULT_GEMINI_DEEP_MODEL),
         "openai": ("gpt-4.1-mini", "gpt-4.1"),
         "openrouter": ("openai/gpt-4.1-mini", "openai/gpt-4.1"),
     }
     fast_model, deep_model = routes.get(provider, (data.model, data.model))
     routed = deep_model if complex_request else fast_model
     return routed, f"routed to {'deep' if complex_request else 'fast'} {provider} model"
+
+
+def normalize_model_id(provider: str, model: str) -> str:
+    model_id = (model or "").strip()
+    provider_id = (provider or "").lower().strip()
+    if provider_id == "gemini":
+        if model_id.startswith("models/"):
+            model_id = model_id.removeprefix("models/")
+        if model_id.startswith("gemini/"):
+            model_id = model_id.removeprefix("gemini/")
+    return model_id
 
 
 def build_prompt_harness(data: ChatIn) -> PromptHarness:

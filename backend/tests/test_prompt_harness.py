@@ -3,6 +3,7 @@ from app.services.llm import build_system_message
 from app.services.prompt_harness import (
     build_prompt_harness,
     load_context_files,
+    normalize_model_id,
     repair_needed,
     route_model,
 )
@@ -70,6 +71,25 @@ def test_model_routing_selects_fast_or_deep_models_when_enabled():
     assert "fast" in fast_reason
     assert deep_model == "gemini-2.5-pro"
     assert "deep" in deep_reason
+
+
+def test_gemini_model_names_are_normalized_for_google_api_routes():
+    assert normalize_model_id("gemini", "gemini/gemini-2.5-flash") == "gemini-2.5-flash"
+    assert normalize_model_id("gemini", "models/gemini-2.5-flash") == "gemini-2.5-flash"
+    assert normalize_model_id("openrouter", "google/gemini-2.5-flash") == "google/gemini-2.5-flash"
+
+    explicit, reason = route_model(
+        ChatIn(
+            message="hi",
+            provider="gemini",
+            api_key="key",
+            model="gemini/gemini-2.5-flash",
+            model_route="off",
+        ),
+        "off",
+    )
+    assert explicit == "gemini-2.5-flash"
+    assert reason == "model routing disabled"
 
 
 def test_repair_needed_detects_claimed_action_without_tool_call():

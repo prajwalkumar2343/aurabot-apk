@@ -11,6 +11,7 @@ from app.services.prompt_harness import (
     format_activated_skills,
     format_context_snippets,
     format_skill_summaries,
+    normalize_model_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,7 @@ def _extract_gemini_text(payload: dict) -> str:
 def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = False) -> str:
     if not data.api_key:
         raise HTTPException(status_code=400, detail="Gemini API Key is required")
+    model = normalize_model_id("gemini", data.model)
     try:
         payload = {
             "contents": [
@@ -339,7 +341,7 @@ def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = F
             payload["systemInstruction"] = {"parts": [{"text": system_message}]}
             payload["tools"] = gemini_assistant_tools()
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{data.model}:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={
                 "x-goog-api-key": data.api_key,
                 "Content-Type": "application/json",
