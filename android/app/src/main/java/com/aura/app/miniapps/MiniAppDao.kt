@@ -36,4 +36,13 @@ interface MiniAppDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(entity: MiniAppEventEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertVersion(entity: MiniAppVersionEntity)
+
+    @Query("SELECT * FROM mini_app_versions WHERE miniAppId = :miniAppId ORDER BY version DESC")
+    suspend fun versions(miniAppId: String): List<MiniAppVersionEntity>
+
+    @Query("SELECT * FROM mini_app_versions WHERE miniAppId = :miniAppId AND version = :version LIMIT 1")
+    suspend fun version(miniAppId: String, version: Int): MiniAppVersionEntity?
 }

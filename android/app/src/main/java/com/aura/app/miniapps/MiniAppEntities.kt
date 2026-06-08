@@ -50,3 +50,18 @@ data class MiniAppSettingEntity(
     val value: String,
     val updatedAt: Long
 )
+
+@Entity(
+    tableName = "mini_app_versions",
+    primaryKeys = ["miniAppId", "version"],
+    indices = [Index(value = ["miniAppId", "createdAt"])]
+)
+data class MiniAppVersionEntity(
+    val miniAppId: String,
+    val version: Int,
+    val name: String,
+    val summary: String,
+    val migrationPlanJson: String,
+    val bundleJson: String,
+    val createdAt: Long
+)
