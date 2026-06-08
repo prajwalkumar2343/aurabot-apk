@@ -20,6 +20,8 @@ import com.aura.app.miniapps.BuiltInMiniApps
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
+import com.aura.app.miniapps.MiniAppRevisionPreview
+import com.aura.app.miniapps.MiniAppVersion
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,9 @@ data class LauncherUiState(
     val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
     val activeMiniApp: MiniAppBundle? = null,
     val activeMiniAppRecords: List<MiniAppRecord> = emptyList(),
+    val activeMiniAppVersions: List<MiniAppVersion> = emptyList(),
+    val pendingMiniAppRevision: MiniAppRevisionPreview? = null,
+    val revisingMiniApp: Boolean = false,
     val llmSettings: LlmSettingsState = LlmSettingsState(),
     val openRouterModels: List<OpenRouterModelInfo> = emptyList(),
     val loadingModels: Boolean = false,
@@ -55,7 +60,9 @@ data class LauncherUiState(
     val currentEmotion: String = "neutral",
     val isSpeaking: Boolean = false,
     val isDefaultLauncher: Boolean = false,
-    val sessionLoaded: Boolean = false
+    val sessionLoaded: Boolean = false,
+    val attachedImageBase64: String? = null,
+    val attachedImageMimeType: String? = null
 ) {
     val filteredApps: List<AppInfo> =
         if (appQuery.isBlank()) apps else apps.filter {
@@ -92,6 +99,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         refreshApps(force = true)
         refreshMiniApps()
         refreshCloud()
+        observeVoiceStatus()
     }
 
     private fun updateEmotionFromReply(reply: String) {
@@ -138,41 +146,95 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         localState.update { it.copy(assistantInput = input) }
     }
 
+    fun setAttachedImage(base64: String?, mimeType: String?) {
+        localState.update { it.copy(attachedImageBase64 = base64, attachedImageMimeType = mimeType) }
+    }
+
+    private fun observeVoiceStatus() {
+        viewModelScope.launch {
+            container.voiceServiceController.status.collect { voiceStatus ->
+                val audio = voiceStatus.lastRecordedAudioBase64
+                if (audio != null) {
+                    container.voiceServiceController.clearLastRecordedAudio()
+                    transcribeAndSend(audio)
+                }
+            }
+        }
+    }
+
+    private fun transcribeAndSend(audioBase64: String) {
+        viewModelScope.launch {
+            localState.update {
+                it.copy(
+                    loading = true,
+                    error = null
+                )
+            }
+            try {
+                val text = container.assistantRepository.transcribe(audioBase64)
+                if (text.isNotBlank()) {
+                    localState.update {
+                        it.copy(
+                            messages = it.messages + AssistantMessage(MessageRole.User, text)
+                        )
+                    }
+                    sendAssistantMessageInternal(text, null, null)
+                } else {
+                    localState.update { it.copy(loading = false, error = "Speech not recognized") }
+                }
+            } catch (error: Exception) {
+                localState.update { it.copy(loading = false, error = error.message ?: "Transcription failed") }
+            }
+        }
+    }
+
     fun sendAssistantMessage() {
         val message = uiState.value.assistantInput.trim()
-        if (message.isEmpty()) return
+        val imgBase64 = uiState.value.attachedImageBase64
+        val imgMime = uiState.value.attachedImageMimeType
+        if (message.isEmpty() && imgBase64 == null) return
         viewModelScope.launch {
             localState.update {
                 it.copy(
                     assistantInput = "",
+                    attachedImageBase64 = null,
+                    attachedImageMimeType = null,
                     loading = true,
                     error = null,
-                    messages = it.messages + AssistantMessage(MessageRole.User, message)
+                    messages = it.messages + AssistantMessage(MessageRole.User, if (message.isNotBlank()) message else "[Attached Image]")
                 )
             }
-            try {
-                val bundles = uiState.value.miniApps.mapNotNull { container.miniAppRepository.bundle(it.id) }
-                val response = container.assistantRepository.chat(
-                    message = message,
-                    sessionId = uiState.value.assistantSessionId,
-                    apps = uiState.value.apps,
-                    miniApps = uiState.value.miniApps,
-                    miniAppBundles = bundles
+            sendAssistantMessageInternal(message, imgBase64, imgMime)
+        }
+    }
+
+    private suspend fun sendAssistantMessageInternal(message: String, imgBase64: String?, imgMime: String?) {
+        try {
+            val bundles = uiState.value.miniApps.mapNotNull { container.miniAppRepository.bundle(it.id) }
+            val response = container.assistantRepository.chat(
+                message = message,
+                sessionId = uiState.value.assistantSessionId,
+                apps = uiState.value.apps,
+                miniApps = uiState.value.miniApps,
+                miniAppBundles = bundles,
+                image_base64 = imgBase64,
+                image_mime_type = imgMime
+            )
+            val actionReplies = applyChatActions(response.actions)
+            localState.update {
+                it.copy(
+                    loading = false,
+                    assistantSessionId = response.session_id,
+                    messages = it.messages +
+                        AssistantMessage(MessageRole.Assistant, response.reply) +
+                        actionReplies.map { text -> AssistantMessage(MessageRole.Assistant, text) },
+                    isSpeaking = true
                 )
-                val actionReplies = applyChatActions(response.actions)
-                localState.update {
-                    it.copy(
-                        loading = false,
-                        assistantSessionId = response.session_id,
-                        messages = it.messages +
-                            AssistantMessage(MessageRole.Assistant, response.reply) +
-                            actionReplies.map { text -> AssistantMessage(MessageRole.Assistant, text) }
-                    )
-                }
-                updateEmotionFromReply(response.reply)
-            } catch (error: Exception) {
-                localState.update { it.copy(loading = false, error = error.message ?: "Assistant failed") }
             }
+            updateEmotionFromReply(response.reply)
+            container.voiceSpeaker.speak(response.reply)
+        } catch (error: Exception) {
+            localState.update { it.copy(loading = false, error = error.message ?: "Assistant failed") }
         }
     }
 
@@ -286,6 +348,19 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         }
                     }
                 }
+                "revise_mini_app" -> {
+                    val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
+                    val instruction = action.revision_instruction?.trim().orEmpty()
+                    if (miniApp == null) {
+                        replies += "I could not find that mini app."
+                    } else if (instruction.isBlank()) {
+                        replies += "I need a specific change to make."
+                    } else {
+                        openMiniApp(miniApp.id)
+                        reviseMiniApp(miniApp.id, instruction)
+                        replies += "Drafting an upgrade for ${miniApp.name}."
+                    }
+                }
                 "create_mini_app_record" -> {
                     val miniApp = resolveMiniApp(action.mini_app_id, action.mini_app_query)
                     if (miniApp == null) {
@@ -328,11 +403,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         val installed = container.miniAppRepository.install(bundle)
         val installedApps = container.miniAppRepository.listInstalled()
         val records = if (openAfterCreate) container.miniAppRepository.records(bundle.id) else emptyList()
+        val versions = if (openAfterCreate) container.miniAppRepository.versions(bundle.id) else emptyList()
         localState.update {
             it.copy(
                 miniApps = installedApps,
                 activeMiniApp = if (openAfterCreate) bundle else it.activeMiniApp,
-                activeMiniAppRecords = if (openAfterCreate) records else it.activeMiniAppRecords
+                activeMiniAppRecords = if (openAfterCreate) records else it.activeMiniAppRecords,
+                activeMiniAppVersions = if (openAfterCreate) versions else it.activeMiniAppVersions
             )
         }
         return installed
@@ -474,12 +551,29 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val bundle = container.miniAppRepository.bundle(id)
             val records = container.miniAppRepository.records(id)
-            localState.update { it.copy(activeMiniApp = bundle, activeMiniAppRecords = records) }
+            val versions = container.miniAppRepository.versions(id)
+            localState.update {
+                it.copy(
+                    activeMiniApp = bundle,
+                    activeMiniAppRecords = records,
+                    activeMiniAppVersions = versions,
+                    pendingMiniAppRevision = null,
+                    revisingMiniApp = false
+                )
+            }
         }
     }
 
     fun closeMiniApp() {
-        localState.update { it.copy(activeMiniApp = null, activeMiniAppRecords = emptyList()) }
+        localState.update {
+            it.copy(
+                activeMiniApp = null,
+                activeMiniAppRecords = emptyList(),
+                activeMiniAppVersions = emptyList(),
+                pendingMiniAppRevision = null,
+                revisingMiniApp = false
+            )
+        }
     }
 
     fun runMiniAppAction(miniAppId: String, actionId: String) {
@@ -504,6 +598,93 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             val records = container.miniAppRepository.records(miniAppId)
             localState.update { state -> state.copy(activeMiniAppRecords = records) }
         }
+
+    fun reviseActiveMiniApp(instruction: String) {
+        val trimmed = instruction.trim()
+        val bundle = uiState.value.activeMiniApp ?: return
+        if (trimmed.isEmpty()) return
+        reviseMiniApp(bundle.id, trimmed)
+    }
+
+    private fun reviseMiniApp(miniAppId: String, instruction: String) {
+        viewModelScope.launch {
+            val bundle = container.miniAppRepository.bundle(miniAppId) ?: return@launch
+            localState.update { it.copy(revisingMiniApp = true, error = null, pendingMiniAppRevision = null) }
+            try {
+                val sample = container.miniAppRepository.records(bundle.id).take(8).map { record ->
+                    mapOf<String, Any>(
+                        "recordType" to record.recordType,
+                        "values" to record.values,
+                        "createdAt" to record.createdAt
+                    )
+                }
+                val response = container.assistantRepository.reviseMiniApp(instruction, bundle, sample)
+                localState.update {
+                    it.copy(
+                        revisingMiniApp = false,
+                        pendingMiniAppRevision = MiniAppRevisionPreview(
+                            bundle = response.bundle,
+                            summary = response.summary,
+                            migrationPlan = response.migrationPlan
+                        )
+                    )
+                }
+            } catch (error: Exception) {
+                localState.update { it.copy(revisingMiniApp = false, error = error.message ?: "Could not revise mini app") }
+            }
+        }
+    }
+
+    fun dismissMiniAppRevision() {
+        localState.update { it.copy(pendingMiniAppRevision = null, revisingMiniApp = false) }
+    }
+
+    fun applyPendingMiniAppRevision() {
+        val preview = uiState.value.pendingMiniAppRevision ?: return
+        viewModelScope.launch {
+            try {
+                val installed = container.miniAppRepository.applyRevision(preview)
+                val records = container.miniAppRepository.records(installed.id)
+                val versions = container.miniAppRepository.versions(installed.id)
+                localState.update {
+                    it.copy(
+                        miniApps = container.miniAppRepository.listInstalled(),
+                        activeMiniApp = preview.bundle,
+                        activeMiniAppRecords = records,
+                        activeMiniAppVersions = versions,
+                        pendingMiniAppRevision = null,
+                        error = null
+                    )
+                }
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not apply mini app revision") }
+            }
+        }
+    }
+
+    fun rollbackActiveMiniApp(version: Int) {
+        val id = uiState.value.activeMiniApp?.id ?: return
+        viewModelScope.launch {
+            try {
+                container.miniAppRepository.rollback(id, version)
+                val bundle = container.miniAppRepository.bundle(id)
+                val records = container.miniAppRepository.records(id)
+                val versions = container.miniAppRepository.versions(id)
+                localState.update {
+                    it.copy(
+                        miniApps = container.miniAppRepository.listInstalled(),
+                        activeMiniApp = bundle,
+                        activeMiniAppRecords = records,
+                        activeMiniAppVersions = versions,
+                        pendingMiniAppRevision = null,
+                        error = null
+                    )
+                }
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not roll back mini app") }
+            }
+        }
+    }
 
     suspend fun updateMiniAppRecordForRuntime(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? =
         container.miniAppRepository.updateRecord(miniAppId, recordId, values).also {
