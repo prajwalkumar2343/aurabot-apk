@@ -7,11 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.mini_apps import MiniAppBuildIn, MiniAppBuildOut, MiniAppRecordCreate, MiniAppRecordOut, MiniAppRecordUpdate
+from app.models.mini_apps import (
+    MiniAppBuildIn,
+    MiniAppBuildOut,
+    MiniAppRecordCreate,
+    MiniAppRecordOut,
+    MiniAppRecordUpdate,
+    MiniAppRevisionIn,
+    MiniAppRevisionOut,
+)
 from app.services.mini_apps import (
     call_builder_llm,
+    call_revision_llm,
     compile_mini_app_bundle,
     mini_app_builder_system_prompt,
+    mini_app_revision_system_prompt,
     parse_json_object,
     validate_mini_app_bundle,
 )
@@ -36,6 +46,23 @@ async def build_mini_app(data: MiniAppBuildIn):
         _enforce_requested_runtime(data.runtime, bundle.runtime)
     bundle = await asyncio.to_thread(compile_mini_app_bundle, bundle)
     return MiniAppBuildOut(bundle=bundle)
+
+
+@router.post("/revise", response_model=MiniAppRevisionOut)
+async def revise_mini_app(data: MiniAppRevisionIn):
+    if not data.instruction.strip():
+        raise HTTPException(status_code=400, detail="Revision instruction is required")
+    raw = await asyncio.to_thread(call_revision_llm, data)
+    try:
+        bundle, summary, migration_plan = _parse_revision_payload(raw, data)
+        _enforce_requested_runtime(data.runtime or data.currentBundle.runtime, bundle.runtime)
+    except HTTPException as first_error:
+        repair_prompt = mini_app_revision_system_prompt(data, str(first_error.detail), raw)
+        repaired = await asyncio.to_thread(call_revision_llm, data, repair_prompt)
+        bundle, summary, migration_plan = _parse_revision_payload(repaired, data)
+        _enforce_requested_runtime(data.runtime or data.currentBundle.runtime, bundle.runtime)
+    bundle = await asyncio.to_thread(compile_mini_app_bundle, bundle)
+    return MiniAppRevisionOut(bundle=bundle, summary=summary, migrationPlan=migration_plan)
 
 
 @router.get("/{mini_app_id}/records", response_model=list[MiniAppRecordOut])
@@ -144,3 +171,23 @@ def _now() -> str:
 def _enforce_requested_runtime(requested: Optional[str], actual: str) -> None:
     if requested and requested != actual:
         raise HTTPException(status_code=422, detail=f"Requested {requested} runtime but LLM returned {actual}")
+
+
+def _parse_revision_payload(raw: str, data: MiniAppRevisionIn):
+    payload = parse_json_object(raw)
+    bundle_payload = payload.get("bundle")
+    if not isinstance(bundle_payload, dict):
+        raise HTTPException(status_code=422, detail="Revision response requires bundle")
+    bundle_payload["id"] = data.currentBundle.id
+    bundle_payload["version"] = data.currentBundle.version + 1
+    if "metadata" in bundle_payload and isinstance(bundle_payload["metadata"], dict):
+        bundle_payload["metadata"]["builtIn"] = False
+    bundle = validate_mini_app_bundle(bundle_payload)
+    summary = str(payload.get("summary") or "Updated mini app.").strip()[:240]
+    migration_plan_raw = payload.get("migrationPlan") or []
+    if not isinstance(migration_plan_raw, list):
+        raise HTTPException(status_code=422, detail="migrationPlan must be a list")
+    migration_plan = [str(item).strip()[:180] for item in migration_plan_raw if str(item).strip()][:8]
+    if not migration_plan:
+        migration_plan = ["Existing local records stay attached to this mini app id."]
+    return bundle, summary, migration_plan
