@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.mini_apps import compile_mini_app_bundle, fallback_bundle, mini_app_builder_system_prompt, react_fallback_bundle
+from app.services.mini_apps import compile_mini_app_bundle, fallback_bundle, mini_app_builder_system_prompt, mini_app_revision_system_prompt, react_fallback_bundle
 
 
 @pytest.fixture
@@ -60,6 +60,17 @@ def build_payload(prompt="make me a habit tracker for workouts and water"):
     return {"prompt": prompt, "provider": "gemini", "api_key": "test", "model": "gemini-test"}
 
 
+def revision_payload(instruction="track soreness too"):
+    return {
+        "instruction": instruction,
+        "currentBundle": valid_bundle(),
+        "recordSample": [{"recordType": "habit_checkin", "values": {"habit": "Workout"}}],
+        "provider": "gemini",
+        "api_key": "test",
+        "model": "gemini-test",
+    }
+
+
 def test_build_mini_app_validates_llm_bundle(client):
     with patch("app.api.mini_apps.call_builder_llm", return_value=json.dumps(valid_bundle())):
         response = client.post("/api/mini-apps/build", json=build_payload())
@@ -92,10 +103,68 @@ def test_builder_system_prompt_can_request_native_runtime():
     assert "omit codeBundle" in prompt
 
 
+def test_revision_system_prompt_preserves_existing_app_contract():
+    prompt = mini_app_revision_system_prompt(
+        type("Revision", (), {
+            "currentBundle": compile_mini_app_bundle(fallback_bundle("gym tracker")),
+            "recordSample": [{"values": {"title": "Leg day"}}],
+            "instruction": "track soreness too",
+            "runtime": None,
+        })()
+    )
+
+    assert "revising an existing installed Aura mini app" in prompt
+    assert "keep the same id" in prompt
+    assert "increment version by exactly 1" in prompt
+    assert "track soreness too" in prompt
+
+
 def test_build_mini_app_rejects_empty_prompt(client):
     response = client.post("/api/mini-apps/build", json=build_payload("   "))
 
     assert response.status_code == 400
+
+
+def test_revise_mini_app_returns_next_version_and_migration_plan(client):
+    revised = valid_bundle()
+    revised["id"] = "model.tried.to.rename"
+    revised["version"] = 99
+    revised["dataSchema"]["fields"].append({"name": "soreness", "type": "number"})
+    revised["actions"].append(
+        {
+            "id": "log_soreness",
+            "type": "create_record",
+            "recordType": "habit_checkin",
+            "values": {"habit": "Workout", "soreness": "3"},
+        }
+    )
+    revised["assistantIntents"].append(
+        {"name": "log_soreness", "utterances": ["log soreness"], "actionId": "log_soreness"}
+    )
+    payload = {"bundle": revised, "summary": "Added soreness tracking.", "migrationPlan": ["Old workout records remain valid."]}
+    with patch("app.api.mini_apps.call_revision_llm", return_value=json.dumps(payload)):
+        response = client.post("/api/mini-apps/revise", json=revision_payload())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["bundle"]["id"] == "generated.habits"
+    assert data["bundle"]["version"] == 2
+    assert data["bundle"]["metadata"]["builtIn"] is False
+    assert data["bundle"]["dataSchema"]["fields"][-1]["name"] == "soreness"
+    assert data["migrationPlan"] == ["Old workout records remain valid."]
+
+
+def test_revise_mini_app_repairs_invalid_revision(client):
+    fixed = valid_bundle()
+    fixed["dataSchema"]["fields"].append({"name": "soreness", "type": "number"})
+    payload = {"bundle": fixed, "summary": "Added soreness.", "migrationPlan": ["Records stay attached."]}
+    with patch("app.api.mini_apps.call_revision_llm", side_effect=["not json", json.dumps(payload)]) as mock_call:
+        response = client.post("/api/mini-apps/revise", json=revision_payload())
+
+    assert response.status_code == 200
+    assert mock_call.call_count == 2
+    assert "Repair pass" in mock_call.call_args.args[1]
+    assert response.json()["bundle"]["version"] == 2
 
 
 def test_build_mini_app_rejects_malformed_json(client):

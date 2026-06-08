@@ -157,6 +157,8 @@ import com.aura.app.miniapps.MiniAppComponentItem
 import com.aura.app.miniapps.MiniAppField
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
+import com.aura.app.miniapps.MiniAppRevisionPreview
+import com.aura.app.miniapps.MiniAppVersion
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -242,6 +244,50 @@ fun AuraLauncherApp(
             } catch (_: Exception) {
             }
             viewModel.setWallpaper(uri.toString())
+        }
+    }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes != null) {
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    viewModel.setAttachedImage(base64, mimeType)
+                }
+            } catch (e: Exception) {
+                viewModel.showError("Could not load image: ${e.message}")
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: android.graphics.Bitmap? ->
+        if (bitmap != null) {
+            try {
+                val outputStream = java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+                val bytes = outputStream.toByteArray()
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                viewModel.setAttachedImage(base64, "image/jpeg")
+            } catch (e: Exception) {
+                viewModel.showError("Could not capture image: ${e.message}")
+            }
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            try {
+                val container = (context.applicationContext as com.aura.app.AuraApplication).container
+                container.voiceSpeaker.stop()
+            } catch (_: Exception) {}
         }
     }
 
@@ -467,7 +513,10 @@ fun AuraLauncherApp(
                                     }
                                 }
                             }
-                        }
+                        },
+                        onClearAttachment = { viewModel.setAttachedImage(null, null) },
+                        onLaunchPicker = { imagePickerLauncher.launch("image/*") },
+                        onLaunchCamera = { cameraLauncher.launch(null) }
                     )
                 }
                 composable(Route.Apps.name) {
@@ -495,6 +544,9 @@ fun AuraLauncherApp(
                     MiniAppRuntimeScreen(
                         bundle = state.activeMiniApp,
                         records = state.activeMiniAppRecords,
+                        versions = state.activeMiniAppVersions,
+                        revisionPreview = state.pendingMiniAppRevision,
+                        revising = state.revisingMiniApp,
                         onBack = {
                             viewModel.closeMiniApp()
                             navController.popBackStack()
@@ -502,6 +554,10 @@ fun AuraLauncherApp(
                         onRunAction = viewModel::runMiniAppAction,
                         onCreateRecord = viewModel::createMiniAppRecord,
                         onDeleteRecord = viewModel::deleteMiniAppRecord,
+                        onRevise = viewModel::reviseActiveMiniApp,
+                        onAcceptRevision = viewModel::applyPendingMiniAppRevision,
+                        onDismissRevision = viewModel::dismissMiniAppRevision,
+                        onRollback = viewModel::rollbackActiveMiniApp,
                         onReactListRecords = viewModel::listMiniAppRecordsForRuntime,
                         onReactCreateRecord = viewModel::createMiniAppRecordForRuntime,
                         onReactUpdateRecord = viewModel::updateMiniAppRecordForRuntime,
@@ -512,7 +568,10 @@ fun AuraLauncherApp(
                     AssistantScreen(
                         state = state,
                         onAssistantInput = viewModel::setAssistantInput,
-                        onSend = viewModel::sendAssistantMessage
+                        onSend = viewModel::sendAssistantMessage,
+                        onClearAttachment = { viewModel.setAttachedImage(null, null) },
+                        onLaunchPicker = { imagePickerLauncher.launch("image/*") },
+                        onLaunchCamera = { cameraLauncher.launch(null) }
                     )
                 }
                 composable(Route.Tasks.name) {
@@ -569,7 +628,10 @@ private fun HomeScreen(
     onSwipeLeft: () -> Unit,
     onSelectWallpaper: () -> Unit,
     onOpenSettings: () -> Unit,
-    onLaunchApp: (AppInfo) -> Unit
+    onLaunchApp: (AppInfo) -> Unit,
+    onClearAttachment: () -> Unit,
+    onLaunchPicker: () -> Unit,
+    onLaunchCamera: () -> Unit
 ) {
     val presenceMode = when {
         state.loading -> AuraPresenceMode.Thinking
@@ -605,17 +667,38 @@ private fun HomeScreen(
                 )
             }
     ) {
-        AuraEyes(
-            mode = presenceMode,
-            voiceLevel = state.status.rmsLevel,
-            commandText = state.assistantInput,
-            emotion = state.currentEmotion,
-            isSpeaking = state.isSpeaking,
-            interactionMode = state.session.interactionMode,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (state.status.running) {
+                        onStopVoice()
+                    } else {
+                        onTalk()
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            AuraEyes(
+                mode = presenceMode,
+                voiceLevel = state.status.rmsLevel,
+                commandText = state.assistantInput,
+                emotion = state.currentEmotion,
+                isSpeaking = state.isSpeaking,
+                interactionMode = state.session.interactionMode,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Spacer(Modifier.weight(1f))
-        AssistantComposer(state.assistantInput, onAssistantInput, onSend)
+        AssistantComposer(
+            value = state.assistantInput,
+            onValueChange = onAssistantInput,
+            onSend = onSend,
+            attachedImageBase64 = state.attachedImageBase64,
+            onClearAttachment = onClearAttachment,
+            onLaunchPicker = onLaunchPicker,
+            onLaunchCamera = onLaunchCamera
+        )
     }
 
     if (showLongPressMenu) {
@@ -1691,10 +1774,17 @@ private fun MiniAppAvatar(
 private fun MiniAppRuntimeScreen(
     bundle: MiniAppBundle?,
     records: List<MiniAppRecord>,
+    versions: List<MiniAppVersion>,
+    revisionPreview: MiniAppRevisionPreview?,
+    revising: Boolean,
     onBack: () -> Unit,
     onRunAction: (String, String) -> Unit,
     onCreateRecord: (String, String, Map<String, String>) -> Unit,
     onDeleteRecord: (String, String) -> Unit,
+    onRevise: (String) -> Unit,
+    onAcceptRevision: () -> Unit,
+    onDismissRevision: () -> Unit,
+    onRollback: (Int) -> Unit,
     onReactListRecords: suspend (String, String?) -> List<MiniAppRecord>,
     onReactCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
     onReactUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
@@ -1709,7 +1799,14 @@ private fun MiniAppRuntimeScreen(
     if (bundle.runtime == "react") {
         MiniAppReactRuntimeScreen(
             bundle = bundle,
+            versions = versions,
+            revisionPreview = revisionPreview,
+            revising = revising,
             onBack = onBack,
+            onRevise = onRevise,
+            onAcceptRevision = onAcceptRevision,
+            onDismissRevision = onDismissRevision,
+            onRollback = onRollback,
             onListRecords = onReactListRecords,
             onCreateRecord = onReactCreateRecord,
             onUpdateRecord = onReactUpdateRecord,
@@ -1741,6 +1838,19 @@ private fun MiniAppRuntimeScreen(
             item(key = "hero") {
                 MiniAppHeroCard(bundle, records.size, today, streak, primary, secondary)
             }
+            item(key = "forge") {
+                MiniAppForgePanel(
+                    bundle = bundle,
+                    versions = versions,
+                    revisionPreview = revisionPreview,
+                    revising = revising,
+                    primary = primary,
+                    onRevise = onRevise,
+                    onAcceptRevision = onAcceptRevision,
+                    onDismissRevision = onDismissRevision,
+                    onRollback = onRollback
+                )
+            }
             if (bundle.screens.size > 1) {
                 item(key = "screens") {
                     MiniAppScreenTabs(
@@ -1764,7 +1874,14 @@ private fun MiniAppRuntimeScreen(
 @Composable
 private fun MiniAppReactRuntimeScreen(
     bundle: MiniAppBundle,
+    versions: List<MiniAppVersion>,
+    revisionPreview: MiniAppRevisionPreview?,
+    revising: Boolean,
     onBack: () -> Unit,
+    onRevise: (String) -> Unit,
+    onAcceptRevision: () -> Unit,
+    onDismissRevision: () -> Unit,
+    onRollback: (Int) -> Unit,
     onListRecords: suspend (String, String?) -> List<MiniAppRecord>,
     onCreateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord,
     onUpdateRecord: suspend (String, String, Map<String, String>) -> MiniAppRecord?,
@@ -1779,6 +1896,18 @@ private fun MiniAppReactRuntimeScreen(
     }
     ScreenShell(wallpaperUri = null) {
         MiniAppTopBar(bundle, "React App", primary, onBack)
+        Spacer(Modifier.height(14.dp))
+        MiniAppForgePanel(
+            bundle = bundle,
+            versions = versions,
+            revisionPreview = revisionPreview,
+            revising = revising,
+            primary = primary,
+            onRevise = onRevise,
+            onAcceptRevision = onAcceptRevision,
+            onDismissRevision = onDismissRevision,
+            onRollback = onRollback
+        )
         Spacer(Modifier.height(14.dp))
         key(bundle.id, html) {
             AndroidView(
@@ -1992,6 +2121,149 @@ private fun buildMiniAppReactHtml(bundle: MiniAppBundle): String {
 }
 
 private fun String.escapeScriptEnd(): String = replace("</script", "<\\/script", ignoreCase = true)
+
+@Composable
+private fun MiniAppForgePanel(
+    bundle: MiniAppBundle,
+    versions: List<MiniAppVersion>,
+    revisionPreview: MiniAppRevisionPreview?,
+    revising: Boolean,
+    primary: Color,
+    onRevise: (String) -> Unit,
+    onAcceptRevision: () -> Unit,
+    onDismissRevision: () -> Unit,
+    onRollback: (Int) -> Unit
+) {
+    var instruction by remember(bundle.id, revisionPreview?.bundle?.version) { mutableStateOf("") }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+            .border(BorderStroke(1.dp, primary.copy(alpha = 0.16f)), RoundedCornerShape(24.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = primary)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Forge", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    "v${bundle.version} / ${bundle.dataSchema.fields.size} fields / ${bundle.actions.size} actions / ${bundle.assistantIntents.size} intents",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (revising) {
+                Text(
+                    "Drafting",
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(primary.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                    color = primary
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = instruction,
+                onValueChange = { instruction = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Add soreness, charts, actions...") },
+                singleLine = true,
+                enabled = !revising,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                )
+            )
+            FilledTonalButton(
+                onClick = {
+                    onRevise(instruction)
+                    instruction = ""
+                },
+                enabled = instruction.isNotBlank() && !revising,
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                modifier = Modifier.height(54.dp)
+            ) {
+                Icon(Icons.Rounded.AutoAwesome, "Forge revision")
+            }
+        }
+
+        AnimatedVisibility(visible = revisionPreview != null) {
+            revisionPreview?.let { preview ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(primary.copy(alpha = 0.08f))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Preview v${preview.bundle.version}",
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        preview.summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    preview.migrationPlan.take(3).forEach { step ->
+                        Text(
+                            "- $step",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "${preview.bundle.dataSchema.fields.size} fields / ${preview.bundle.actions.size} actions / ${preview.bundle.assistantIntents.size} intents",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = primary
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onAcceptRevision,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = primary)
+                        ) {
+                            Icon(Icons.Rounded.Check, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Apply")
+                        }
+                        OutlinedButton(onClick = onDismissRevision, shape = RoundedCornerShape(14.dp)) {
+                            Icon(Icons.Rounded.Clear, null)
+                        }
+                    }
+                }
+            }
+        }
+
+        val rollbackTargets = versions.filterNot { it.active }.take(3)
+        if (rollbackTargets.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Rollback",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                rollbackTargets.forEach { version ->
+                    TextButton(onClick = { onRollback(version.version) }) {
+                        Text("v${version.version}")
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MiniAppMissingState(onBack: () -> Unit, message: String) {
@@ -2772,7 +3044,10 @@ private fun calculateStreak(records: List<MiniAppRecord>): Int {
 private fun AssistantScreen(
     state: LauncherUiState,
     onAssistantInput: (String) -> Unit,
-    onSend: () -> Unit
+    onSend: () -> Unit,
+    onClearAttachment: () -> Unit,
+    onLaunchPicker: () -> Unit,
+    onLaunchCamera: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
@@ -2852,7 +3127,15 @@ private fun AssistantScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        AssistantComposer(state.assistantInput, onAssistantInput, onSend)
+        AssistantComposer(
+            value = state.assistantInput,
+            onValueChange = onAssistantInput,
+            onSend = onSend,
+            attachedImageBase64 = state.attachedImageBase64,
+            onClearAttachment = onClearAttachment,
+            onLaunchPicker = onLaunchPicker,
+            onLaunchCamera = onLaunchCamera
+        )
     }
 }
 
@@ -4762,6 +5045,60 @@ private fun ScreenShell(
                 lightPeachColors = lightPeachColors
             )
         }
+
+        // Dynamic Parallax Particle Starfield
+        val starColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.08f)
+        val stars = remember {
+            List(60) {
+                Triple(
+                    kotlin.random.Random.nextFloat(),
+                    kotlin.random.Random.nextFloat(),
+                    kotlin.random.Random.nextFloat() * 2f + 0.5f
+                )
+            }
+        }
+        var tiltX by remember { mutableStateOf(0f) }
+        var tiltY by remember { mutableStateOf(0f) }
+        val sensorContext = LocalContext.current
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            val sensorManager = sensorContext.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+            val accel = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+            val listener = object : android.hardware.SensorEventListener {
+                var smoothX = 0f
+                var smoothY = 0f
+                override fun onSensorChanged(event: android.hardware.SensorEvent?) {
+                    if (event != null && event.sensor.type == android.hardware.Sensor.TYPE_ACCELEROMETER) {
+                        val x = event.values[0]
+                        val y = event.values[1]
+                        smoothX = smoothX * 0.9f - x * 0.1f
+                        smoothY = smoothY * 0.9f + y * 0.1f
+                        tiltX = smoothX
+                        tiltY = smoothY
+                    }
+                }
+                override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+            }
+            if (accel != null) {
+                sensorManager.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+            }
+            onDispose {
+                sensorManager.unregisterListener(listener)
+            }
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            stars.forEach { (pctX, pctY, depth) ->
+                val x = (pctX * size.width) + (tiltX * depth * 22f)
+                val y = (pctY * size.height) + (tiltY * depth * 22f)
+                val finalX = (x % size.width + size.width) % size.width
+                val finalY = (y % size.height + size.height) % size.height
+                drawCircle(
+                    color = starColor,
+                    radius = depth * 1.5f,
+                    center = Offset(finalX, finalY)
+                )
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -4812,71 +5149,162 @@ private fun startActivitySafely(context: Context, intent: Intent): Boolean =
     }.isSuccess
 
 @Composable
-private fun AssistantComposer(value: String, onValueChange: (String) -> Unit, onSend: () -> Unit) {
+private fun AssistantComposer(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+    attachedImageBase64: String?,
+    onClearAttachment: () -> Unit,
+    onLaunchPicker: () -> Unit,
+    onLaunchCamera: () -> Unit
+) {
     val isDark = isSystemInDarkTheme()
     val hasText = value.isNotBlank()
     val sendScale by animateFloatAsState(
-        targetValue = if (hasText) 1f else 0.85f,
+        targetValue = if (hasText || attachedImageBase64 != null) 1f else 0.85f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "send_scale"
     )
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    var showPickerDialog by remember { mutableStateOf(false) }
+
+    if (showPickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showPickerDialog = false },
+            title = { Text("ATTACH VISUAL INPUT", fontWeight = FontWeight.Bold) },
+            text = { Text("Select an option to send an image to Aura.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPickerDialog = false
+                    onLaunchCamera()
+                }) {
+                    Text("CAMERA", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPickerDialog = false
+                    onLaunchPicker()
+                }) {
+                    Text("GALLERY", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .glassCard(shape = RoundedCornerShape(28.dp))
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .padding(4.dp)
     ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
-            placeholder = {
-                Text(
-                    "Ask Aura anything...",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                )
-            },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                cursorColor = if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)
-            ),
-            shape = RoundedCornerShape(24.dp)
-        )
-        Spacer(Modifier.width(6.dp))
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .scale(sendScale)
-                .clip(CircleShape)
-                .background(
-                    if (hasText) {
-                        Brush.linearGradient(
-                            colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
-                            else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
-                        )
-                    } else {
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
-                            )
-                        )
-                    }
-                )
-                .clickable(onClick = onSend),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Search,
-                contentDescription = "Send",
-                tint = if (hasText) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+        if (attachedImageBase64 != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Image,
+                        contentDescription = "Image attached",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "IMAGE READY TO SEND",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                IconButton(
+                    onClick = onClearAttachment,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Clear,
+                        contentDescription = "Clear",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f))
             )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(
+                onClick = { showPickerDialog = true },
+                modifier = Modifier.size(44.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Attach",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(2.dp))
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(
+                        "Ask Aura anything...",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    cursorColor = if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .scale(sendScale)
+                    .clip(CircleShape)
+                    .background(
+                        if (hasText || attachedImageBase64 != null) {
+                            Brush.linearGradient(
+                                colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                                else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                            )
+                        } else {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+                                )
+                            )
+                        }
+                    )
+                    .clickable(onClick = onSend),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = "Send",
+                    tint = if (hasText || attachedImageBase64 != null) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }

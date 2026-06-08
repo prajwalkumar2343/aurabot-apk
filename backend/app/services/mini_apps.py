@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.chat import ChatIn
-from app.models.mini_apps import MiniAppBuildIn, MiniAppBundle
+from app.models.mini_apps import MiniAppBuildIn, MiniAppBundle, MiniAppRevisionIn
 from app.services.llm import call_gemini, call_openai, call_openrouter
 
 
@@ -108,6 +108,34 @@ def mini_app_builder_system_prompt(
             "\n\nRepair pass:\n"
             f"- Previous bundle error: {repair_error}\n"
             "- Return corrected JSON only.\n"
+            f"- Previous output excerpt: {(previous_output or '')[:800]}"
+        )
+    return prompt
+
+
+def mini_app_revision_system_prompt(data: MiniAppRevisionIn, repair_error: Optional[str] = None, previous_output: Optional[str] = None) -> str:
+    current = data.currentBundle.model_dump(exclude_none=True)
+    record_sample = data.recordSample[:8]
+    requested_runtime = data.runtime or data.currentBundle.runtime
+    prompt = (
+        f"{mini_app_builder_system_prompt(runtime=requested_runtime)}\n\n"
+        "You are revising an existing installed Aura mini app. Return JSON only with this exact top-level shape: "
+        '{"bundle":{...},"summary":"short user-facing summary","migrationPlan":["step"]}. '
+        "The bundle must keep the same id as the current app, increment version by exactly 1, and remain compatible "
+        "with existing local records. Preserve existing record fields unless the user explicitly asks to remove them. "
+        "When the user asks to track a new attribute, add it to dataSchema.fields, add useful UI for entering/viewing it, "
+        "add or update chart/list/timeline components when helpful, add quick actions when safe, and add assistantIntents "
+        "for natural voice use. For React apps, revise codeBundle.appJsx and css while keeping only the allowed records API. "
+        "Do not include compiledJs; Aura will compile it. Do not use imports, network calls, browser storage, eval, or script tags.\n\n"
+        f"Current bundle JSON:\n{json.dumps(current, ensure_ascii=False)}\n\n"
+        f"Recent record sample JSON:\n{json.dumps(record_sample, ensure_ascii=False)}\n\n"
+        f"User revision instruction:\n{data.instruction.strip()}"
+    )
+    if repair_error:
+        prompt += (
+            "\n\nRepair pass:\n"
+            f"- Previous revision error: {repair_error}\n"
+            "- Return corrected JSON only with bundle, summary, and migrationPlan.\n"
             f"- Previous output excerpt: {(previous_output or '')[:800]}"
         )
     return prompt
@@ -461,6 +489,24 @@ def call_builder_llm(data: MiniAppBuildIn, system_prompt: Optional[str] = None) 
     )
     provider = data.provider.lower().strip()
     system = system_prompt or mini_app_builder_system_prompt(runtime=data.runtime)
+    if provider == "gemini":
+        return call_gemini(chat, system)
+    if provider == "openai":
+        return call_openai(chat, system)
+    if provider == "openrouter":
+        return call_openrouter(chat, system)
+    raise HTTPException(status_code=400, detail="Unsupported provider")
+
+
+def call_revision_llm(data: MiniAppRevisionIn, system_prompt: Optional[str] = None) -> str:
+    chat = ChatIn(
+        message=data.instruction,
+        provider=data.provider,
+        api_key=data.api_key,
+        model=data.model,
+    )
+    provider = data.provider.lower().strip()
+    system = system_prompt or mini_app_revision_system_prompt(data)
     if provider == "gemini":
         return call_gemini(chat, system)
     if provider == "openai":

@@ -119,3 +119,19 @@ class MiniAppBuildIn(BaseModel):
 
 class MiniAppBuildOut(BaseModel):
     bundle: MiniAppBundle
+
+
+class MiniAppRevisionIn(BaseModel):
+    instruction: str
+    currentBundle: MiniAppBundle
+    recordSample: list[dict[str, object]] = Field(default_factory=list)
+    provider: str = "gemini"
+    api_key: str
+    model: str
+    runtime: Optional[str] = None
+
+
+class MiniAppRevisionOut(BaseModel):
+    bundle: MiniAppBundle
+    summary: str
+    migrationPlan: list[str] = Field(default_factory=list)

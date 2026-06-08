@@ -96,7 +96,8 @@ data class MiniAppInstall(
     val category: String,
     val icon: MiniAppIcon,
     val builtIn: Boolean,
-    val installedAt: Long
+    val installedAt: Long,
+    val version: Int = 1
 )
 
 data class MiniAppRecord(
@@ -106,4 +107,20 @@ data class MiniAppRecord(
     val values: Map<String, String>,
     val createdAt: Long,
     val updatedAt: Long
+)
+
+data class MiniAppVersion(
+    val miniAppId: String,
+    val version: Int,
+    val name: String,
+    val summary: String,
+    val migrationPlan: List<String>,
+    val createdAt: Long,
+    val active: Boolean
+)
+
+data class MiniAppRevisionPreview(
+    val bundle: MiniAppBundle,
+    val summary: String,
+    val migrationPlan: List<String>
 )

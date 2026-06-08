@@ -60,11 +60,62 @@ class MiniAppRepositoryTest {
         repository.deleteRecord("builtin.react_field_notes", created.id)
         assertTrue(repository.records("builtin.react_field_notes").isEmpty())
     }
+
+    @Test
+    fun revisionPreviewAppliesNewVersionPreservesRecordsAndRollsBackBundle() = runTest {
+        var now = 3000L
+        val dao = FakeMiniAppDao()
+        val repository = MiniAppRepository(dao, clock = { now })
+        val original = BuiltInMiniApps.habitTracker.copy(
+            metadata = BuiltInMiniApps.habitTracker.metadata.copy(builtIn = false)
+        )
+
+        repository.install(original)
+        val record = repository.createRecord(
+            miniAppId = original.id,
+            recordType = "habit_checkin",
+            values = mapOf("habit" to "Workout")
+        )
+
+        now = 4000L
+        val revised = original.copy(
+            version = original.version + 1,
+            dataSchema = original.dataSchema.copy(
+                fields = original.dataSchema.fields + MiniAppField("soreness", "number", defaultValue = "0")
+            ),
+            assistantIntents = original.assistantIntents + MiniAppAssistantIntent(
+                name = "log_soreness",
+                utterances = listOf("log soreness"),
+                actionId = "check_workout"
+            )
+        )
+        repository.applyRevision(
+            MiniAppRevisionPreview(
+                bundle = revised,
+                summary = "Added soreness tracking.",
+                migrationPlan = listOf("Existing records remain valid.")
+            )
+        )
+
+        assertEquals(2, repository.bundle(original.id)?.version)
+        assertEquals(record.id, repository.records(original.id).first().id)
+        assertEquals("0", repository.records(original.id).first().values["soreness"])
+        assertEquals(listOf(2, 1), repository.versions(original.id).map { it.version })
+        assertEquals(true, repository.versions(original.id).first().active)
+
+        now = 5000L
+        repository.rollback(original.id, 1)
+
+        assertEquals(1, repository.bundle(original.id)?.version)
+        assertEquals(record.id, repository.records(original.id).first().id)
+        assertEquals(true, repository.versions(original.id).first { it.version == 1 }.active)
+    }
 }
 
 private class FakeMiniAppDao : MiniAppDao {
     private val bundles = linkedMapOf<String, MiniAppBundleEntity>()
     private val records = linkedMapOf<String, MiniAppRecordEntity>()
+    private val versions = linkedMapOf<String, MiniAppVersionEntity>()
 
     override suspend fun listBundles(): List<MiniAppBundleEntity> = bundles.values.sortedBy { it.name }
     override suspend fun bundle(id: String): MiniAppBundleEntity? = bundles[id]
@@ -87,4 +138,11 @@ private class FakeMiniAppDao : MiniAppDao {
         if (records[recordId]?.miniAppId == miniAppId) records.remove(recordId)
     }
     override suspend fun insertEvent(entity: MiniAppEventEntity) = Unit
+    override suspend fun upsertVersion(entity: MiniAppVersionEntity) {
+        versions["${entity.miniAppId}:${entity.version}"] = entity
+    }
+    override suspend fun versions(miniAppId: String): List<MiniAppVersionEntity> =
+        versions.values.filter { it.miniAppId == miniAppId }.sortedByDescending { it.version }
+    override suspend fun version(miniAppId: String, version: Int): MiniAppVersionEntity? =
+        versions["$miniAppId:$version"]
 }
