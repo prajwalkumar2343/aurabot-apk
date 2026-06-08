@@ -27,4 +27,5 @@ class AppContainer(context: Context) {
         llmSettingsStore = llmSettingsStore
     )
     val voiceServiceController = VoiceServiceController(appContext, sessionStore)
+    val voiceSpeaker = com.aura.app.voice.VoiceSpeaker(appContext)
 }

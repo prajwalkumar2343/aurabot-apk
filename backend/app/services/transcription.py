@@ -1,3 +1,4 @@
+from typing import Optional
 import base64
 import logging
 import requests
@@ -7,7 +8,12 @@ from app.services.prompt_harness import normalize_model_id
 
 logger = logging.getLogger(__name__)
 
-def transcribe_audio(audio_base64: str, mime_type: str = "audio/m4a") -> str:
+def transcribe_audio(
+    audio_base64: str,
+    mime_type: str = "audio/m4a",
+    api_key: Optional[str] = None,
+    provider: Optional[str] = None
+) -> str:
     try:
         base64_data = audio_base64.strip()
         if "," in base64_data:
@@ -20,7 +26,8 @@ def transcribe_audio(audio_base64: str, mime_type: str = "audio/m4a") -> str:
         logger.warning(f"Invalid base64 provided: {e}")
         raise HTTPException(status_code=400, detail="Invalid base64 audio")
 
-    if not settings.GEMINI_API_KEY:
+    key = api_key or settings.GEMINI_API_KEY
+    if not key:
         raise HTTPException(status_code=500, detail="Gemini API Key is not configured for transcription")
 
     model = normalize_model_id("gemini", settings.GEMINI_MODEL)
@@ -28,7 +35,7 @@ def transcribe_audio(audio_base64: str, mime_type: str = "audio/m4a") -> str:
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={
-                "x-goog-api-key": settings.GEMINI_API_KEY,
+                "x-goog-api-key": key,
                 "Content-Type": "application/json",
             },
             json={

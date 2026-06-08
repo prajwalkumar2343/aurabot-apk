@@ -5,5 +5,6 @@ data class ListeningStatus(
     val speechDetected: Boolean = false,
     val rmsLevel: Int = 0,
     val speechEvents: Int = 0,
-    val lastSpeechAt: Long = 0
+    val lastSpeechAt: Long = 0,
+    val lastRecordedAudioBase64: String? = null
 )

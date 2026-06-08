@@ -41,6 +41,7 @@ class AuraListeningService : Service() {
     private var noiseFloor = 0.0
     private var speechFrames = 0
     private var silenceFrames = 0
+    private val pcmOutputStream = java.io.ByteArrayOutputStream()
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -241,10 +242,23 @@ class AuraListeningService : Service() {
             speechFrames = 0
         }
 
+        if (isSpeechDetected.get()) {
+            synchronized(pcmOutputStream) {
+                for (i in 0 until samplesRead) {
+                    val sample = buffer[i]
+                    pcmOutputStream.write(sample.toInt() and 0xFF)
+                    pcmOutputStream.write((sample.toInt() shr 8) and 0xFF)
+                }
+            }
+        }
+
         if (!isSpeechDetected.get() && speechFrames >= SPEECH_START_FRAMES) {
             isSpeechDetected.set(true)
             speechEvents.incrementAndGet()
             lastSpeechAt.set(System.currentTimeMillis())
+            synchronized(pcmOutputStream) {
+                pcmOutputStream.reset()
+            }
             emitEvent()
 
             try {
@@ -262,8 +276,76 @@ class AuraListeningService : Service() {
 
         if (isSpeechDetected.get() && silenceFrames >= SPEECH_END_FRAMES) {
             isSpeechDetected.set(false)
+            val audioBytes = synchronized(pcmOutputStream) {
+                val bytes = pcmOutputStream.toByteArray()
+                pcmOutputStream.reset()
+                bytes
+            }
+            if (audioBytes.isNotEmpty()) {
+                val wavBytes = convertPcmToWav(audioBytes, 16000, 1, 16)
+                val base64 = android.util.Base64.encodeToString(wavBytes, android.util.Base64.NO_WRAP)
+                recordedAudioBase64.set(base64)
+            }
             emitEvent()
         }
+    }
+
+    private fun convertPcmToWav(pcmBytes: ByteArray, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+        val totalAudioLen = pcmBytes.size.toLong()
+        val totalDataLen = totalAudioLen + 36
+        val longSampleRate = sampleRate.toLong()
+        val byteRate = (sampleRate * channels * bitsPerSample / 8).toLong()
+
+        val header = ByteArray(44)
+        header[0] = 'R'.toByte()
+        header[1] = 'I'.toByte()
+        header[2] = 'F'.toByte()
+        header[3] = 'F'.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.toByte()
+        header[9] = 'A'.toByte()
+        header[10] = 'V'.toByte()
+        header[11] = 'E'.toByte()
+        header[12] = 'f'.toByte()
+        header[13] = 'm'.toByte()
+        header[14] = 't'.toByte()
+        header[15] = ' '.toByte()
+        header[16] = 16
+        header[17] = 0
+        header[18] = 0
+        header[19] = 0
+        header[20] = 1
+        header[21] = 0
+        header[22] = channels.toByte()
+        header[23] = 0
+        header[24] = (longSampleRate and 0xff).toByte()
+        header[25] = ((longSampleRate shr 8) and 0xff).toByte()
+        header[26] = ((longSampleRate shr 16) and 0xff).toByte()
+        header[27] = ((longSampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte()
+        header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = (channels * bitsPerSample / 8).toByte()
+        header[33] = 0
+        header[34] = bitsPerSample.toByte()
+        header[35] = 0
+        header[36] = 'd'.toByte()
+        header[37] = 'a'.toByte()
+        header[38] = 't'.toByte()
+        header[39] = 'a'.toByte()
+        header[40] = (totalAudioLen and 0xff).toByte()
+        header[41] = ((totalAudioLen shr 8) and 0xff).toByte()
+        header[42] = ((totalAudioLen shr 16) and 0xff).toByte()
+        header[43] = ((totalAudioLen shr 24) and 0xff).toByte()
+
+        val wavBytes = ByteArray(44 + pcmBytes.size)
+        System.arraycopy(header, 0, wavBytes, 0, 44)
+        System.arraycopy(pcmBytes, 0, wavBytes, 44, pcmBytes.size)
+        return wavBytes
     }
 
     private fun stopForegroundCompat() {
@@ -311,6 +393,7 @@ class AuraListeningService : Service() {
         private val lastRms = AtomicInteger(0)
         private val speechEvents = AtomicInteger(0)
         private val lastSpeechAt = AtomicLong(0)
+        private val recordedAudioBase64 = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
         @Volatile
         private var eventSink: (() -> Unit)? = null
@@ -329,13 +412,19 @@ class AuraListeningService : Service() {
             context.startService(intent)
         }
 
+        fun clearLastRecordedAudio() {
+            recordedAudioBase64.set(null)
+            emitEvent()
+        }
+
         fun status(): ListeningStatus =
             ListeningStatus(
                 running = isRunning.get(),
                 speechDetected = isSpeechDetected.get(),
                 rmsLevel = lastRms.get(),
                 speechEvents = speechEvents.get(),
-                lastSpeechAt = lastSpeechAt.get()
+                lastSpeechAt = lastSpeechAt.get(),
+                lastRecordedAudioBase64 = recordedAudioBase64.get()
             )
 
         fun setEventSink(sink: (() -> Unit)?) {
