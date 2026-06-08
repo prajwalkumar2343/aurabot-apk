@@ -27,6 +27,7 @@ class ChatActionOut(BaseModel):
     mini_app_id: Optional[str] = None
     mini_app_query: Optional[str] = None
     mini_app_prompt: Optional[str] = None
+    revision_instruction: Optional[str] = None
     open_after_create: Optional[bool] = None
     action_id: Optional[str] = None
     record_type: Optional[str] = None
@@ -46,6 +47,8 @@ class ChatIn(BaseModel):
     planning_mode: str = "auto"
     model_route: str = "off"
     max_repair_attempts: int = 1
+    image_base64: Optional[str] = None
+    image_mime_type: Optional[str] = None
 
 class ChatOut(BaseModel):
     reply: str

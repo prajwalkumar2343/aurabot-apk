@@ -84,7 +84,9 @@ SKILL_CARDS = (
             "with a specific professional mini_app_prompt that asks for runtime react unless the user explicitly "
             "requested a native/declarative mini app. The prompt should describe the workflow, data model, polished "
             "React UI, local records, assistant intents, and any helpful screens/actions. Do not ask for APKs, "
-            "webviews, plugins, remote URLs, network calls, browser storage APIs, or unsupported capabilities."
+            "webviews, plugins, remote URLs, network calls, browser storage APIs, or unsupported capabilities. "
+            "When the user asks to revise, upgrade, patch, or add capabilities to an installed mini app, call "
+            "revise_mini_app with the exact target mini app and a specific revision_instruction."
         ),
     ),
 )
@@ -207,7 +209,7 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
     lower_message = data.message.lower()
     wants_action = any(
         word in lower_message
-        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate")
+        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate", "revise", "upgrade", "patch")
     )
     if wants_action and not actions and any(word in reply.lower() for word in ("done", "blocked", "opened", "saved")):
         return "reply claimed a local action without calling the matching tool"
@@ -218,6 +220,8 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
             return "block_app requires a positive duration_minutes value"
         if action.type == "create_mini_app" and not (action.mini_app_prompt or "").strip():
             return "create_mini_app requires a specific mini_app_prompt value"
+        if action.type == "revise_mini_app" and not (action.revision_instruction or "").strip():
+            return "revise_mini_app requires a specific revision_instruction value"
     return None
 
 

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 ASSISTANT_TOOL_NAMES = {
     "block_app",
     "create_mini_app",
+    "revise_mini_app",
     "open_mini_app",
     "create_mini_app_record",
     "query_mini_app_records",
@@ -52,15 +53,16 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Use the available tools when the user asks for an action Aura can perform locally. "
         "Do not claim an action has completed unless you request the matching tool. "
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
-        "Use mini app tools when the user asks to create/build/generate an Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
+        "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
+        "When revising an installed mini app from chat, call revise_mini_app with the target mini app and a specific revision_instruction. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. "
         f"Planning mode is {harness.planning_mode}. "
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
@@ -127,6 +129,23 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                     "mini_app_id": {"type": "string", "description": "Exact mini app id when known."},
                     "mini_app_query": {"type": "string", "description": "Fallback mini app name query."},
                 },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "revise_mini_app",
+            "description": "Revise, upgrade, or patch an installed Aura mini app while preserving its local records. Use this when the user asks to add fields, charts, actions, assistant intents, or workflow changes to an existing mini app.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mini_app_id": {"type": "string", "description": "Exact installed mini app id when known."},
+                    "mini_app_query": {"type": "string", "description": "Fallback mini app name query."},
+                    "revision_instruction": {
+                        "type": "string",
+                        "description": "Specific change request for the existing mini app, including fields, screens, charts, actions, and assistant intents to add or adjust.",
+                    },
+                },
+                "required": ["revision_instruction"],
                 "additionalProperties": False,
             },
         },
@@ -229,6 +248,7 @@ def _action_from_tool_call(name: str, args: Any) -> Optional[ChatActionOut]:
         mini_app_id=args.get("mini_app_id"),
         mini_app_query=args.get("mini_app_query"),
         mini_app_prompt=args.get("mini_app_prompt"),
+        revision_instruction=args.get("revision_instruction"),
         open_after_create=args.get("open_after_create"),
         action_id=args.get("action_id"),
         record_type=args.get("record_type"),
@@ -272,6 +292,7 @@ def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
                 mini_app_id=item.get("mini_app_id"),
                 mini_app_query=item.get("mini_app_query"),
                 mini_app_prompt=item.get("mini_app_prompt"),
+                revision_instruction=item.get("revision_instruction"),
                 open_after_create=item.get("open_after_create"),
                 action_id=item.get("action_id"),
                 record_type=item.get("record_type"),
@@ -337,6 +358,16 @@ def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = F
                 }
             ],
         }
+        if getattr(data, "image_base64", None) and getattr(data, "image_mime_type", None):
+            b64 = data.image_base64.strip()
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            payload["contents"][0]["parts"].append({
+                "inlineData": {
+                    "mimeType": data.image_mime_type,
+                    "data": b64
+                }
+            })
         if use_assistant_tools:
             payload["systemInstruction"] = {"parts": [{"text": system_message}]}
             payload["tools"] = gemini_assistant_tools()
