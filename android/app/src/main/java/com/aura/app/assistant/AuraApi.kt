@@ -47,6 +47,9 @@ interface AuraApi {
     @POST("mini-apps/build")
     suspend fun buildMiniApp(@Body request: MiniAppBuildRequest): MiniAppBuildResponse
 
+    @POST("mini-apps/revise")
+    suspend fun reviseMiniApp(@Body request: MiniAppRevisionRequest): MiniAppRevisionResponse
+
     @POST("transcribe")
     suspend fun transcribe(@Body request: TranscribeRequest): TranscribeResponse
 }

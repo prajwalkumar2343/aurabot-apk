@@ -115,7 +115,9 @@ class AssistantRepository(
         sessionId: String?,
         apps: List<AppInfo>,
         miniApps: List<MiniAppInstall> = emptyList(),
-        miniAppBundles: List<MiniAppBundle> = emptyList()
+        miniAppBundles: List<MiniAppBundle> = emptyList(),
+        image_base64: String? = null,
+        image_mime_type: String? = null
     ): ChatResponse = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
         val apiKey = settings.currentApiKey
@@ -146,9 +148,26 @@ class AssistantRepository(
                         intents = bundle?.assistantIntents?.map { it.name }.orEmpty(),
                         actions = bundle?.actions?.map { it.id }.orEmpty()
                     )
-                }
+                },
+                image_base64 = image_base64,
+                image_mime_type = image_mime_type
             )
         )
+    }
+
+    suspend fun transcribe(audioBase64: String, mimeType: String = "audio/wav"): String = withContext(Dispatchers.IO) {
+        val settings = llmSettingsStore.state.first()
+        val apiKey = settings.currentApiKey
+        val provider = settings.provider.wireValue
+        val response = api.transcribe(
+            TranscribeRequest(
+                audio_base64 = audioBase64,
+                mime_type = mimeType,
+                api_key = apiKey.takeIf { it.isNotBlank() },
+                provider = provider
+            )
+        )
+        response.text
     }
 
     suspend fun openRouterModels(): List<OpenRouterModelInfo> = withContext(Dispatchers.IO) {
@@ -178,6 +197,33 @@ class AssistantRepository(
                 model = model
             )
         ).bundle
+    }
+
+    suspend fun reviseMiniApp(
+        instruction: String,
+        currentBundle: MiniAppBundle,
+        recordSample: List<Map<String, Any>>
+    ): MiniAppRevisionResponse = withContext(Dispatchers.IO) {
+        val settings = llmSettingsStore.state.first()
+        val apiKey = settings.currentApiKey
+        val model = settings.currentModel
+        if (apiKey.isBlank()) {
+            throw IllegalStateException("Add a ${settings.provider.label} API key in Settings")
+        }
+        if (model.isBlank()) {
+            throw IllegalStateException("Choose a ${settings.provider.label} model in Settings")
+        }
+        api.reviseMiniApp(
+            MiniAppRevisionRequest(
+                instruction = instruction,
+                currentBundle = currentBundle,
+                recordSample = recordSample,
+                provider = settings.provider.wireValue,
+                api_key = apiKey,
+                model = model,
+                runtime = currentBundle.runtime
+            )
+        )
     }
 
     suspend fun setProvider(provider: LlmProvider) = llmSettingsStore.setProvider(provider)

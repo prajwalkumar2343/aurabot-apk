@@ -44,7 +44,9 @@ data class ChatRequest(
     val memories: List<ChatMemoryItem> = emptyList(),
     val todos: List<ChatTodoItem> = emptyList(),
     val apps: List<ChatAppItem> = emptyList(),
-    val mini_apps: List<ChatMiniAppItem> = emptyList()
+    val mini_apps: List<ChatMiniAppItem> = emptyList(),
+    val image_base64: String? = null,
+    val image_mime_type: String? = null
 )
 data class ChatAction(
     val type: String,
@@ -54,6 +56,7 @@ data class ChatAction(
     val mini_app_id: String? = null,
     val mini_app_query: String? = null,
     val mini_app_prompt: String? = null,
+    val revision_instruction: String? = null,
     val open_after_create: Boolean? = null,
     val action_id: String? = null,
     val record_type: String? = null,
@@ -76,6 +79,20 @@ data class MiniAppBuildRequest(
     val runtime: String = "react"
 )
 data class MiniAppBuildResponse(val bundle: MiniAppBundle)
+data class MiniAppRevisionRequest(
+    val instruction: String,
+    val currentBundle: MiniAppBundle,
+    val recordSample: List<Map<String, Any>> = emptyList(),
+    val provider: String,
+    val api_key: String,
+    val model: String,
+    val runtime: String? = null
+)
+data class MiniAppRevisionResponse(
+    val bundle: MiniAppBundle,
+    val summary: String,
+    val migrationPlan: List<String> = emptyList()
+)
 
 data class MemoryCreateRequest(val title: String, val content: String)
 data class MemoryResponse(val id: String, val title: String, val content: String, val created_at: String)
@@ -84,7 +101,12 @@ data class TodoCreateRequest(val title: String)
 data class TodoUpdateRequest(val title: String? = null, val done: Boolean? = null)
 data class TodoResponse(val id: String, val title: String, val done: Boolean, val created_at: String)
 
-data class TranscribeRequest(val audio_base64: String, val mime_type: String = "audio/m4a")
+data class TranscribeRequest(
+    val audio_base64: String,
+    val mime_type: String = "audio/wav",
+    val api_key: String? = null,
+    val provider: String? = null
+)
 data class TranscribeResponse(val text: String)
 
 data class AssistantMessage(val role: MessageRole, val text: String)
