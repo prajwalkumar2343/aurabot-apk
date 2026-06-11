@@ -1,5 +1,6 @@
 package com.aura.app.assistant
 
+import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
 
 data class LoginRequest(val email: String, val password: String)
@@ -34,6 +35,13 @@ data class ChatMiniAppItem(
     val intents: List<String> = emptyList(),
     val actions: List<String> = emptyList()
 )
+data class ChatAutomationItem(
+    val id: String,
+    val name: String,
+    val enabled: Boolean,
+    val trigger_type: String,
+    val action_types: List<String> = emptyList()
+)
 
 data class ChatRequest(
     val message: String,
@@ -45,6 +53,7 @@ data class ChatRequest(
     val todos: List<ChatTodoItem> = emptyList(),
     val apps: List<ChatAppItem> = emptyList(),
     val mini_apps: List<ChatMiniAppItem> = emptyList(),
+    val automations: List<ChatAutomationItem> = emptyList(),
     val image_base64: String? = null,
     val image_mime_type: String? = null
 )
@@ -60,7 +69,8 @@ data class ChatAction(
     val open_after_create: Boolean? = null,
     val action_id: String? = null,
     val record_type: String? = null,
-    val values: Map<String, String>? = null
+    val values: Map<String, String>? = null,
+    val automation_spec: AutomationSpec? = null
 )
 data class ChatResponse(
     val reply: String,

@@ -12,6 +12,26 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
 
+def wav_payload(duration_ms=400):
+    sample_rate = 16_000
+    pcm = b"\x01\x00" * int(sample_rate * duration_ms / 1000)
+    data_len = len(pcm)
+    header = (
+        b"RIFF" +
+        (36 + data_len).to_bytes(4, "little") +
+        b"WAVEfmt " +
+        (16).to_bytes(4, "little") +
+        (1).to_bytes(2, "little") +
+        (1).to_bytes(2, "little") +
+        sample_rate.to_bytes(4, "little") +
+        (sample_rate * 2).to_bytes(4, "little") +
+        (2).to_bytes(2, "little") +
+        (16).to_bytes(2, "little") +
+        b"data" +
+        data_len.to_bytes(4, "little")
+    )
+    return base64.b64encode(header + pcm).decode("utf-8")
+
 # ==============================================================================
 # Mock In-Memory MongoDB Implementation
 # ==============================================================================
@@ -1317,10 +1337,9 @@ def test_94_transcribe_audio_success(mock_post, client, test_user_token):
     }
     mock_post.return_value = mock_response
 
-    audio_payload = base64.b64encode(b"dummy_wav_contents").decode("utf-8")
     response = client.post(
         "/api/transcribe",
-        json={"audio_base64": audio_payload, "mime_type": "audio/wav"},
+        json={"audio_base64": wav_payload(), "mime_type": "audio/wav"},
         headers={"Authorization": f"Bearer {test_user_token}"}
     )
     assert response.status_code == 200
@@ -1372,14 +1391,39 @@ def test_98_transcribe_audio_not_padded_base64(client, test_user_token):
 def test_99_transcribe_audio_missing_api_key(client, test_user_token):
     """99. Transcription API connection fails gracefully when Gemini key is missing."""
     settings.GEMINI_API_KEY = ""
-    audio_payload = base64.b64encode(b"wav").decode("utf-8")
     response = client.post(
         "/api/transcribe",
-        json={"audio_base64": audio_payload, "mime_type": "audio/wav"},
+        json={"audio_base64": wav_payload(), "mime_type": "audio/wav"},
         headers={"Authorization": f"Bearer {test_user_token}"}
     )
     assert response.status_code == 500
     assert "not configured" in response.json()["detail"].lower()
+
+def test_99b_transcribe_audio_rejects_too_short_wav(client, test_user_token):
+    """99b. Header-only or tiny WAV captures are rejected before provider calls."""
+    settings.GEMINI_API_KEY = "test_key"
+    response = client.post(
+        "/api/transcribe",
+        json={"audio_base64": wav_payload(duration_ms=40), "mime_type": "audio/wav"},
+        headers={"Authorization": f"Bearer {test_user_token}"}
+    )
+    assert response.status_code == 400
+    assert "too short" in response.json()["detail"].lower()
+
+def test_99c_transcribe_audio_rejects_unsupported_provider(client, test_user_token):
+    """99c. Transcription fails clearly when a non-Gemini provider is requested."""
+    settings.GEMINI_API_KEY = "test_key"
+    response = client.post(
+        "/api/transcribe",
+        json={
+            "audio_base64": wav_payload(),
+            "mime_type": "audio/wav",
+            "provider": "openai"
+        },
+        headers={"Authorization": f"Bearer {test_user_token}"}
+    )
+    assert response.status_code == 400
+    assert "gemini" in response.json()["detail"].lower()
 
 def test_100_supabase_gateway_massive_payload(client, test_user_token):
     """100. Supabase gateway can handle massive dictionary payloads (boundary check)."""

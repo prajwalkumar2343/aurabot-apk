@@ -6,8 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.aura.app.AuraApplication
 import com.aura.app.session.SessionStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class BootReceiver : BroadcastReceiver() {
@@ -23,6 +28,12 @@ class BootReceiver : BroadcastReceiver() {
         }
         if (shouldRestore) {
             AuraListeningService.start(context.applicationContext)
+        }
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                val app = context.applicationContext as AuraApplication
+                app.container.automationRuntime.restoreTriggers()
+            }
         }
     }
 }

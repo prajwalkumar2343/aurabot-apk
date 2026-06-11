@@ -41,8 +41,8 @@ class VoiceServiceController(
         _status.value = AuraListeningService.status().copy(running = false, speechDetected = false)
     }
 
-    fun clearLastRecordedAudio() {
-        AuraListeningService.clearLastRecordedAudio()
+    fun clearLastRecordedAudio(expectedBase64: String? = null) {
+        AuraListeningService.clearLastRecordedAudio(expectedBase64)
         _status.value = AuraListeningService.status()
     }
 

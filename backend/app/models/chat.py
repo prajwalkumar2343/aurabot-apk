@@ -19,6 +19,13 @@ class ChatMiniAppIn(BaseModel):
     intents: List[str] = Field(default_factory=list)
     actions: List[str] = Field(default_factory=list)
 
+class ChatAutomationIn(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    trigger_type: str
+    action_types: List[str] = Field(default_factory=list)
+
 class ChatActionOut(BaseModel):
     type: str
     package_name: Optional[str] = None
@@ -32,6 +39,7 @@ class ChatActionOut(BaseModel):
     action_id: Optional[str] = None
     record_type: Optional[str] = None
     values: Optional[dict[str, str]] = None
+    automation_spec: Optional[dict] = None
 
 class ChatIn(BaseModel):
     message: str
@@ -43,6 +51,7 @@ class ChatIn(BaseModel):
     todos: List[ChatTodoIn] = Field(default_factory=list)
     apps: List[ChatAppIn] = Field(default_factory=list)
     mini_apps: List[ChatMiniAppIn] = Field(default_factory=list)
+    automations: List[ChatAutomationIn] = Field(default_factory=list)
     context_files: List[str] = Field(default_factory=list)
     planning_mode: str = "auto"
     model_route: str = "off"

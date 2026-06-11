@@ -209,7 +209,7 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
     lower_message = data.message.lower()
     wants_action = any(
         word in lower_message
-        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate", "revise", "upgrade", "patch")
+        for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate", "revise", "upgrade", "patch", "automate", "automation", "daily", "schedule", "remind", "when i", "when leaving", "when entering")
     )
     if wants_action and not actions and any(word in reply.lower() for word in ("done", "blocked", "opened", "saved")):
         return "reply claimed a local action without calling the matching tool"
@@ -222,6 +222,10 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
             return "create_mini_app requires a specific mini_app_prompt value"
         if action.type == "revise_mini_app" and not (action.revision_instruction or "").strip():
             return "revise_mini_app requires a specific revision_instruction value"
+        if action.type == "create_automation":
+            spec = action.automation_spec or {}
+            if not spec.get("name") or not isinstance(spec.get("trigger"), dict) or not spec.get("actions"):
+                return "create_automation requires automation_spec with name, trigger, and at least one action"
     return None
 
 
