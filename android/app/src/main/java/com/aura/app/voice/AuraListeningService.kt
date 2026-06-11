@@ -21,13 +21,10 @@ import com.aura.app.LauncherActivity
 import com.aura.app.R
 import android.provider.Settings
 import com.aura.app.AuraApplication
-import com.aura.app.auraContainer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -42,6 +39,7 @@ class AuraListeningService : Service() {
     private var speechFrames = 0
     private var silenceFrames = 0
     private val pcmOutputStream = java.io.ByteArrayOutputStream()
+    private val preSpeechPcmOutputStream = java.io.ByteArrayOutputStream()
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -148,7 +146,7 @@ class AuraListeningService : Service() {
     private fun startListening(): Boolean {
         if (recorderThread?.isAlive == true) return true
 
-        val sampleRate = 16_000
+        val sampleRate = VoiceAudio.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -200,10 +198,18 @@ class AuraListeningService : Service() {
     }
 
     private fun stopListening() {
+        finishRecordedAudioIfNeeded()
         isRunning.set(false)
         isSpeechDetected.set(false)
         emitEvent()
         recorderThread?.interrupt()
+        if (recorderThread != null && recorderThread != Thread.currentThread()) {
+            try {
+                recorderThread?.join(500)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         recorderThread = null
         recorder = null
     }
@@ -214,6 +220,10 @@ class AuraListeningService : Service() {
         silenceFrames = 0
         lastRms.set(0)
         isSpeechDetected.set(false)
+        synchronized(pcmOutputStream) {
+            pcmOutputStream.reset()
+            preSpeechPcmOutputStream.reset()
+        }
     }
 
     private fun processAudioFrame(buffer: ShortArray, samplesRead: Int) {
@@ -242,22 +252,14 @@ class AuraListeningService : Service() {
             speechFrames = 0
         }
 
-        if (isSpeechDetected.get()) {
-            synchronized(pcmOutputStream) {
-                for (i in 0 until samplesRead) {
-                    val sample = buffer[i]
-                    pcmOutputStream.write(sample.toInt() and 0xFF)
-                    pcmOutputStream.write((sample.toInt() shr 8) and 0xFF)
-                }
-            }
-        }
-
         if (!isSpeechDetected.get() && speechFrames >= SPEECH_START_FRAMES) {
             isSpeechDetected.set(true)
             speechEvents.incrementAndGet()
             lastSpeechAt.set(System.currentTimeMillis())
             synchronized(pcmOutputStream) {
                 pcmOutputStream.reset()
+                pcmOutputStream.write(preSpeechPcmOutputStream.toByteArray())
+                preSpeechPcmOutputStream.reset()
             }
             emitEvent()
 
@@ -274,78 +276,46 @@ class AuraListeningService : Service() {
             }
         }
 
-        if (isSpeechDetected.get() && silenceFrames >= SPEECH_END_FRAMES) {
-            isSpeechDetected.set(false)
-            val audioBytes = synchronized(pcmOutputStream) {
-                val bytes = pcmOutputStream.toByteArray()
-                pcmOutputStream.reset()
-                bytes
+        synchronized(pcmOutputStream) {
+            if (isSpeechDetected.get()) {
+                VoiceAudio.appendPcm16LittleEndian(pcmOutputStream, buffer, samplesRead)
+            } else {
+                appendPreSpeechFrame(buffer, samplesRead)
             }
-            if (audioBytes.isNotEmpty()) {
-                val wavBytes = convertPcmToWav(audioBytes, 16000, 1, 16)
-                val base64 = android.util.Base64.encodeToString(wavBytes, android.util.Base64.NO_WRAP)
-                recordedAudioBase64.set(base64)
-            }
+        }
+
+        if (isSpeechDetected.get() && (
+                silenceFrames >= SPEECH_END_FRAMES ||
+                    synchronized(pcmOutputStream) { pcmOutputStream.size() >= MAX_RECORDED_PCM_BYTES }
+                )
+        ) {
+            finishRecordedAudioIfNeeded()
             emitEvent()
         }
     }
 
-    private fun convertPcmToWav(pcmBytes: ByteArray, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
-        val totalAudioLen = pcmBytes.size.toLong()
-        val totalDataLen = totalAudioLen + 36
-        val longSampleRate = sampleRate.toLong()
-        val byteRate = (sampleRate * channels * bitsPerSample / 8).toLong()
+    private fun appendPreSpeechFrame(buffer: ShortArray, samplesRead: Int) {
+        VoiceAudio.appendPcm16LittleEndian(preSpeechPcmOutputStream, buffer, samplesRead)
+        if (preSpeechPcmOutputStream.size() > PRE_SPEECH_PCM_BYTES) {
+            val bytes = preSpeechPcmOutputStream.toByteArray()
+            preSpeechPcmOutputStream.reset()
+            preSpeechPcmOutputStream.write(bytes, bytes.size - PRE_SPEECH_PCM_BYTES, PRE_SPEECH_PCM_BYTES)
+        }
+    }
 
-        val header = ByteArray(44)
-        header[0] = 'R'.toByte()
-        header[1] = 'I'.toByte()
-        header[2] = 'F'.toByte()
-        header[3] = 'F'.toByte()
-        header[4] = (totalDataLen and 0xff).toByte()
-        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
-        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
-        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
-        header[8] = 'W'.toByte()
-        header[9] = 'A'.toByte()
-        header[10] = 'V'.toByte()
-        header[11] = 'E'.toByte()
-        header[12] = 'f'.toByte()
-        header[13] = 'm'.toByte()
-        header[14] = 't'.toByte()
-        header[15] = ' '.toByte()
-        header[16] = 16
-        header[17] = 0
-        header[18] = 0
-        header[19] = 0
-        header[20] = 1
-        header[21] = 0
-        header[22] = channels.toByte()
-        header[23] = 0
-        header[24] = (longSampleRate and 0xff).toByte()
-        header[25] = ((longSampleRate shr 8) and 0xff).toByte()
-        header[26] = ((longSampleRate shr 16) and 0xff).toByte()
-        header[27] = ((longSampleRate shr 24) and 0xff).toByte()
-        header[28] = (byteRate and 0xff).toByte()
-        header[29] = ((byteRate shr 8) and 0xff).toByte()
-        header[30] = ((byteRate shr 16) and 0xff).toByte()
-        header[31] = ((byteRate shr 24) and 0xff).toByte()
-        header[32] = (channels * bitsPerSample / 8).toByte()
-        header[33] = 0
-        header[34] = bitsPerSample.toByte()
-        header[35] = 0
-        header[36] = 'd'.toByte()
-        header[37] = 'a'.toByte()
-        header[38] = 't'.toByte()
-        header[39] = 'a'.toByte()
-        header[40] = (totalAudioLen and 0xff).toByte()
-        header[41] = ((totalAudioLen shr 8) and 0xff).toByte()
-        header[42] = ((totalAudioLen shr 16) and 0xff).toByte()
-        header[43] = ((totalAudioLen shr 24) and 0xff).toByte()
-
-        val wavBytes = ByteArray(44 + pcmBytes.size)
-        System.arraycopy(header, 0, wavBytes, 0, 44)
-        System.arraycopy(pcmBytes, 0, wavBytes, 44, pcmBytes.size)
-        return wavBytes
+    private fun finishRecordedAudioIfNeeded() {
+        if (!isSpeechDetected.getAndSet(false)) return
+        val audioBytes = synchronized(pcmOutputStream) {
+            val bytes = pcmOutputStream.toByteArray()
+            pcmOutputStream.reset()
+            preSpeechPcmOutputStream.reset()
+            bytes
+        }
+        if (VoiceAudio.isLongEnoughForTranscription(audioBytes)) {
+            val wavBytes = VoiceAudio.pcm16ToWav(audioBytes)
+            val base64 = android.util.Base64.encodeToString(wavBytes, android.util.Base64.NO_WRAP)
+            recordedAudioBase64.set(base64)
+        }
     }
 
     private fun stopForegroundCompat() {
@@ -384,6 +354,10 @@ class AuraListeningService : Service() {
         private const val SPEECH_THRESHOLD_MULTIPLIER = 3.2
         private const val SPEECH_START_FRAMES = 3
         private const val SPEECH_END_FRAMES = 10
+        private const val PRE_SPEECH_PCM_BYTES =
+            VoiceAudio.SAMPLE_RATE * VoiceAudio.CHANNELS * VoiceAudio.BYTES_PER_SAMPLE / 4
+        private const val MAX_RECORDED_PCM_BYTES =
+            VoiceAudio.SAMPLE_RATE * VoiceAudio.CHANNELS * VoiceAudio.BYTES_PER_SAMPLE * 15
 
         private const val RAW_RMS_MULTIPLIER = 1.0 / 32767.0
         private const val RMS_TO_INT_MULTIPLIER = 1000.0 / 32767.0
@@ -412,8 +386,12 @@ class AuraListeningService : Service() {
             context.startService(intent)
         }
 
-        fun clearLastRecordedAudio() {
-            recordedAudioBase64.set(null)
+        fun clearLastRecordedAudio(expectedBase64: String? = null) {
+            if (expectedBase64 == null) {
+                recordedAudioBase64.set(null)
+            } else {
+                recordedAudioBase64.compareAndSet(expectedBase64, null)
+            }
             emitEvent()
         }
 
