@@ -2,6 +2,7 @@ package com.aura.app.assistant
 
 import com.aura.app.session.SessionStore
 import com.aura.app.apps.AppInfo
+import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppInstall
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +115,7 @@ class AssistantRepository(
         message: String,
         sessionId: String?,
         apps: List<AppInfo>,
+        automations: List<AutomationSpec> = emptyList(),
         miniApps: List<MiniAppInstall> = emptyList(),
         miniAppBundles: List<MiniAppBundle> = emptyList(),
         image_base64: String? = null,
@@ -149,6 +151,15 @@ class AssistantRepository(
                         actions = bundle?.actions?.map { it.id }.orEmpty()
                     )
                 },
+                automations = automations.map { automation ->
+                    ChatAutomationItem(
+                        id = automation.id,
+                        name = automation.name,
+                        enabled = automation.enabled,
+                        trigger_type = automation.trigger.type,
+                        action_types = automation.actions.map { it.type }
+                    )
+                },
                 image_base64 = image_base64,
                 image_mime_type = image_mime_type
             )
@@ -157,14 +168,12 @@ class AssistantRepository(
 
     suspend fun transcribe(audioBase64: String, mimeType: String = "audio/wav"): String = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
-        val apiKey = settings.currentApiKey
-        val provider = settings.provider.wireValue
         val response = api.transcribe(
             TranscribeRequest(
                 audio_base64 = audioBase64,
                 mime_type = mimeType,
-                api_key = apiKey.takeIf { it.isNotBlank() },
-                provider = provider
+                api_key = settings.googleApiKey.trim().takeIf { it.isNotBlank() },
+                provider = LlmProvider.Gemini.wireValue
             )
         )
         response.text
