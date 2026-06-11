@@ -21,6 +21,8 @@ import com.aura.app.assistant.TodoResponse
 import com.aura.app.assistant.UserResponse
 import com.aura.app.miniapps.BuiltInMiniApps
 import com.aura.app.miniapps.MiniAppBundle
+import com.aura.app.miniapps.MiniAppEvolutionEngine
+import com.aura.app.miniapps.MiniAppEvolutionSuggestion
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
 import com.aura.app.miniapps.MiniAppRevisionPreview
@@ -55,6 +57,7 @@ data class LauncherUiState(
     val activeMiniApp: MiniAppBundle? = null,
     val activeMiniAppRecords: List<MiniAppRecord> = emptyList(),
     val activeMiniAppVersions: List<MiniAppVersion> = emptyList(),
+    val activeMiniAppEvolutionSuggestion: MiniAppEvolutionSuggestion? = null,
     val pendingMiniAppRevision: MiniAppRevisionPreview? = null,
     val revisingMiniApp: Boolean = false,
     val llmSettings: LlmSettingsState = LlmSettingsState(),
@@ -84,6 +87,7 @@ data class LauncherUiState(
 class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val localState = MutableStateFlow(LauncherUiState())
     private val automationPermissionPlanner = AutomationPermissionPlanner()
+    private val dismissedMiniAppEvolutions = mutableSetOf<String>()
     private var transcribingAudioBase64: String? = null
 
     val uiState: StateFlow<LauncherUiState> =
@@ -646,11 +650,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             val bundle = container.miniAppRepository.bundle(id)
             val records = container.miniAppRepository.records(id)
             val versions = container.miniAppRepository.versions(id)
+            val evolutionSuggestion = bundle?.let { suggestMiniAppEvolution(it, records) }
             localState.update {
                 it.copy(
                     activeMiniApp = bundle,
                     activeMiniAppRecords = records,
                     activeMiniAppVersions = versions,
+                    activeMiniAppEvolutionSuggestion = evolutionSuggestion,
                     pendingMiniAppRevision = null,
                     revisingMiniApp = false
                 )
@@ -664,6 +670,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 activeMiniApp = null,
                 activeMiniAppRecords = emptyList(),
                 activeMiniAppVersions = emptyList(),
+                activeMiniAppEvolutionSuggestion = null,
                 pendingMiniAppRevision = null,
                 revisingMiniApp = false
             )
@@ -690,7 +697,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun createMiniAppRecordForRuntime(miniAppId: String, recordType: String, values: Map<String, String>): MiniAppRecord =
         container.miniAppRepository.createRecord(miniAppId, recordType, values).also {
             val records = container.miniAppRepository.records(miniAppId)
-            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+            val suggestion = uiState.value.activeMiniApp?.let { bundle -> suggestMiniAppEvolution(bundle, records) }
+            localState.update { state ->
+                state.copy(
+                    activeMiniAppRecords = records,
+                    activeMiniAppEvolutionSuggestion = suggestion
+                )
+            }
         }
 
     fun reviseActiveMiniApp(instruction: String) {
@@ -703,7 +716,14 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private fun reviseMiniApp(miniAppId: String, instruction: String) {
         viewModelScope.launch {
             val bundle = container.miniAppRepository.bundle(miniAppId) ?: return@launch
-            localState.update { it.copy(revisingMiniApp = true, error = null, pendingMiniAppRevision = null) }
+            localState.update {
+                it.copy(
+                    revisingMiniApp = true,
+                    error = null,
+                    pendingMiniAppRevision = null,
+                    activeMiniAppEvolutionSuggestion = null
+                )
+            }
             try {
                 val sample = container.miniAppRepository.records(bundle.id).take(8).map { record ->
                     mapOf<String, Any>(
@@ -733,6 +753,19 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         localState.update { it.copy(pendingMiniAppRevision = null, revisingMiniApp = false) }
     }
 
+    fun draftMiniAppEvolution() {
+        val suggestion = uiState.value.activeMiniAppEvolutionSuggestion ?: return
+        val bundle = uiState.value.activeMiniApp ?: return
+        dismissedMiniAppEvolutions += suggestion.id
+        reviseMiniApp(bundle.id, suggestion.revisionInstruction)
+    }
+
+    fun dismissMiniAppEvolution() {
+        val suggestion = uiState.value.activeMiniAppEvolutionSuggestion ?: return
+        dismissedMiniAppEvolutions += suggestion.id
+        localState.update { it.copy(activeMiniAppEvolutionSuggestion = null) }
+    }
+
     fun applyPendingMiniAppRevision() {
         val preview = uiState.value.pendingMiniAppRevision ?: return
         viewModelScope.launch {
@@ -746,6 +779,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         activeMiniApp = preview.bundle,
                         activeMiniAppRecords = records,
                         activeMiniAppVersions = versions,
+                        activeMiniAppEvolutionSuggestion = suggestMiniAppEvolution(preview.bundle, records),
                         pendingMiniAppRevision = null,
                         error = null
                     )
@@ -765,11 +799,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 val records = container.miniAppRepository.records(id)
                 val versions = container.miniAppRepository.versions(id)
                 localState.update {
+                    val suggestion = bundle?.let { activeBundle -> suggestMiniAppEvolution(activeBundle, records) }
                     it.copy(
                         miniApps = container.miniAppRepository.listInstalled(),
                         activeMiniApp = bundle,
                         activeMiniAppRecords = records,
                         activeMiniAppVersions = versions,
+                        activeMiniAppEvolutionSuggestion = suggestion,
                         pendingMiniAppRevision = null,
                         error = null
                     )
@@ -783,13 +819,23 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun updateMiniAppRecordForRuntime(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? =
         container.miniAppRepository.updateRecord(miniAppId, recordId, values).also {
             val records = container.miniAppRepository.records(miniAppId)
-            localState.update { state -> state.copy(activeMiniAppRecords = records) }
+            localState.update { state ->
+                state.copy(
+                    activeMiniAppRecords = records,
+                    activeMiniAppEvolutionSuggestion = state.activeMiniApp?.let { bundle -> suggestMiniAppEvolution(bundle, records) }
+                )
+            }
         }
 
     suspend fun deleteMiniAppRecordForRuntime(miniAppId: String, recordId: String): Boolean {
         container.miniAppRepository.deleteRecord(miniAppId, recordId)
         val records = container.miniAppRepository.records(miniAppId)
-        localState.update { state -> state.copy(activeMiniAppRecords = records) }
+        localState.update { state ->
+            state.copy(
+                activeMiniAppRecords = records,
+                activeMiniAppEvolutionSuggestion = state.activeMiniApp?.let { bundle -> suggestMiniAppEvolution(bundle, records) }
+            )
+        }
         return true
     }
 
@@ -799,6 +845,10 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             openMiniApp(miniAppId)
         }
     }
+
+    private fun suggestMiniAppEvolution(bundle: MiniAppBundle, records: List<MiniAppRecord>): MiniAppEvolutionSuggestion? =
+        MiniAppEvolutionEngine.suggest(bundle, records)
+            ?.takeUnless { it.id in dismissedMiniAppEvolutions }
 
     private fun resolveMiniApp(id: String?, query: String?): MiniAppInstall? {
         id?.takeIf { it.isNotBlank() }?.let { miniAppId ->
