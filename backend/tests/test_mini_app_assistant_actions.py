@@ -55,6 +55,7 @@ def test_assistant_tool_registry_exposes_intended_tools():
 
     assert names == {
         "block_app",
+        "create_automation",
         "create_mini_app",
         "revise_mini_app",
         "open_mini_app",
