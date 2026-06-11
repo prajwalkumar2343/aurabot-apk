@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aura.app.AppContainer
+import com.aura.app.automations.AutomationPermissionPlanner
+import com.aura.app.automations.AutomationRunLog
+import com.aura.app.automations.AutomationSpec
 import com.aura.app.apps.AppBlockRule
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.AssistantMessage
@@ -44,6 +47,9 @@ data class LauncherUiState(
     val memories: List<MemoryResponse> = emptyList(),
     val todos: List<TodoResponse> = emptyList(),
     val appBlocks: List<AppBlockRule> = emptyList(),
+    val automations: List<AutomationSpec> = emptyList(),
+    val automationRunLogs: Map<String, List<AutomationRunLog>> = emptyMap(),
+    val automationPermissionLabels: Map<String, List<String>> = emptyMap(),
     val miniApps: List<MiniAppInstall> = emptyList(),
     val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
     val activeMiniApp: MiniAppBundle? = null,
@@ -77,6 +83,8 @@ data class LauncherUiState(
 
 class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val localState = MutableStateFlow(LauncherUiState())
+    private val automationPermissionPlanner = AutomationPermissionPlanner()
+    private var transcribingAudioBase64: String? = null
 
     val uiState: StateFlow<LauncherUiState> =
         combine(
@@ -98,6 +106,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     init {
         refreshApps(force = true)
         refreshMiniApps()
+        refreshAutomations()
         refreshCloud()
         observeVoiceStatus()
     }
@@ -106,7 +115,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         val regex = """\{([a-zA-Z0-9_-]+)\}""".toRegex()
         val match = regex.find(reply)
         val emotion = match?.groupValues?.get(1)?.lowercase() ?: "neutral"
-        localState.update { it.copy(currentEmotion = emotion, isSpeaking = false) }
+        localState.update { it.copy(currentEmotion = emotion) }
     }
 
     fun refreshApps(force: Boolean = false) {
@@ -154,8 +163,8 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.voiceServiceController.status.collect { voiceStatus ->
                 val audio = voiceStatus.lastRecordedAudioBase64
-                if (audio != null) {
-                    container.voiceServiceController.clearLastRecordedAudio()
+                if (audio != null && transcribingAudioBase64 == null) {
+                    transcribingAudioBase64 = audio
                     transcribeAndSend(audio)
                 }
             }
@@ -184,6 +193,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 }
             } catch (error: Exception) {
                 localState.update { it.copy(loading = false, error = error.message ?: "Transcription failed") }
+            } finally {
+                transcribingAudioBase64 = null
+                container.voiceServiceController.clearLastRecordedAudio(audioBase64)
             }
         }
     }
@@ -215,6 +227,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 message = message,
                 sessionId = uiState.value.assistantSessionId,
                 apps = uiState.value.apps,
+                automations = container.automationRepository.list(),
                 miniApps = uiState.value.miniApps,
                 miniAppBundles = bundles,
                 image_base64 = imgBase64,
@@ -227,12 +240,17 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     assistantSessionId = response.session_id,
                     messages = it.messages +
                         AssistantMessage(MessageRole.Assistant, response.reply) +
-                        actionReplies.map { text -> AssistantMessage(MessageRole.Assistant, text) },
-                    isSpeaking = true
+                        actionReplies.map { text -> AssistantMessage(MessageRole.Assistant, text) }
                 )
             }
             updateEmotionFromReply(response.reply)
-            container.voiceSpeaker.speak(response.reply)
+            localState.update { it.copy(isSpeaking = true) }
+            val acceptedSpeech = container.voiceSpeaker.speak(response.reply) {
+                localState.update { state -> state.copy(isSpeaking = false) }
+            }
+            if (!acceptedSpeech) {
+                localState.update { it.copy(isSpeaking = false) }
+            }
         } catch (error: Exception) {
             localState.update { it.copy(loading = false, error = error.message ?: "Assistant failed") }
         }
@@ -386,9 +404,81 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         replies += "${miniApp.name} has $count local records."
                     }
                 }
+                "create_automation" -> {
+                    val spec = action.automation_spec
+                    if (spec == null) {
+                        replies += "I need a complete automation plan to save that."
+                    } else {
+                        val saved = container.automationRuntime.upsertAndRestore(spec)
+                        refreshAutomations()
+                        replies += "Created automation: ${saved.name}."
+                    }
+                }
             }
         }
         return replies
+    }
+
+    fun refreshAutomations() {
+        viewModelScope.launch {
+            try {
+                val automations = container.automationRepository.list()
+                val logs = automations.associate { automation ->
+                    automation.id to container.automationRepository.logs(automation.id, limit = 5)
+                }
+                val permissionLabels = automations.associate { automation ->
+                    automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
+                        permission.substringAfterLast('.').replace('_', ' ').lowercase()
+                            .replaceFirstChar { it.uppercase() }
+                    }
+                }
+                localState.update {
+                    it.copy(
+                        automations = automations,
+                        automationRunLogs = logs,
+                        automationPermissionLabels = permissionLabels,
+                        error = null
+                    )
+                }
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not load automations") }
+            }
+        }
+    }
+
+    fun setAutomationEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                container.automationRepository.setEnabled(id, enabled)
+                container.automationRuntime.restoreTriggers()
+                refreshAutomations()
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not update automation") }
+            }
+        }
+    }
+
+    fun deleteAutomation(id: String) {
+        viewModelScope.launch {
+            try {
+                container.automationRuntime.deleteAndRestore(id)
+                refreshAutomations()
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not delete automation") }
+            }
+        }
+    }
+
+    fun runAutomationNow(id: String) {
+        viewModelScope.launch {
+            try {
+                val result = container.automationEngine.runNow(id)
+                refreshAutomations()
+                localState.update { it.copy(error = "Automation ${result.status}: ${result.message}") }
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not run automation") }
+            }
+        }
     }
 
     private suspend fun buildInstallAndMaybeOpenMiniApp(
