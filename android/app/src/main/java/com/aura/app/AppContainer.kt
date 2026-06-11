@@ -1,6 +1,15 @@
 package com.aura.app
 
 import android.content.Context
+import com.aura.app.automations.AndroidAutomationActionExecutor
+import com.aura.app.automations.AutomationDatabase
+import com.aura.app.automations.AutomationEngine
+import com.aura.app.automations.AutomationRepository
+import com.aura.app.automations.AutomationRuntime
+import com.aura.app.automations.GeofenceAutomationRegistrar
+import com.aura.app.automations.DefaultAutomationContextEnricher
+import com.aura.app.automations.LocalDistanceEtaProvider
+import com.aura.app.automations.ScheduleAutomationScheduler
 import com.aura.app.apps.AppBlockStore
 import com.aura.app.apps.AppsRepository
 import com.aura.app.assistant.AssistantRepository
@@ -18,6 +27,20 @@ class AppContainer(context: Context) {
     val appsRepository = AppsRepository(appContext.packageManager)
     val appBlockStore = AppBlockStore(appContext)
     val miniAppRepository = MiniAppRepository(MiniAppDatabase.get(appContext).miniAppDao())
+    val automationRepository = AutomationRepository(AutomationDatabase.get(appContext).automationDao())
+    val geofenceAutomationRegistrar = GeofenceAutomationRegistrar(appContext)
+    val scheduleAutomationScheduler = ScheduleAutomationScheduler(appContext)
+    val etaProvider = LocalDistanceEtaProvider()
+    val automationEngine = AutomationEngine(
+        repository = automationRepository,
+        contextEnricher = DefaultAutomationContextEnricher(etaProvider),
+        actionExecutor = AndroidAutomationActionExecutor(appContext)
+    )
+    val automationRuntime = AutomationRuntime(
+        repository = automationRepository,
+        geofenceRegistrar = geofenceAutomationRegistrar,
+        scheduleScheduler = scheduleAutomationScheduler
+    )
     val llmSettingsStore = LlmSettingsStore(appContext)
     private val localAssistantStore = LocalAssistantStore(appContext)
     val assistantRepository = AssistantRepository(
