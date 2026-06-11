@@ -23,6 +23,7 @@ class Settings:
     # LLM Settings
     GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_FAST_MODEL)
     GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", os.environ.get("EMERGENT_LLM_KEY", ""))
+    OPENAI_TRANSCRIPTION_MODEL: str = os.environ.get("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
     
     # Admin Settings
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@aura.app")

@@ -168,12 +168,24 @@ class AssistantRepository(
 
     suspend fun transcribe(audioBase64: String, mimeType: String = "audio/wav"): String = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        val voiceProvider = when {
+            settings.provider == LlmProvider.OpenAI && settings.openAiApiKey.isNotBlank() -> LlmProvider.OpenAI
+            settings.provider == LlmProvider.Gemini && settings.googleApiKey.isNotBlank() -> LlmProvider.Gemini
+            settings.googleApiKey.isNotBlank() -> LlmProvider.Gemini
+            settings.openAiApiKey.isNotBlank() -> LlmProvider.OpenAI
+            else -> throw IllegalStateException("Add a Google or OpenAI API key for voice transcription")
+        }
+        val voiceApiKey = when (voiceProvider) {
+            LlmProvider.Gemini -> settings.googleApiKey
+            LlmProvider.OpenAI -> settings.openAiApiKey
+            LlmProvider.OpenRouter -> ""
+        }.trim()
         val response = api.transcribe(
             TranscribeRequest(
                 audio_base64 = audioBase64,
                 mime_type = mimeType,
-                api_key = settings.googleApiKey.trim().takeIf { it.isNotBlank() },
-                provider = LlmProvider.Gemini.wireValue
+                api_key = voiceApiKey,
+                provider = voiceProvider.wireValue
             )
         )
         response.text

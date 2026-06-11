@@ -450,6 +450,10 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 container.automationRepository.setEnabled(id, enabled)
+                if (!enabled) {
+                    runCatching { container.geofenceAutomationRegistrar.remove(id) }
+                    container.scheduleAutomationScheduler.cancel(id)
+                }
                 container.automationRuntime.restoreTriggers()
                 refreshAutomations()
             } catch (error: Exception) {

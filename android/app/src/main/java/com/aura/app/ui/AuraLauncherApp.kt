@@ -230,6 +230,7 @@ private enum class AuraPresenceMode {
 fun AuraLauncherApp(
     viewModel: LauncherViewModel,
     onRequestVoicePermissions: () -> Unit,
+    onRequestAutomationPermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
     onQuitApp: () -> Unit,
     onMinimizeApp: () -> Unit
@@ -616,7 +617,7 @@ fun AuraLauncherApp(
                         onSetEnabled = viewModel::setAutomationEnabled,
                         onRunNow = viewModel::runAutomationNow,
                         onDelete = viewModel::deleteAutomation,
-                        onOpenPermissions = onRequestVoicePermissions
+                        onOpenPermissions = onRequestAutomationPermissions
                     )
                 }
                 composable(Route.Models.name) {
