@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 ASSISTANT_TOOL_NAMES = {
     "block_app",
+    "create_automation",
     "create_mini_app",
     "revise_mini_app",
     "open_mini_app",
@@ -44,6 +45,13 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         )
         for item in data.mini_apps[:40]
     )
+    automations = _context_list(
+        (
+            f"- {item.name} ({item.id}); enabled: {item.enabled}; trigger: {item.trigger_type}; "
+            f"actions: {', '.join(item.action_types[:8]) or 'none'}"
+        )
+        for item in data.automations[:40]
+    )
     return (
         "You are Aura, a calm launcher assistant inside an Android home app. "
         "Your responses will be read aloud by a Text-to-Speech (TTS) synthesizer. "
@@ -54,6 +62,9 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Do not claim an action has completed unless you request the matching tool. "
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
+        "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. "
+        "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
+        "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
         "When revising an installed mini app from chat, call revise_mini_app with the target mini app and a specific revision_instruction. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
@@ -62,12 +73,13 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
         f"Installed apps:\n{apps}\n\n"
         f"Installed Aura mini apps:\n{mini_apps}\n\n"
+        f"Saved Aura automations:\n{automations}\n\n"
         f"Loaded file context:\n{format_context_snippets(harness.context_snippets)}\n\n"
         f"Available skill summaries:\n{format_skill_summaries(harness.skill_summaries)}\n\n"
         f"Activated skill details:\n{format_activated_skills(harness.activated_skills)}"
@@ -75,7 +87,95 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
 
 
 def assistant_tool_definitions() -> list[dict[str, Any]]:
-    return [
+    tools = [
+        {
+            "name": "create_automation",
+            "description": "Create a durable local Aura automation from a user request. The phone runtime validates permissions, stores it, restores triggers after reboot, and executes actions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "automation_spec": {
+                        "type": "object",
+                        "description": "Typed automation spec. Use geofence for enter/exit place triggers, schedule for time triggers, manual for testable automations.",
+                        "properties": {
+                            "id": {"type": "string", "description": "Leave blank for a new automation."},
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "enabled": {"type": "boolean"},
+                            "trigger": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string", "enum": ["geofence", "schedule", "manual"]},
+                                    "geofence": {
+                                        "type": "object",
+                                        "properties": {
+                                            "placeName": {"type": "string"},
+                                            "latitude": {"type": "number"},
+                                            "longitude": {"type": "number"},
+                                            "radiusMeters": {"type": "number"},
+                                            "transition": {"type": "string", "enum": ["enter", "exit"]},
+                                        },
+                                        "required": ["placeName", "latitude", "longitude", "radiusMeters", "transition"],
+                                    },
+                                    "schedule": {
+                                        "type": "object",
+                                        "properties": {
+                                            "mode": {"type": "string", "enum": ["daily", "interval"]},
+                                            "localTime": {"type": "string", "description": "HH:mm local time for daily schedules."},
+                                            "intervalMinutes": {"type": "integer"},
+                                            "daysOfWeek": {"type": "array", "items": {"type": "integer"}},
+                                        },
+                                    },
+                                    "manual": {
+                                        "type": "object",
+                                        "properties": {"eventName": {"type": "string"}},
+                                    },
+                                },
+                                "required": ["type"],
+                            },
+                            "conditions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "key": {"type": "string"},
+                                        "operator": {"type": "string", "enum": ["exists", "equals", "not_equals", "contains"]},
+                                        "value": {"type": "string"},
+                                    },
+                                    "required": ["type", "key", "operator"],
+                                },
+                            },
+                            "actions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                            "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms"]},
+                                        "title": {"type": "string"},
+                                        "messageTemplate": {"type": "string"},
+                                        "recipientName": {"type": "string"},
+                                        "recipientAddress": {"type": "string"},
+                                        "requireConfirmation": {"type": "boolean"},
+                                        "metadata": {
+                                            "type": "object",
+                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true.",
+                                            "additionalProperties": {"type": "string"},
+                                        },
+                                    },
+                                    "required": ["type", "requireConfirmation"],
+                                },
+                            },
+                            "cooldownMillis": {"type": "integer"},
+                            "createdBy": {"type": "string"},
+                        },
+                        "required": ["name", "enabled", "trigger", "actions"],
+                    }
+                },
+                "required": ["automation_spec"],
+                "additionalProperties": False,
+            },
+        },
         {
             "name": "block_app",
             "description": "Block or restrict one installed Android app for a number of minutes.",
@@ -181,6 +281,16 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    preferred_order = {
+        "block_app": 0,
+        "create_automation": 1,
+        "create_mini_app": 2,
+        "revise_mini_app": 3,
+        "open_mini_app": 4,
+        "create_mini_app_record": 5,
+        "query_mini_app_records": 6,
+    }
+    return sorted(tools, key=lambda tool: preferred_order.get(tool["name"], 99))
 
 
 def openai_assistant_tools() -> list[dict[str, Any]]:
@@ -253,6 +363,7 @@ def _action_from_tool_call(name: str, args: Any) -> Optional[ChatActionOut]:
         action_id=args.get("action_id"),
         record_type=args.get("record_type"),
         values=_coerce_values(args.get("values")),
+        automation_spec=args.get("automation_spec") if isinstance(args.get("automation_spec"), dict) else None,
     )
 
 
@@ -297,6 +408,7 @@ def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
                 action_id=item.get("action_id"),
                 record_type=item.get("record_type"),
                 values=item.get("values") if isinstance(item.get("values"), dict) else None,
+                automation_spec=item.get("automation_spec") if isinstance(item.get("automation_spec"), dict) else None,
             )
         )
     return reply, [action for action in actions if action.type]
