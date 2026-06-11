@@ -124,3 +124,12 @@ data class MiniAppRevisionPreview(
     val summary: String,
     val migrationPlan: List<String>
 )
+
+data class MiniAppEvolutionSuggestion(
+    val id: String,
+    val title: String,
+    val reason: String,
+    val revisionInstruction: String,
+    val proposedFields: List<MiniAppField> = emptyList(),
+    val confidence: Float = 0f
+)

@@ -21,19 +21,34 @@ class BootReceiver : BroadcastReceiver() {
 
         val canRecord = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
-        if (!canRecord) return
 
-        val shouldRestore = runBlocking {
+        val shouldRestoreListening = canRecord && runBlocking {
             SessionStore(context.applicationContext).state.first().backgroundListeningEnabled
         }
-        if (shouldRestore) {
-            AuraListeningService.start(context.applicationContext)
-        }
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            runCatching {
-                val app = context.applicationContext as AuraApplication
-                app.container.automationRuntime.restoreTriggers()
+        BootRestoreCoordinator.handle(
+            shouldRestoreListening = shouldRestoreListening,
+            startListening = { AuraListeningService.start(context.applicationContext) },
+            restoreAutomations = {
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    runCatching {
+                        val app = context.applicationContext as AuraApplication
+                        app.container.automationRuntime.restoreTriggers()
+                    }
+                }
             }
+        )
+    }
+}
+
+internal object BootRestoreCoordinator {
+    fun handle(
+        shouldRestoreListening: Boolean,
+        startListening: () -> Unit,
+        restoreAutomations: () -> Unit
+    ) {
+        if (shouldRestoreListening) {
+            startListening()
         }
+        restoreAutomations()
     }
 }

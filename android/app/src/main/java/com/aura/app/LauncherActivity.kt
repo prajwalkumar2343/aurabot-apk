@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -42,6 +43,7 @@ class LauncherActivity : ComponentActivity() {
                 AuraLauncherApp(
                     viewModel = viewModel,
                     onRequestVoicePermissions = ::requestVoicePermissions,
+                    onRequestAutomationPermissions = ::requestAutomationPermissions,
                     onOpenHomeSettings = ::openHomeSettings,
                     onQuitApp = ::quitApp,
                     onMinimizeApp = { moveTaskToBack(true) }
@@ -94,6 +96,36 @@ class LauncherActivity : ComponentActivity() {
         }
         if (permissions.isNotEmpty()) {
             permissionLauncher.launch(permissions.toTypedArray())
+        }
+    }
+
+    private fun requestAutomationPermissions() {
+        val runtimePermissions = buildList {
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.SEND_SMS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (runtimePermissions.isNotEmpty()) {
+            permissionLauncher.launch(runtimePermissions.toTypedArray())
+            return
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
         }
     }
 

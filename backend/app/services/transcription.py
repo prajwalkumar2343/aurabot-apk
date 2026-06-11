@@ -82,9 +82,14 @@ def transcribe_audio(
         raise HTTPException(status_code=400, detail="Invalid base64 audio")
 
     normalized_provider = (provider or "gemini").strip().lower()
-    if normalized_provider != "gemini":
-        raise HTTPException(status_code=400, detail="Transcription currently supports the gemini provider")
+    if normalized_provider == "gemini":
+        return _transcribe_with_gemini(base64_data, mime_type, api_key)
+    if normalized_provider == "openai":
+        return _transcribe_with_openai(decoded, mime_type, api_key)
+    raise HTTPException(status_code=400, detail="Transcription currently supports gemini or openai providers")
 
+
+def _transcribe_with_gemini(base64_data: str, mime_type: str, api_key: Optional[str]) -> str:
     key = api_key or settings.GEMINI_API_KEY
     if not key:
         raise HTTPException(status_code=500, detail="Gemini API Key is not configured for transcription")
@@ -140,4 +145,48 @@ def transcribe_audio(
     if not text:
         raise HTTPException(status_code=502, detail="Gemini transcription response did not include text")
     
+    return text
+
+
+def _transcribe_with_openai(decoded: bytes, mime_type: str, api_key: Optional[str]) -> str:
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API Key is required for transcription")
+    extension = {
+        "audio/wav": "wav",
+        "audio/wave": "wav",
+        "audio/x-wav": "wav",
+        "audio/m4a": "m4a",
+        "audio/mp4": "m4a",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/webm": "webm",
+        "audio/ogg": "ogg",
+    }.get(mime_type.split(";", 1)[0].strip().lower(), "audio")
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            data={
+                "model": settings.OPENAI_TRANSCRIPTION_MODEL,
+                "response_format": "json",
+            },
+            files={
+                "file": (f"aura-audio.{extension}", decoded, mime_type),
+            },
+            timeout=60,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.exception("OpenAI transcription API call failed")
+        raise HTTPException(status_code=502, detail=f"Failed to connect to OpenAI transcription API: {str(e)}")
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"OpenAI transcription API error: {response.text[:300]}",
+        )
+
+    payload = response.json()
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="OpenAI transcription response did not include text")
     return text

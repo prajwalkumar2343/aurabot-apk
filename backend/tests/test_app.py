@@ -1190,6 +1190,37 @@ def test_85_assistant_chat_openai_timeout(mock_post, client):
     })
     assert response.status_code == 502
 
+@patch("app.services.llm.requests.post")
+def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client):
+    """85b. OpenAI chat requests include attached images instead of dropping them."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "output": [
+            {
+                "content": [
+                    {"type": "output_text", "text": "{neutral} I can see it."}
+                ]
+            }
+        ]
+    }
+    mock_post.return_value = mock_response
+
+    response = client.post("/api/assistant/chat", json={
+        "message": "What is in this image?",
+        "provider": "openai",
+        "api_key": "dummy",
+        "model": "gpt-4.1-mini",
+        "image_base64": "aW1hZ2U=",
+        "image_mime_type": "image/png",
+    })
+
+    assert response.status_code == 200
+    payload = mock_post.call_args.kwargs["json"]
+    user_content = payload["input"][1]["content"]
+    assert user_content[1]["type"] == "input_image"
+    assert user_content[1]["image_url"] == "data:image/png;base64,aW1hZ2U="
+
 @patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
 def test_86_assistant_chat_openrouter_timeout(mock_post, client):
     """86. OpenRouter timeout exceptions map to a standard HTTP 502 response."""
@@ -1200,6 +1231,38 @@ def test_86_assistant_chat_openrouter_timeout(mock_post, client):
         "model": "model"
     })
     assert response.status_code == 502
+
+@patch("app.services.llm.requests.post")
+def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client):
+    """86b. OpenRouter chat requests include attached images instead of dropping them."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "{neutral} I can see it.",
+                    "tool_calls": [],
+                }
+            }
+        ]
+    }
+    mock_post.return_value = mock_response
+
+    response = client.post("/api/assistant/chat", json={
+        "message": "What is in this image?",
+        "provider": "openrouter",
+        "api_key": "dummy",
+        "model": "openai/gpt-4.1-mini",
+        "image_base64": "aW1hZ2U=",
+        "image_mime_type": "image/png",
+    })
+
+    assert response.status_code == 200
+    payload = mock_post.call_args.kwargs["json"]
+    user_content = payload["messages"][1]["content"]
+    assert user_content[0] == {"type": "text", "text": "What is in this image?"}
+    assert user_content[1]["image_url"]["url"] == "data:image/png;base64,aW1hZ2U="
 
 @patch("app.services.llm.requests.post")
 def test_87_assistant_chat_gemini_403_forbidden(mock_post, client):
@@ -1410,20 +1473,46 @@ def test_99b_transcribe_audio_rejects_too_short_wav(client, test_user_token):
     assert response.status_code == 400
     assert "too short" in response.json()["detail"].lower()
 
-def test_99c_transcribe_audio_rejects_unsupported_provider(client, test_user_token):
-    """99c. Transcription fails clearly when a non-Gemini provider is requested."""
+@patch("app.services.transcription.requests.post")
+def test_99c_transcribe_audio_openai_success(mock_post, client, test_user_token):
+    """99c. OpenAI transcription requests use multipart audio and return text."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"text": "Hello from OpenAI"}
+    mock_post.return_value = mock_response
+
+    response = client.post(
+        "/api/transcribe",
+        json={
+            "audio_base64": wav_payload(),
+            "mime_type": "audio/wav",
+            "api_key": "openai_key",
+            "provider": "openai",
+        },
+        headers={"Authorization": f"Bearer {test_user_token}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["text"] == "Hello from OpenAI"
+    kwargs = mock_post.call_args.kwargs
+    assert kwargs["data"]["model"] == settings.OPENAI_TRANSCRIPTION_MODEL
+    assert kwargs["files"]["file"][0].endswith(".wav")
+    assert kwargs["files"]["file"][2] == "audio/wav"
+
+def test_99d_transcribe_audio_rejects_unsupported_provider(client, test_user_token):
+    """99d. Transcription fails clearly when an unsupported provider is requested."""
     settings.GEMINI_API_KEY = "test_key"
     response = client.post(
         "/api/transcribe",
         json={
             "audio_base64": wav_payload(),
             "mime_type": "audio/wav",
-            "provider": "openai"
+            "provider": "openrouter"
         },
         headers={"Authorization": f"Bearer {test_user_token}"}
     )
     assert response.status_code == 400
-    assert "gemini" in response.json()["detail"].lower()
+    assert "gemini or openai" in response.json()["detail"].lower()
 
 def test_100_supabase_gateway_massive_payload(client, test_user_token):
     """100. Supabase gateway can handle massive dictionary payloads (boundary check)."""

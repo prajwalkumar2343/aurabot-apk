@@ -162,6 +162,7 @@ import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
 import com.aura.app.miniapps.MiniAppComponentItem
+import com.aura.app.miniapps.MiniAppEvolutionSuggestion
 import com.aura.app.miniapps.MiniAppField
 import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
@@ -230,6 +231,7 @@ private enum class AuraPresenceMode {
 fun AuraLauncherApp(
     viewModel: LauncherViewModel,
     onRequestVoicePermissions: () -> Unit,
+    onRequestAutomationPermissions: () -> Unit,
     onOpenHomeSettings: () -> Unit,
     onQuitApp: () -> Unit,
     onMinimizeApp: () -> Unit
@@ -554,6 +556,7 @@ fun AuraLauncherApp(
                         bundle = state.activeMiniApp,
                         records = state.activeMiniAppRecords,
                         versions = state.activeMiniAppVersions,
+                        evolutionSuggestion = state.activeMiniAppEvolutionSuggestion,
                         revisionPreview = state.pendingMiniAppRevision,
                         revising = state.revisingMiniApp,
                         onBack = {
@@ -564,6 +567,8 @@ fun AuraLauncherApp(
                         onCreateRecord = viewModel::createMiniAppRecord,
                         onDeleteRecord = viewModel::deleteMiniAppRecord,
                         onRevise = viewModel::reviseActiveMiniApp,
+                        onDraftEvolution = viewModel::draftMiniAppEvolution,
+                        onDismissEvolution = viewModel::dismissMiniAppEvolution,
                         onAcceptRevision = viewModel::applyPendingMiniAppRevision,
                         onDismissRevision = viewModel::dismissMiniAppRevision,
                         onRollback = viewModel::rollbackActiveMiniApp,
@@ -616,7 +621,7 @@ fun AuraLauncherApp(
                         onSetEnabled = viewModel::setAutomationEnabled,
                         onRunNow = viewModel::runAutomationNow,
                         onDelete = viewModel::deleteAutomation,
-                        onOpenPermissions = onRequestVoicePermissions
+                        onOpenPermissions = onRequestAutomationPermissions
                     )
                 }
                 composable(Route.Models.name) {
@@ -1796,6 +1801,7 @@ private fun MiniAppRuntimeScreen(
     bundle: MiniAppBundle?,
     records: List<MiniAppRecord>,
     versions: List<MiniAppVersion>,
+    evolutionSuggestion: MiniAppEvolutionSuggestion?,
     revisionPreview: MiniAppRevisionPreview?,
     revising: Boolean,
     onBack: () -> Unit,
@@ -1803,6 +1809,8 @@ private fun MiniAppRuntimeScreen(
     onCreateRecord: (String, String, Map<String, String>) -> Unit,
     onDeleteRecord: (String, String) -> Unit,
     onRevise: (String) -> Unit,
+    onDraftEvolution: () -> Unit,
+    onDismissEvolution: () -> Unit,
     onAcceptRevision: () -> Unit,
     onDismissRevision: () -> Unit,
     onRollback: (Int) -> Unit,
@@ -1821,10 +1829,13 @@ private fun MiniAppRuntimeScreen(
         MiniAppReactRuntimeScreen(
             bundle = bundle,
             versions = versions,
+            evolutionSuggestion = evolutionSuggestion,
             revisionPreview = revisionPreview,
             revising = revising,
             onBack = onBack,
             onRevise = onRevise,
+            onDraftEvolution = onDraftEvolution,
+            onDismissEvolution = onDismissEvolution,
             onAcceptRevision = onAcceptRevision,
             onDismissRevision = onDismissRevision,
             onRollback = onRollback,
@@ -1863,10 +1874,13 @@ private fun MiniAppRuntimeScreen(
                 MiniAppForgePanel(
                     bundle = bundle,
                     versions = versions,
+                    evolutionSuggestion = evolutionSuggestion,
                     revisionPreview = revisionPreview,
                     revising = revising,
                     primary = primary,
                     onRevise = onRevise,
+                    onDraftEvolution = onDraftEvolution,
+                    onDismissEvolution = onDismissEvolution,
                     onAcceptRevision = onAcceptRevision,
                     onDismissRevision = onDismissRevision,
                     onRollback = onRollback
@@ -1896,10 +1910,13 @@ private fun MiniAppRuntimeScreen(
 private fun MiniAppReactRuntimeScreen(
     bundle: MiniAppBundle,
     versions: List<MiniAppVersion>,
+    evolutionSuggestion: MiniAppEvolutionSuggestion?,
     revisionPreview: MiniAppRevisionPreview?,
     revising: Boolean,
     onBack: () -> Unit,
     onRevise: (String) -> Unit,
+    onDraftEvolution: () -> Unit,
+    onDismissEvolution: () -> Unit,
     onAcceptRevision: () -> Unit,
     onDismissRevision: () -> Unit,
     onRollback: (Int) -> Unit,
@@ -1921,10 +1938,13 @@ private fun MiniAppReactRuntimeScreen(
         MiniAppForgePanel(
             bundle = bundle,
             versions = versions,
+            evolutionSuggestion = evolutionSuggestion,
             revisionPreview = revisionPreview,
             revising = revising,
             primary = primary,
             onRevise = onRevise,
+            onDraftEvolution = onDraftEvolution,
+            onDismissEvolution = onDismissEvolution,
             onAcceptRevision = onAcceptRevision,
             onDismissRevision = onDismissRevision,
             onRollback = onRollback
@@ -2147,10 +2167,13 @@ private fun String.escapeScriptEnd(): String = replace("</script", "<\\/script",
 private fun MiniAppForgePanel(
     bundle: MiniAppBundle,
     versions: List<MiniAppVersion>,
+    evolutionSuggestion: MiniAppEvolutionSuggestion?,
     revisionPreview: MiniAppRevisionPreview?,
     revising: Boolean,
     primary: Color,
     onRevise: (String) -> Unit,
+    onDraftEvolution: () -> Unit,
+    onDismissEvolution: () -> Unit,
     onAcceptRevision: () -> Unit,
     onDismissRevision: () -> Unit,
     onRollback: (Int) -> Unit
@@ -2215,6 +2238,60 @@ private fun MiniAppForgePanel(
                 modifier = Modifier.height(54.dp)
             ) {
                 Icon(Icons.Rounded.AutoAwesome, "Forge revision")
+            }
+        }
+
+        AnimatedVisibility(visible = evolutionSuggestion != null && revisionPreview == null && !revising) {
+            evolutionSuggestion?.let { suggestion ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(primary.copy(alpha = 0.1f))
+                        .border(BorderStroke(1.dp, primary.copy(alpha = 0.18f)), RoundedCornerShape(18.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = primary, modifier = Modifier.size(18.dp))
+                        Text(
+                            "Living upgrade",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+                            color = primary
+                        )
+                    }
+                    Text(
+                        suggestion.title,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        suggestion.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (suggestion.proposedFields.isNotEmpty()) {
+                        Text(
+                            suggestion.proposedFields.joinToString(" + ") { formatMiniAppFieldLabel(it.name) },
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = primary
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onDraftEvolution,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = primary)
+                        ) {
+                            Icon(Icons.Rounded.AutoAwesome, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Draft")
+                        }
+                        OutlinedButton(onClick = onDismissEvolution, shape = RoundedCornerShape(14.dp)) {
+                            Icon(Icons.Rounded.Clear, null)
+                        }
+                    }
+                }
             }
         }
 

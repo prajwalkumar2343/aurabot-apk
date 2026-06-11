@@ -340,6 +340,19 @@ def _coerce_values(values: Any) -> Optional[dict[str, str]]:
     return {str(key): str(value) for key, value in values.items()}
 
 
+def _image_data_url(data: ChatIn) -> Optional[str]:
+    if not data.image_base64 or not data.image_mime_type:
+        return None
+    b64 = data.image_base64.strip()
+    if not b64:
+        return None
+    if b64.startswith("data:"):
+        return b64
+    if "," in b64:
+        b64 = b64.split(",", 1)[1]
+    return f"data:{data.image_mime_type};base64,{b64}"
+
+
 def _action_from_tool_call(name: str, args: Any) -> Optional[ChatActionOut]:
     if name not in ASSISTANT_TOOL_NAMES:
         return None
@@ -504,6 +517,20 @@ def call_openai(data: ChatIn, system_message: str, use_assistant_tools: bool = F
     if not data.api_key:
         raise HTTPException(status_code=400, detail="OpenAI API Key is required")
     try:
+        user_content = [
+            {
+                "type": "input_text",
+                "text": data.message,
+            }
+        ]
+        image_url = _image_data_url(data)
+        if image_url:
+            user_content.append(
+                {
+                    "type": "input_image",
+                    "image_url": image_url,
+                }
+            )
         payload = {
             "model": data.model,
             "input": [
@@ -518,12 +545,7 @@ def call_openai(data: ChatIn, system_message: str, use_assistant_tools: bool = F
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": data.message,
-                        }
-                    ],
+                    "content": user_content,
                 },
             ],
         }
@@ -550,11 +572,18 @@ def call_openrouter(data: ChatIn, system_message: str, use_assistant_tools: bool
     if not data.api_key:
         raise HTTPException(status_code=400, detail="OpenRouter API Key is required")
     try:
+        image_url = _image_data_url(data)
+        user_content: Any = data.message
+        if image_url:
+            user_content = [
+                {"type": "text", "text": data.message},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]
         payload = {
             "model": data.model,
             "messages": [
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": data.message},
+                {"role": "user", "content": user_content},
             ],
         }
         if use_assistant_tools:
