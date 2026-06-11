@@ -70,6 +70,9 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Store
 import androidx.compose.material.icons.rounded.Mail
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
@@ -147,6 +150,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
+import com.aura.app.automations.AutomationActionTypes
+import com.aura.app.automations.AutomationEvents
+import com.aura.app.automations.AutomationRunLog
+import com.aura.app.automations.AutomationSpec
+import com.aura.app.automations.AutomationTriggerTypes
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
 import com.aura.app.assistant.LlmProvider
@@ -204,6 +212,7 @@ private enum class Route(val title: String) {
     Assistant("Assistant"),
     Tasks("Tasks"),
     Memory("Memory"),
+    Automations("Automations"),
     Settings("Settings"),
     Models("Models"),
     MiniApp("MiniApp")
@@ -594,8 +603,20 @@ fun AuraLauncherApp(
                         onConfigureModels = { navController.navigate(Route.Models.name) },
                         onConfigureTasks = { navController.navigate(Route.Tasks.name) },
                         onConfigureMemories = { navController.navigate(Route.Memory.name) },
+                        onConfigureAutomations = { navController.navigate(Route.Automations.name) },
                         onQuitApp = onQuitApp,
                         onSetAppMode = viewModel::setAppMode
+                    )
+                }
+                composable(Route.Automations.name) {
+                    AutomationsScreen(
+                        state = state,
+                        onBack = { navController.popBackStack() },
+                        onRefresh = viewModel::refreshAutomations,
+                        onSetEnabled = viewModel::setAutomationEnabled,
+                        onRunNow = viewModel::runAutomationNow,
+                        onDelete = viewModel::deleteAutomation,
+                        onOpenPermissions = onRequestVoicePermissions
                     )
                 }
                 composable(Route.Models.name) {
@@ -3377,6 +3398,239 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
 }
 
 @Composable
+private fun AutomationsScreen(
+    state: LauncherUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onSetEnabled: (String, Boolean) -> Unit,
+    onRunNow: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenPermissions: () -> Unit
+) {
+    LaunchedEffect(Unit) {
+        onRefresh()
+    }
+    ScreenShell(wallpaperUri = state.session.wallpaperUri) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
+                Text("← BACK", fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh automations")
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Header("AUTOMATIONS", "${state.automations.count { it.enabled }} armed of ${state.automations.size} saved rules.")
+        Spacer(Modifier.height(12.dp))
+        if (state.automations.isEmpty()) {
+            EmptyAutomationState()
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(state.automations, key = { it.id }) { automation ->
+                    AutomationCard(
+                        automation = automation,
+                        logs = state.automationRunLogs[automation.id].orEmpty(),
+                        permissionLabels = state.automationPermissionLabels[automation.id].orEmpty(),
+                        onSetEnabled = onSetEnabled,
+                        onRunNow = onRunNow,
+                        onDelete = onDelete,
+                        onOpenPermissions = onOpenPermissions
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyAutomationState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard(shape = RoundedCornerShape(18.dp))
+            .padding(18.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("NO AUTOMATIONS YET", fontWeight = FontWeight.Black)
+            }
+            Text(
+                "Ask Aura to create one, like messaging an ETA when leaving work or reminding you on a schedule.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutomationCard(
+    automation: AutomationSpec,
+    logs: List<AutomationRunLog>,
+    permissionLabels: List<String>,
+    onSetEnabled: (String, Boolean) -> Unit,
+    onRunNow: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenPermissions: () -> Unit
+) {
+    val isDark = isSystemInDarkTheme()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard(shape = RoundedCornerShape(16.dp))
+            .padding(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (automation.enabled) Color(0xFF22C55E).copy(alpha = if (isDark) 0.2f else 0.12f)
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = automationIcon(automation),
+                        contentDescription = null,
+                        tint = if (automation.enabled) Color(0xFF16A34A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(automation.name, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        automationSummary(automation),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Switch(
+                    checked = automation.enabled,
+                    onCheckedChange = { onSetEnabled(automation.id, it) }
+                )
+            }
+
+            if (automation.description.isNotBlank()) {
+                Text(
+                    automation.description,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                AutomationChip(text = automation.trigger.type.uppercase(), icon = automationIcon(automation))
+                automation.actions.take(2).forEach { action ->
+                    AutomationChip(text = action.type.replace('_', ' ').uppercase(), icon = actionIcon(action.type))
+                }
+            }
+
+            if (permissionLabels.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("REQUIRED PERMISSIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        permissionLabels.take(3).forEach { label ->
+                            AutomationChip(text = label.uppercase(), icon = Icons.Rounded.Lock)
+                        }
+                        TextButton(onClick = onOpenPermissions) {
+                            Text("OPEN")
+                        }
+                    }
+                }
+            }
+
+            if (logs.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("RECENT RUNS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                    logs.take(2).forEach { log ->
+                        Text(
+                            "${formatMiniAppTime(log.createdAt)} · ${log.status.uppercase()} · ${log.message}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(
+                    onClick = { onRunNow(automation.id) },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("TEST")
+                }
+                OutlinedButton(
+                    onClick = { onDelete(automation.id) },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("DELETE")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutomationChip(text: String, icon: ImageVector) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(5.dp))
+        Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun automationIcon(automation: AutomationSpec): ImageVector =
+    when (automation.trigger.type) {
+        AutomationTriggerTypes.Geofence -> Icons.Rounded.LocationOn
+        AutomationTriggerTypes.Schedule -> Icons.Rounded.Schedule
+        else -> Icons.Rounded.AutoAwesome
+    }
+
+private fun actionIcon(actionType: String): ImageVector =
+    when (actionType) {
+        AutomationActionTypes.EtaMessage, AutomationActionTypes.DraftMessage, AutomationActionTypes.DirectSms -> Icons.Rounded.Mail
+        AutomationActionTypes.Notify -> Icons.Rounded.Refresh
+        else -> Icons.Rounded.AutoAwesome
+    }
+
+private fun automationSummary(automation: AutomationSpec): String =
+    when (automation.trigger.type) {
+        AutomationTriggerTypes.Geofence -> {
+            val geofence = automation.trigger.geofence
+            val transition = geofence?.transition ?: "transition"
+            "When ${transition.lowercase()} ${geofence?.placeName ?: "place"}"
+        }
+        AutomationTriggerTypes.Schedule -> {
+            val schedule = automation.trigger.schedule
+            if (schedule?.mode == "interval") "Every ${schedule.intervalMinutes} minutes" else "Daily at ${schedule?.localTime ?: "09:00"}"
+        }
+        else -> "Manual automation"
+    }
+
+@Composable
 private fun AuraAvatarFace(
     modifier: Modifier = Modifier,
     sizeMultiplier: Float = 1f
@@ -4456,6 +4710,7 @@ private fun SettingsScreen(
     onConfigureModels: () -> Unit,
     onConfigureTasks: () -> Unit,
     onConfigureMemories: () -> Unit,
+    onConfigureAutomations: () -> Unit,
     onQuitApp: () -> Unit,
     onSetAppMode: (String) -> Unit
 ) {
@@ -4528,6 +4783,12 @@ private fun SettingsScreen(
                 subtitle = "Stored assistant memory items.",
                 icon = Icons.Rounded.Layers,
                 onClick = onConfigureMemories
+            )
+            SettingsRow(
+                title = "Automations",
+                subtitle = "${state.automations.size} saved rules for schedules, places, and actions.",
+                icon = Icons.Rounded.AutoAwesome,
+                onClick = onConfigureAutomations
             )
 
             Spacer(Modifier.height(8.dp))
@@ -5464,6 +5725,7 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Assistant -> Icons.Rounded.GraphicEq
     Route.Tasks -> Icons.Rounded.CheckCircle
     Route.Memory -> Icons.Rounded.Layers
+    Route.Automations -> Icons.Rounded.AutoAwesome
     Route.Settings -> Icons.Rounded.Settings
     Route.Models -> Icons.Rounded.Settings
     Route.MiniApp -> Icons.Rounded.Store
