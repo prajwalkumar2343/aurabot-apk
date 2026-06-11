@@ -12,10 +12,19 @@ import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.tasks.await
 
-class GeofenceAutomationRegistrar(private val context: Context) {
+interface AutomationGeofenceRegistrar {
+    suspend fun restore(automations: List<AutomationSpec>)
+    suspend fun remove(automationId: String)
+}
+
+class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeofenceRegistrar {
     private val geofencingClient = LocationServices.getGeofencingClient(context)
 
-    suspend fun restore(automations: List<AutomationSpec>) {
+    override suspend fun restore(automations: List<AutomationSpec>) {
+        val automationIds = automations.map { it.id }.filter { it.isNotBlank() }
+        if (automationIds.isNotEmpty()) {
+            runCatching { geofencingClient.removeGeofences(automationIds).await() }
+        }
         val geofences = automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Geofence }
             .mapNotNull { it.toGeofence() }
@@ -28,7 +37,7 @@ class GeofenceAutomationRegistrar(private val context: Context) {
         geofencingClient.addGeofences(request, pendingIntent()).await()
     }
 
-    suspend fun remove(automationId: String) {
+    override suspend fun remove(automationId: String) {
         geofencingClient.removeGeofences(listOf(automationId)).await()
     }
 

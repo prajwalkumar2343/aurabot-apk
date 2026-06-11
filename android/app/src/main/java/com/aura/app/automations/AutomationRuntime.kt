@@ -5,13 +5,13 @@ import kotlinx.coroutines.withContext
 
 class AutomationRuntime(
     private val repository: AutomationRepository,
-    private val geofenceRegistrar: GeofenceAutomationRegistrar,
-    private val scheduleScheduler: ScheduleAutomationScheduler
+    private val geofenceRegistrar: AutomationGeofenceRegistrar,
+    private val scheduleScheduler: AutomationScheduleScheduler
 ) {
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
-        val enabled = repository.listEnabled()
-        geofenceRegistrar.restore(enabled)
-        scheduleScheduler.restore(enabled)
+        val automations = repository.list()
+        geofenceRegistrar.restore(automations)
+        scheduleScheduler.restore(automations)
     }
 
     suspend fun upsertAndRestore(spec: AutomationSpec): AutomationSpec = withContext(Dispatchers.IO) {

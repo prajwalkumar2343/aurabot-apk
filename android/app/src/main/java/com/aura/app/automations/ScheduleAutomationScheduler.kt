@@ -9,10 +9,19 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-class ScheduleAutomationScheduler(private val context: Context) {
+interface AutomationScheduleScheduler {
+    fun restore(automations: List<AutomationSpec>)
+    fun cancel(automationId: String)
+}
+
+class ScheduleAutomationScheduler(private val context: Context) : AutomationScheduleScheduler {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
-    fun restore(automations: List<AutomationSpec>) {
+    override fun restore(automations: List<AutomationSpec>) {
+        automations
+            .map { it.id }
+            .filter { it.isNotBlank() }
+            .forEach { cancel(it) }
         automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Schedule }
             .forEach { schedule(it) }
@@ -33,7 +42,7 @@ class ScheduleAutomationScheduler(private val context: Context) {
         }
     }
 
-    fun cancel(automationId: String) {
+    override fun cancel(automationId: String) {
         alarmManager.cancel(pendingIntent(automationId))
     }
 

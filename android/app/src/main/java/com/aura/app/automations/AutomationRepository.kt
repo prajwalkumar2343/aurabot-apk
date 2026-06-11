@@ -87,5 +87,14 @@ class AutomationRepository(
     )
 
     private fun AutomationEntity.spec(): AutomationSpec? =
-        runCatching { gson.fromJson(specJson, AutomationSpec::class.java) }.getOrNull()
+        runCatching { gson.fromJson(specJson, AutomationSpec::class.java) }
+            .getOrNull()
+            ?.copy(
+                id = id,
+                name = name,
+                description = description,
+                enabled = enabled,
+                createdAt = createdAt,
+                updatedAt = updatedAt
+            )
 }
