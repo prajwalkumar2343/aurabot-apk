@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.content.ContextCompat
 import com.aura.app.AuraApplication
 import com.aura.app.session.SessionStore
@@ -27,6 +28,7 @@ class BootReceiver : BroadcastReceiver() {
         }
         BootRestoreCoordinator.handle(
             shouldRestoreListening = shouldRestoreListening,
+            canStartListeningFromBoot = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
             startListening = { AuraListeningService.start(context.applicationContext) },
             restoreAutomations = {
                 CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -43,10 +45,11 @@ class BootReceiver : BroadcastReceiver() {
 internal object BootRestoreCoordinator {
     fun handle(
         shouldRestoreListening: Boolean,
+        canStartListeningFromBoot: Boolean,
         startListening: () -> Unit,
         restoreAutomations: () -> Unit
     ) {
-        if (shouldRestoreListening) {
+        if (shouldRestoreListening && canStartListeningFromBoot) {
             startListening()
         }
         restoreAutomations()
