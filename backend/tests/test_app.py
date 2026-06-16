@@ -551,7 +551,7 @@ def test_39_auth_me_cookie_precedence(client, test_user_token):
 def test_40_jwt_signature_failure(client):
     """40. Tampered JWT signature payloads are securely blocked."""
     payload = {"sub": "uid", "email": "a@a.com", "type": "access"}
-    fake_token = jwt.encode(payload, "wrong_secret_key_123", algorithm="HS256")
+    fake_token = jwt.encode(payload, "wrong_secret_key_123_with_enough_length", algorithm="HS256")
     response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {fake_token}"})
     assert response.status_code == 401
     assert "invalid token" in response.json()["detail"].lower()
@@ -646,7 +646,7 @@ def test_50_auth_refresh_wrong_token_type(client):
 def test_51_auth_refresh_tampered_token(client):
     """51. Rejects tampered refresh tokens with bad signatures."""
     payload = {"sub": "uid", "type": "refresh"}
-    bad_refresh = jwt.encode(payload, "malicious_secret_xyz", algorithm="HS256")
+    bad_refresh = jwt.encode(payload, "malicious_secret_xyz_with_enough_length", algorithm="HS256")
     client.cookies.set("refresh_token", bad_refresh)
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
