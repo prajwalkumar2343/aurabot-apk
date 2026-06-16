@@ -2,6 +2,7 @@ package com.aura.app.automations
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneId
@@ -127,6 +128,180 @@ class AutomationEngineTest {
         )
     }
 
+    @Test
+    fun validatorRejectsInvalidDailyScheduleTimesAndDays() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "daily", localTime = "99:99")
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "daily", localTime = "09:00", daysOfWeek = listOf(0, 8))
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun manualTriggerDoesNotMatchDifferentEventTypeByIdOnly() {
+        val matcher = AutomationTriggerMatcher()
+        val spec = manualSpec()
+
+        assertEquals(
+            false,
+            matcher.matches(
+                spec,
+                AutomationEvent(type = AutomationEvents.ScheduleTick, automationId = spec.id)
+            )
+        )
+        assertEquals(
+            true,
+            matcher.matches(
+                spec,
+                AutomationEvent(type = AutomationEvents.Manual, automationId = spec.id)
+            )
+        )
+    }
+
+    @Test
+    fun flowAutomationRunsStepsInOrderAndRecordsDurableRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "check-context",
+                            type = AutomationFlowStepTypes.Condition,
+                            condition = AutomationCondition(key = "ready", operator = AutomationOperators.Equals, value = "true")
+                        ),
+                        AutomationFlowStep(
+                            id = "notify-user",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Done")
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id, mapOf("ready" to "true"))
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(listOf("check-context", "notify-user"), result.stepResults.map { it.stepId })
+        assertEquals(1, executor.events.size)
+        val runId = result.runId ?: error("runId missing")
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(2, repository.stepRuns(runId).size)
+    }
+
+    @Test
+    fun flowAutomationPausesAndResumesAfterCheckpoint() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "confirm",
+                            type = AutomationFlowStepTypes.Checkpoint,
+                            metadata = mapOf("message" to "Waiting for confirmation")
+                        ),
+                        AutomationFlowStep(
+                            id = "send",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Confirmed")
+                        )
+                    )
+                )
+            )
+        )
+
+        val waiting = engine.runNow(saved.id)
+        val resumed = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Waiting, waiting.status)
+        assertEquals(AutomationRunStatus.Success, resumed.status)
+        assertEquals(listOf("send"), resumed.stepResults.map { it.stepId })
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun waitStepSchedulesContinuationBeforeResume() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val scheduler = RecordingEngineFlowContinuationScheduler()
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            flowContinuationScheduler = scheduler,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+
+        val waiting = engine.runNow(saved.id)
+        val resumed = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Waiting, waiting.status)
+        assertEquals(mapOf(waiting.runId to 5_000L), scheduler.scheduled)
+        assertEquals(AutomationRunStatus.Success, resumed.status)
+        assertTrue(waiting.runId in scheduler.cancelled)
+    }
+
+    @Test
+    fun flowAutomationRetriesFailedAction() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = FlakyActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "flaky",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Try"),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(2, result.stepResults.first().attempts)
+        assertEquals(2, executor.calls)
+    }
+
     private fun leaveWorkSpec() = AutomationSpec(
         id = "leave-work",
         name = "Leave work ETA",
@@ -155,6 +330,23 @@ class AutomationEngineTest {
             )
         )
     )
+
+    private fun scheduleSpec() = AutomationSpec(
+        id = "daily-check",
+        name = "Daily check",
+        trigger = AutomationTrigger(
+            type = AutomationTriggerTypes.Schedule,
+            schedule = ScheduleTrigger(mode = "daily", localTime = "09:00")
+        ),
+        actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Check in"))
+    )
+
+    private fun manualSpec() = AutomationSpec(
+        id = "manual-check",
+        name = "Manual check",
+        trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
+        actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Check in"))
+    )
 }
 
 private class RecordingActionExecutor : AutomationActionExecutor {
@@ -166,9 +358,35 @@ private class RecordingActionExecutor : AutomationActionExecutor {
     }
 }
 
+private class FlakyActionExecutor : AutomationActionExecutor {
+    var calls = 0
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        calls += 1
+        return if (calls == 1) {
+            AutomationActionResult(action.type, AutomationRunStatus.Failed, "try again")
+        } else {
+            AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+        }
+    }
+}
+
 private class FixedEtaProvider : EtaProvider {
     override suspend fun estimate(request: EtaRequest): EtaEstimate =
         EtaEstimate(minutes = 17, distanceKm = 8.2, provider = "fake_routes", confidence = "routed")
+}
+
+private class RecordingEngineFlowContinuationScheduler : AutomationFlowContinuationScheduler {
+    val scheduled = linkedMapOf<String?, Long>()
+    val cancelled = linkedSetOf<String?>()
+
+    override fun schedule(runId: String, delayMillis: Long) {
+        scheduled[runId] = delayMillis
+    }
+
+    override fun cancel(runId: String) {
+        cancelled += runId
+    }
 }
 
 private class FakeAutomationDao : AutomationDao {
@@ -205,4 +423,36 @@ private class FakeAutomationDao : AutomationDao {
 
     override suspend fun runLogs(automationId: String, limit: Int): List<AutomationRunLogEntity> =
         logs.filter { it.automationId == automationId }.sortedByDescending { it.createdAt }.take(limit)
+
+    private val runs = linkedMapOf<String, AutomationRunEntity>()
+    private val stepRuns = mutableListOf<AutomationStepRunEntity>()
+
+    override suspend fun upsertRun(entity: AutomationRunEntity) {
+        runs[entity.id] = entity
+    }
+
+    override suspend fun run(id: String): AutomationRunEntity? = runs[id]
+
+    override suspend fun activeRun(automationId: String): AutomationRunEntity? =
+        runs.values
+            .filter {
+                it.automationId == automationId &&
+                    it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting)
+            }
+            .maxByOrNull { it.updatedAt }
+
+    override suspend fun activeRuns(): List<AutomationRunEntity> =
+        runs.values
+            .filter { it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting) }
+            .sortedByDescending { it.updatedAt }
+
+    override suspend fun runs(automationId: String, limit: Int): List<AutomationRunEntity> =
+        runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
+
+    override suspend fun insertStepRun(entity: AutomationStepRunEntity) {
+        stepRuns += entity
+    }
+
+    override suspend fun stepRuns(runId: String): List<AutomationStepRunEntity> =
+        stepRuns.filter { it.runId == runId }.sortedWith(compareBy<AutomationStepRunEntity> { it.stepIndex }.thenBy { it.attempt })
 }

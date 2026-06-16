@@ -1,6 +1,7 @@
 package com.aura.app.automations
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -20,6 +21,7 @@ interface AutomationGeofenceRegistrar {
 class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeofenceRegistrar {
     private val geofencingClient = LocationServices.getGeofencingClient(context)
 
+    @SuppressLint("MissingPermission")
     override suspend fun restore(automations: List<AutomationSpec>) {
         val automationIds = automations.map { it.id }.filter { it.isNotBlank() }
         if (automationIds.isNotEmpty()) {
@@ -34,7 +36,9 @@ class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeof
             .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_EXIT)
             .addGeofences(geofences)
             .build()
-        geofencingClient.addGeofences(request, pendingIntent()).await()
+        runCatching {
+            geofencingClient.addGeofences(request, pendingIntent()).await()
+        }
     }
 
     override suspend fun remove(automationId: String) {

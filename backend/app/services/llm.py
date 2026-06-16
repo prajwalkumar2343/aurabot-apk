@@ -63,6 +63,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
         "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. "
+        "For multi-step automations, prefer automation_spec.flow.steps with clear step ids and names. Use action steps for device actions, condition steps for event/context checks, checkpoint steps when the flow should pause for a later resume/confirmation, and wait steps only when a real delay is required. Keep the legacy actions array as a simple summary/fallback when possible. "
         "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
         "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
@@ -73,7 +74,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"flow":{"concurrencyPolicy":"skip_if_running","steps":[{"id":"send-eta","name":"Draft ETA","type":"action","action":{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}},"retryPolicy":{"maxAttempts":1,"backoffMillis":0},"continueOnFailure":false,"metadata":{}}]},"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
@@ -165,6 +166,69 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                     },
                                     "required": ["type", "requireConfirmation"],
                                 },
+                            },
+                            "flow": {
+                                "type": "object",
+                                "description": "Optional durable multi-step flow. Use this for ordered or resumable automations; legacy actions remain a simple fallback.",
+                                "properties": {
+                                    "concurrencyPolicy": {
+                                        "type": "string",
+                                        "enum": ["skip_if_running", "allow_parallel"],
+                                        "description": "Use skip_if_running unless the user clearly wants overlapping runs.",
+                                    },
+                                    "steps": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string", "description": "Stable kebab-case step id, such as check-context or send-message."},
+                                                "name": {"type": "string"},
+                                                "type": {"type": "string", "enum": ["action", "condition", "wait", "checkpoint"]},
+                                                "action": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms"]},
+                                                        "title": {"type": "string"},
+                                                        "messageTemplate": {"type": "string"},
+                                                        "recipientName": {"type": "string"},
+                                                        "recipientAddress": {"type": "string"},
+                                                        "requireConfirmation": {"type": "boolean"},
+                                                        "metadata": {
+                                                            "type": "object",
+                                                            "additionalProperties": {"type": "string"},
+                                                        },
+                                                    },
+                                                    "required": ["type", "requireConfirmation"],
+                                                },
+                                                "condition": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "type": {"type": "string"},
+                                                        "key": {"type": "string"},
+                                                        "operator": {"type": "string", "enum": ["exists", "equals", "not_equals", "contains"]},
+                                                        "value": {"type": "string"},
+                                                    },
+                                                    "required": ["type", "key", "operator"],
+                                                },
+                                                "waitMillis": {"type": "integer"},
+                                                "retryPolicy": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "maxAttempts": {"type": "integer"},
+                                                        "backoffMillis": {"type": "integer"},
+                                                    },
+                                                },
+                                                "continueOnFailure": {"type": "boolean"},
+                                                "metadata": {
+                                                    "type": "object",
+                                                    "additionalProperties": {"type": "string"},
+                                                },
+                                            },
+                                            "required": ["id", "type"],
+                                        },
+                                    },
+                                },
+                                "required": ["steps"],
                             },
                             "cooldownMillis": {"type": "integer"},
                             "createdBy": {"type": "string"},
@@ -471,25 +535,28 @@ def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = F
         raise HTTPException(status_code=400, detail="Gemini API Key is required")
     model = normalize_model_id("gemini", data.model)
     try:
-        payload = {
+        parts: list[dict[str, Any]] = [
+            {
+                "text": data.message if use_assistant_tools else f"{system_message}\n\nUser request:\n{data.message}"
+            }
+        ]
+        payload: dict[str, Any] = {
             "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {
-                            "text": data.message if use_assistant_tools else f"{system_message}\n\nUser request:\n{data.message}"
-                        }
-                    ],
+                    "parts": parts,
                 }
             ],
         }
-        if getattr(data, "image_base64", None) and getattr(data, "image_mime_type", None):
-            b64 = data.image_base64.strip()
+        image_base64 = data.image_base64
+        image_mime_type = data.image_mime_type
+        if image_base64 and image_mime_type:
+            b64 = image_base64.strip()
             if "," in b64:
                 b64 = b64.split(",", 1)[1]
-            payload["contents"][0]["parts"].append({
+            parts.append({
                 "inlineData": {
-                    "mimeType": data.image_mime_type,
+                    "mimeType": image_mime_type,
                     "data": b64
                 }
             })

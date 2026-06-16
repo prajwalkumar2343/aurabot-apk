@@ -63,3 +63,16 @@ def test_create_automation_tool_schema_is_available():
     assert "create_automation" in names
     create_automation = next(tool for tool in tools if tool["name"] == "create_automation")
     assert create_automation["parameters"]["required"] == ["automation_spec"]
+
+
+def test_create_automation_tool_schema_supports_flow_steps():
+    tools = assistant_tool_definitions()
+    create_automation = next(tool for tool in tools if tool["name"] == "create_automation")
+
+    spec = create_automation["parameters"]["properties"]["automation_spec"]
+    flow = spec["properties"]["flow"]
+    step = flow["properties"]["steps"]["items"]
+
+    assert flow["properties"]["concurrencyPolicy"]["enum"] == ["skip_if_running", "allow_parallel"]
+    assert step["properties"]["type"]["enum"] == ["action", "condition", "wait", "checkpoint"]
+    assert "retryPolicy" in step["properties"]

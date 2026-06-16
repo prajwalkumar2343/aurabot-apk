@@ -1,23 +1,24 @@
 package com.aura.app.automations
 
+import java.time.LocalTime
+
 object AutomationValidator {
     fun validate(spec: AutomationSpec): AutomationSpec {
         require(spec.name.isNotBlank()) { "Automation name is required" }
-        require(spec.actions.isNotEmpty()) { "Automation needs at least one action" }
+        val normalizedFlow = normalizeFlow(spec.flow)
+        require(spec.actions.isNotEmpty() || normalizedFlow?.steps?.isNotEmpty() == true) {
+            "Automation needs at least one action or flow step"
+        }
         validateTrigger(spec.trigger)
         spec.conditions.forEach { validateCondition(it) }
         spec.actions.forEach { validateAction(it) }
+        normalizedFlow?.let { validateFlow(it) }
         require(spec.cooldownMillis >= 0L) { "Cooldown cannot be negative" }
         return spec.copy(
             name = spec.name.trim(),
             description = spec.description.trim(),
-            actions = spec.actions.map { action ->
-                if (action.type == AutomationActionTypes.EtaMessage || action.type == AutomationActionTypes.DraftMessage) {
-                    action.copy(requireConfirmation = true)
-                } else {
-                    action
-                }
-            }
+            actions = spec.actions.map { normalizeAction(it) },
+            flow = normalizedFlow
         )
     }
 
@@ -37,9 +38,11 @@ object AutomationValidator {
                 val schedule = requireNotNull(trigger.schedule) { "Schedule trigger config is required" }
                 require(schedule.mode in setOf("daily", "interval")) { "Schedule mode must be daily or interval" }
                 if (schedule.mode == "daily") {
-                    require(schedule.localTime?.matches(Regex("\\d{2}:\\d{2}")) == true) {
-                        "Daily schedule needs HH:mm localTime"
+                    val localTime = schedule.localTime?.trim().orEmpty()
+                    require(localTime.matches(Regex("\\d{2}:\\d{2}")) && runCatching { LocalTime.parse(localTime) }.isSuccess) {
+                        "Daily schedule needs a valid HH:mm localTime"
                     }
+                    require(schedule.daysOfWeek.all { it in 1..7 }) { "Schedule daysOfWeek values must be 1 through 7" }
                 }
                 if (schedule.mode == "interval") {
                     require((schedule.intervalMinutes ?: 0) > 0) { "Interval schedule needs positive intervalMinutes" }
@@ -61,6 +64,61 @@ object AutomationValidator {
             )
         ) { "Unsupported condition operator: ${condition.operator}" }
     }
+
+    private fun validateFlow(flow: AutomationFlow) {
+        require(flow.concurrencyPolicy in setOf(AutomationConcurrencyPolicies.SkipIfRunning, AutomationConcurrencyPolicies.AllowParallel)) {
+            "Unsupported flow concurrency policy: ${flow.concurrencyPolicy}"
+        }
+        val ids = mutableSetOf<String>()
+        flow.steps.forEach { step ->
+            require(step.id.isNotBlank()) { "Flow step id is required" }
+            require(ids.add(step.id)) { "Flow step ids must be unique" }
+            require(
+                step.type in setOf(
+                    AutomationFlowStepTypes.Action,
+                    AutomationFlowStepTypes.Condition,
+                    AutomationFlowStepTypes.Wait,
+                    AutomationFlowStepTypes.Checkpoint
+                )
+            ) { "Unsupported flow step type: ${step.type}" }
+            require(step.retryPolicy.maxAttempts >= 1) { "Flow step maxAttempts must be at least 1" }
+            require(step.retryPolicy.backoffMillis >= 0L) { "Flow step backoff cannot be negative" }
+            require(step.waitMillis >= 0L) { "Flow step waitMillis cannot be negative" }
+            when (step.type) {
+                AutomationFlowStepTypes.Action -> validateAction(
+                    requireNotNull(step.action) { "Action flow steps need an action" }
+                )
+                AutomationFlowStepTypes.Condition -> validateCondition(
+                    requireNotNull(step.condition) { "Condition flow steps need a condition" }
+                )
+                AutomationFlowStepTypes.Wait -> require(step.waitMillis > 0L) {
+                    "Wait flow steps need positive waitMillis"
+                }
+                AutomationFlowStepTypes.Checkpoint -> Unit
+            }
+        }
+    }
+
+    private fun normalizeFlow(flow: AutomationFlow?): AutomationFlow? {
+        val steps = flow?.steps.orEmpty()
+        if (steps.isEmpty()) return null
+        return flow?.copy(
+            steps = steps.mapIndexed { index, step ->
+                step.copy(
+                    id = step.id.ifBlank { "step-${index + 1}" }.trim(),
+                    name = step.name.trim(),
+                    action = step.action?.let { normalizeAction(it) }
+                )
+            }
+        )
+    }
+
+    private fun normalizeAction(action: AutomationAction): AutomationAction =
+        if (action.type == AutomationActionTypes.EtaMessage || action.type == AutomationActionTypes.DraftMessage) {
+            action.copy(requireConfirmation = true)
+        } else {
+            action
+        }
 
     private fun validateAction(action: AutomationAction) {
         require(

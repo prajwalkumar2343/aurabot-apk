@@ -1,6 +1,7 @@
 package com.aura.app.automations
 
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +48,38 @@ class AutomationRuntimeTest {
         assertFalse(schedule.id in schedules.activeIds)
     }
 
+    @Test
+    fun restoreTriggersRearmsWaitingFlowContinuations() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations)
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = repository.createRun(
+            automationId = saved.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Waiting,
+            message = "waiting"
+        )
+        repository.recordStep(
+            runId = run.id,
+            automationId = saved.id,
+            step = waitStep,
+            stepIndex = 0,
+            status = AutomationRunStatus.Waiting,
+            attempt = 1,
+            message = "waiting"
+        )
+
+        runtime.restoreTriggers()
+
+        assertEquals(5_000L, continuations.scheduled[run.id])
+    }
+
     private fun geofenceSpec() = AutomationSpec(
         id = "leave-work",
         name = "Leave work",
@@ -65,6 +98,23 @@ class AutomationRuntimeTest {
             schedule = ScheduleTrigger(mode = "daily", localTime = "09:00")
         ),
         actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Check in"))
+    )
+
+    private fun waitFlowSpec() = AutomationSpec(
+        id = "wait-flow",
+        name = "Wait flow",
+        trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
+        actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Fallback")),
+        flow = AutomationFlow(
+            steps = listOf(
+                AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L),
+                AutomationFlowStep(
+                    id = "notify",
+                    type = AutomationFlowStepTypes.Action,
+                    action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Done")
+                )
+            )
+        )
     )
 }
 
@@ -110,6 +160,19 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
     }
 }
 
+private class RecordingRuntimeFlowContinuationScheduler : AutomationFlowContinuationScheduler {
+    val scheduled = linkedMapOf<String, Long>()
+    val cancelled = linkedSetOf<String>()
+
+    override fun schedule(runId: String, delayMillis: Long) {
+        scheduled[runId] = delayMillis
+    }
+
+    override fun cancel(runId: String) {
+        cancelled += runId
+    }
+}
+
 private class RuntimeFakeAutomationDao : AutomationDao {
     private val automations = linkedMapOf<String, AutomationEntity>()
     private val logs = mutableListOf<AutomationRunLogEntity>()
@@ -144,4 +207,36 @@ private class RuntimeFakeAutomationDao : AutomationDao {
 
     override suspend fun runLogs(automationId: String, limit: Int): List<AutomationRunLogEntity> =
         logs.filter { it.automationId == automationId }.sortedByDescending { it.createdAt }.take(limit)
+
+    private val runs = linkedMapOf<String, AutomationRunEntity>()
+    private val stepRuns = mutableListOf<AutomationStepRunEntity>()
+
+    override suspend fun upsertRun(entity: AutomationRunEntity) {
+        runs[entity.id] = entity
+    }
+
+    override suspend fun run(id: String): AutomationRunEntity? = runs[id]
+
+    override suspend fun activeRun(automationId: String): AutomationRunEntity? =
+        runs.values
+            .filter {
+                it.automationId == automationId &&
+                    it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting)
+            }
+            .maxByOrNull { it.updatedAt }
+
+    override suspend fun activeRuns(): List<AutomationRunEntity> =
+        runs.values
+            .filter { it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting) }
+            .sortedByDescending { it.updatedAt }
+
+    override suspend fun runs(automationId: String, limit: Int): List<AutomationRunEntity> =
+        runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
+
+    override suspend fun insertStepRun(entity: AutomationStepRunEntity) {
+        stepRuns += entity
+    }
+
+    override suspend fun stepRuns(runId: String): List<AutomationStepRunEntity> =
+        stepRuns.filter { it.runId == runId }.sortedWith(compareBy<AutomationStepRunEntity> { it.stepIndex }.thenBy { it.attempt })
 }
