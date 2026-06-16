@@ -19,6 +19,8 @@ class DatabaseManager:
         if self.client:
             logger.info("Closing MongoDB connection...")
             self.client.close()
+            self.client = None
+            self.db = None
             logger.info("MongoDB connection closed.")
 
 db_manager = DatabaseManager()

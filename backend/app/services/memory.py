@@ -171,14 +171,22 @@ class MemoryService:
                 logger.warning("Supermemory search failed: %s %s", response.status_code, response.text[:200])
                 return []
             payload = response.json()
+            if not isinstance(payload, dict):
+                logger.warning("Supermemory search returned non-object payload")
+                return []
+            results = payload.get("results")
+            if not isinstance(results, list):
+                logger.warning("Supermemory search returned invalid results payload")
+                return []
             output: list[MemorySearchOut] = []
-            for item in payload.get("results") or []:
+            for item in results:
                 if not isinstance(item, dict):
                     continue
                 text = item.get("memory") or item.get("chunk") or ""
                 if not text:
                     continue
-                metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                raw_metadata = item.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 output.append(
                     MemorySearchOut(
                         memory_id=str(metadata.get("aura_memory_id") or item.get("id") or ""),

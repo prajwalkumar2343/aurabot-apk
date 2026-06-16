@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 from app.services import memory
+from app.services.memory import MemoryService
 
 
 def test_supermemory_post_runs_in_worker_thread(monkeypatch):
@@ -15,3 +16,18 @@ def test_supermemory_post_runs_in_worker_thread(monkeypatch):
     assert result == "ok"
     to_thread.assert_awaited_once()
     assert to_thread.call_args.args[0] is memory.requests.post
+
+
+def test_supermemory_search_rejects_malformed_payload(monkeypatch):
+    class Response:
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return {"results": None}
+
+    monkeypatch.setattr(memory, "_post_supermemory", AsyncMock(return_value=Response()))
+
+    result = asyncio.run(MemoryService(db=None)._search_supermemory("user-1", "query", 5))
+
+    assert result == []
