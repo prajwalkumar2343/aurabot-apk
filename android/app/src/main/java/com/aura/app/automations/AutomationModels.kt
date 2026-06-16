@@ -167,6 +167,27 @@ object AutomationActionTypes {
     const val DraftMessage = "draft_message"
     const val EtaMessage = "eta_message"
     const val DirectSms = "direct_sms"
+    const val OpenApp = "open_app"
+    const val TapText = "tap_text"
+    const val TapBounds = "tap_bounds"
+    const val TypeText = "type_text"
+    const val WaitForText = "wait_for_text"
+    const val PressBack = "press_back"
+    const val PressHome = "press_home"
+}
+
+object AutomationActionMetadata {
+    const val PackageName = "packageName"
+    const val AppQuery = "appQuery"
+    const val Text = "text"
+    const val TargetText = "targetText"
+    const val ViewId = "viewId"
+    const val PartialMatch = "partialMatch"
+    const val TimeoutMillis = "timeoutMillis"
+    const val BoundsLeft = "boundsLeft"
+    const val BoundsTop = "boundsTop"
+    const val BoundsRight = "boundsRight"
+    const val BoundsBottom = "boundsBottom"
 }
 
 object AutomationFlowStepTypes {

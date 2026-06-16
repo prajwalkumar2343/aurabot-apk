@@ -64,6 +64,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
         "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. "
         "For multi-step automations, prefer automation_spec.flow.steps with clear step ids and names. Use action steps for device actions, condition steps for event/context checks, checkpoint steps when the flow should pause for a later resume/confirmation, and wait steps only when a real delay is required. Keep the legacy actions array as a simple summary/fallback when possible. "
+        "For cross-app automations, use open_app, wait_for_text, tap_text, tap_bounds, type_text, press_back, and press_home steps. Prefer open_app with packageName from the installed apps list, then wait_for_text before tap/type steps. Cross-app UI control requires the user to enable Aura's Accessibility Service, so avoid direct sends, purchases, deletes, or irreversible actions unless the user explicitly asks and the flow includes a checkpoint. "
         "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
         "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
@@ -152,7 +153,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                            "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms"]},
+                                            "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms", "open_app", "tap_text", "tap_bounds", "type_text", "wait_for_text", "press_back", "press_home"]},
                                         "title": {"type": "string"},
                                         "messageTemplate": {"type": "string"},
                                         "recipientName": {"type": "string"},
@@ -160,7 +161,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                         "requireConfirmation": {"type": "boolean"},
                                         "metadata": {
                                             "type": "object",
-                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true.",
+                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true. Cross-app actions use packageName/appQuery, text, targetText, viewId, partialMatch, timeoutMillis, or boundsLeft/boundsTop/boundsRight/boundsBottom.",
                                             "additionalProperties": {"type": "string"},
                                         },
                                     },
@@ -187,7 +188,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                                 "action": {
                                                     "type": "object",
                                                     "properties": {
-                                                        "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms"]},
+                                                        "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms", "open_app", "tap_text", "tap_bounds", "type_text", "wait_for_text", "press_back", "press_home"]},
                                                         "title": {"type": "string"},
                                                         "messageTemplate": {"type": "string"},
                                                         "recipientName": {"type": "string"},
@@ -195,6 +196,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                                         "requireConfirmation": {"type": "boolean"},
                                                         "metadata": {
                                                             "type": "object",
+                                                            "description": "String metadata. Cross-app actions use packageName/appQuery, text, targetText, viewId, partialMatch, timeoutMillis, or boundsLeft/boundsTop/boundsRight/boundsBottom.",
                                                             "additionalProperties": {"type": "string"},
                                                         },
                                                     },

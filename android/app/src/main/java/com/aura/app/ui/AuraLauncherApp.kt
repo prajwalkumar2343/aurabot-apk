@@ -76,6 +76,7 @@ import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
@@ -3908,6 +3909,13 @@ private fun actionIcon(actionType: String): ImageVector =
     when (actionType) {
         AutomationActionTypes.EtaMessage, AutomationActionTypes.DraftMessage, AutomationActionTypes.DirectSms -> Icons.Rounded.Mail
         AutomationActionTypes.Notify -> Icons.Rounded.Refresh
+        AutomationActionTypes.OpenApp -> Icons.Rounded.Apps
+        AutomationActionTypes.TapText,
+        AutomationActionTypes.TapBounds,
+        AutomationActionTypes.TypeText,
+        AutomationActionTypes.WaitForText,
+        AutomationActionTypes.PressBack,
+        AutomationActionTypes.PressHome -> Icons.Rounded.TouchApp
         else -> Icons.Rounded.AutoAwesome
     }
 

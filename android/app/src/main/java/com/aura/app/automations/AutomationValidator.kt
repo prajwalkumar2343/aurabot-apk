@@ -126,7 +126,14 @@ object AutomationValidator {
                 AutomationActionTypes.Notify,
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage,
-                AutomationActionTypes.DirectSms
+                AutomationActionTypes.DirectSms,
+                AutomationActionTypes.OpenApp,
+                AutomationActionTypes.TapText,
+                AutomationActionTypes.TapBounds,
+                AutomationActionTypes.TypeText,
+                AutomationActionTypes.WaitForText,
+                AutomationActionTypes.PressBack,
+                AutomationActionTypes.PressHome
             )
         ) {
             "Unsupported automation action: ${action.type}"
@@ -141,5 +148,34 @@ object AutomationValidator {
         if (action.type == AutomationActionTypes.DirectSms) {
             require(action.recipientAddress?.isNotBlank() == true) { "Direct SMS actions need a recipientAddress" }
         }
+        if (action.type == AutomationActionTypes.OpenApp) {
+            require(
+                action.metadata[AutomationActionMetadata.PackageName]?.isNotBlank() == true ||
+                    action.metadata[AutomationActionMetadata.AppQuery]?.isNotBlank() == true
+            ) { "Open app actions need packageName or appQuery metadata" }
+        }
+        if (action.type == AutomationActionTypes.TapText || action.type == AutomationActionTypes.WaitForText) {
+            require(action.metadata[AutomationActionMetadata.Text]?.isNotBlank() == true) {
+                "${action.type} actions need text metadata"
+            }
+        }
+        if (action.type == AutomationActionTypes.TapBounds) {
+            require(action.bounds() != null) { "Tap bounds actions need numeric boundsLeft, boundsTop, boundsRight, and boundsBottom metadata" }
+        }
+        if (action.type == AutomationActionTypes.TypeText) {
+            require(action.metadata[AutomationActionMetadata.Text]?.isNotBlank() == true) {
+                "Type text actions need text metadata"
+            }
+        }
+    }
+
+    private fun AutomationAction.bounds(): List<Int>? {
+        val values = listOf(
+            metadata[AutomationActionMetadata.BoundsLeft],
+            metadata[AutomationActionMetadata.BoundsTop],
+            metadata[AutomationActionMetadata.BoundsRight],
+            metadata[AutomationActionMetadata.BoundsBottom]
+        ).map { it?.toIntOrNull() }
+        return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
     }
 }

@@ -111,6 +111,64 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun crossAppFlowActionsRequireAccessibilityService() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "tap-login",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(
+                                type = AutomationActionTypes.TapText,
+                                metadata = mapOf(AutomationActionMetadata.Text to "Log in")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val permissions = AutomationPermissionPlanner().requiredPermissions(saved)
+
+        assertTrue(AutomationPermissionPlanner.AccessibilityService in permissions)
+    }
+
+    @Test
+    fun validatorRejectsCrossAppActionsWithoutTargets() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = listOf(AutomationAction(type = AutomationActionTypes.OpenApp))
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = listOf(AutomationAction(type = AutomationActionTypes.TapText))
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = listOf(
+                        AutomationAction(
+                            type = AutomationActionTypes.TapBounds,
+                            metadata = mapOf(
+                                AutomationActionMetadata.BoundsLeft to "0",
+                                AutomationActionMetadata.BoundsTop to "0"
+                            )
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
     fun dailyScheduleHonorsDaysOfWeek() {
         val zone = ZoneId.of("UTC")
         val mondayAfterRunTime = ZonedDateTime.of(2026, 6, 8, 10, 0, 0, 0, zone)

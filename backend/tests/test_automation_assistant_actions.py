@@ -76,3 +76,17 @@ def test_create_automation_tool_schema_supports_flow_steps():
     assert flow["properties"]["concurrencyPolicy"]["enum"] == ["skip_if_running", "allow_parallel"]
     assert step["properties"]["type"]["enum"] == ["action", "condition", "wait", "checkpoint"]
     assert "retryPolicy" in step["properties"]
+
+
+def test_create_automation_tool_schema_supports_cross_app_actions():
+    tools = assistant_tool_definitions()
+    create_automation = next(tool for tool in tools if tool["name"] == "create_automation")
+
+    spec = create_automation["parameters"]["properties"]["automation_spec"]
+    action_types = spec["properties"]["flow"]["properties"]["steps"]["items"]["properties"]["action"]["properties"]["type"]["enum"]
+
+    assert "open_app" in action_types
+    assert "tap_text" in action_types
+    assert "type_text" in action_types
+    assert "wait_for_text" in action_types
+    assert "press_back" in action_types

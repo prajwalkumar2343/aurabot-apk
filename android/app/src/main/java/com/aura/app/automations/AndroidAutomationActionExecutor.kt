@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class AndroidAutomationActionExecutor(
     private val context: Context,
-    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer()
+    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer(),
+    private val crossAppController: CrossAppAutomationController = CrossAppAutomationController(context)
 ) : AutomationActionExecutor {
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
         withContext(Dispatchers.IO) {
@@ -31,6 +32,13 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
                 AutomationActionTypes.DirectSms -> sendDirectSms(action, event)
+                AutomationActionTypes.OpenApp,
+                AutomationActionTypes.TapText,
+                AutomationActionTypes.TapBounds,
+                AutomationActionTypes.TypeText,
+                AutomationActionTypes.WaitForText,
+                AutomationActionTypes.PressBack,
+                AutomationActionTypes.PressHome -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")
             }
         }

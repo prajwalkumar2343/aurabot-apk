@@ -501,8 +501,12 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 val permissionLabels = automations.associate { automation ->
                     automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
-                        permission.substringAfterLast('.').replace('_', ' ').lowercase()
-                            .replaceFirstChar { it.uppercase() }
+                        if (permission == AutomationPermissionPlanner.AccessibilityService) {
+                            "Accessibility service"
+                        } else {
+                            permission.substringAfterLast('.').replace('_', ' ').lowercase()
+                                .replaceFirstChar { it.uppercase() }
+                        }
                     }
                 }
                 localState.update {
