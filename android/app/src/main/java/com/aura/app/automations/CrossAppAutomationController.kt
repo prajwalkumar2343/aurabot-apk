@@ -9,35 +9,48 @@ import kotlinx.coroutines.withContext
 
 class CrossAppAutomationController(
     private val context: Context,
-    private val accessibility: CrossAppAccessibilityBridge = AuraAutomationAccessibilityService
+    private val accessibility: CrossAppAccessibilityBridge = AuraAutomationAccessibilityService,
+    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer()
 ) {
     suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
         withContext(Dispatchers.IO) {
-            when (action.type) {
+            val result = when (action.type) {
                 AutomationActionTypes.OpenApp -> openApp(action, event)
-                AutomationActionTypes.TapText -> withAccessibility(action) {
-                    tapText(renderedText(action, event), partialMatch = action.partialMatch())
+                AutomationActionTypes.TapText -> waitThen(action, event) {
+                    accessibility.tap(action.selector(event, fallbackTextKey = AutomationActionMetadata.Text))
                 }
-                AutomationActionTypes.TapBounds -> {
-                    val bounds = action.bounds()
-                    if (bounds == null) {
-                        AutomationActionResult(action.type, AutomationRunStatus.Failed, "Tap bounds are invalid")
-                    } else {
-                        withAccessibility(action) { tapBounds(bounds.left, bounds.top, bounds.right, bounds.bottom) }
-                    }
+                AutomationActionTypes.TapTarget -> waitThen(action, event) {
+                    accessibility.tap(action.selector(event))
                 }
-                AutomationActionTypes.TypeText -> withAccessibility(action) {
-                    typeText(
-                        text = renderedText(action, event),
-                        targetText = action.metadata[AutomationActionMetadata.TargetText],
-                        viewId = action.metadata[AutomationActionMetadata.ViewId]
+                AutomationActionTypes.LongPressTarget -> waitThen(action, event) {
+                    accessibility.longPress(action.selector(event))
+                }
+                AutomationActionTypes.TapBounds -> tapBounds(action)
+                AutomationActionTypes.TypeText -> waitThen(action, event, selectorRequired = false) {
+                    accessibility.typeText(
+                        text = rendered(action.metadata[AutomationActionMetadata.Text].orEmpty(), event),
+                        selector = action.optionalSelector(event, fallbackTextKey = AutomationActionMetadata.TargetText)
                     )
                 }
-                AutomationActionTypes.WaitForText -> waitForText(action, event)
-                AutomationActionTypes.PressBack -> withAccessibility(action) { pressBack() }
-                AutomationActionTypes.PressHome -> withAccessibility(action) { pressHome() }
+                AutomationActionTypes.ClearText -> waitThen(action, event) {
+                    accessibility.clearText(action.selector(event, fallbackTextKey = AutomationActionMetadata.TargetText))
+                }
+                AutomationActionTypes.WaitForText -> waitThen(action, event) {
+                    accessibility.has(action.selector(event, fallbackTextKey = AutomationActionMetadata.Text))
+                }
+                AutomationActionTypes.Scroll -> waitThen(action, event, selectorRequired = false) {
+                    accessibility.scroll(
+                        selector = action.optionalSelector(event),
+                        direction = action.metadata[AutomationActionMetadata.Direction] ?: "down"
+                    )
+                }
+                AutomationActionTypes.Swipe -> swipe(action)
+                AutomationActionTypes.PressBack -> requireAccessibility(action.type) { accessibility.pressBack() }
+                AutomationActionTypes.PressHome -> requireAccessibility(action.type) { accessibility.pressHome() }
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported cross-app action")
             }
+            settle(action)
+            result
         }
 
     private fun openApp(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
@@ -80,54 +93,152 @@ class CrossAppAutomationController(
             }
     }
 
-    private suspend fun waitForText(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
-        val expected = renderedText(action, event)
-        val timeout = action.metadata[AutomationActionMetadata.TimeoutMillis]?.toLongOrNull()
-            ?.coerceIn(250L, 60_000L)
-            ?: 5_000L
-        if (!accessibility.isEnabled()) {
-            return accessibilityMissing(action.type)
+    private suspend fun waitThen(
+        action: AutomationAction,
+        event: AutomationEvent,
+        selectorRequired: Boolean = true,
+        block: () -> CrossAppUiResult
+    ): AutomationActionResult {
+        if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
+        if (selectorRequired && !action.hasSelector()) {
+            return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Cross-app selector is missing")
         }
+        val timeout = action.timeoutMillis()
         val deadline = System.currentTimeMillis() + timeout
+        var last = CrossAppUiResult(false, "No matching UI target")
         while (System.currentTimeMillis() <= deadline) {
-            if (accessibility.hasText(expected, partialMatch = action.partialMatch())) {
-                return AutomationActionResult(action.type, AutomationRunStatus.Success, "Text appeared")
+            last = block()
+            if (last.success) {
+                return AutomationActionResult(action.type, AutomationRunStatus.Success, last.message)
             }
-            delay(250L)
+            delay(POLL_INTERVAL_MILLIS)
         }
-        return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Timed out waiting for text")
+        val renderedTarget = action.describeTarget(event)
+        return AutomationActionResult(
+            action.type,
+            AutomationRunStatus.Failed,
+            "Timed out after ${timeout}ms waiting for $renderedTarget: ${last.message}"
+        )
     }
 
-    private fun renderedText(action: AutomationAction, event: AutomationEvent): String =
-        AutomationTemplateRenderer().render(action.metadata[AutomationActionMetadata.Text].orEmpty(), event.values)
+    private fun tapBounds(action: AutomationAction): AutomationActionResult {
+        val bounds = action.bounds()
+            ?: return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Tap bounds are invalid")
+        return requireAccessibility(action.type) {
+            if (accessibility.tapBounds(bounds.left, bounds.top, bounds.right, bounds.bottom)) {
+                CrossAppUiResult(true, "Tapped bounds")
+            } else {
+                CrossAppUiResult(false, "Could not tap bounds")
+            }
+        }
+    }
 
-    private fun AutomationAction.partialMatch(): Boolean =
-        metadata[AutomationActionMetadata.PartialMatch]?.toBooleanStrictOrNull() ?: true
+    private fun swipe(action: AutomationAction): AutomationActionResult {
+        val points = action.swipePoints()
+            ?: return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Swipe points are invalid")
+        return requireAccessibility(action.type) {
+            if (accessibility.swipe(points.startX, points.startY, points.endX, points.endY, action.durationMillis())) {
+                CrossAppUiResult(true, "Swiped")
+            } else {
+                CrossAppUiResult(false, "Could not dispatch swipe")
+            }
+        }
+    }
 
-    private inline fun withAccessibility(
-        action: AutomationAction,
-        block: CrossAppAccessibilityBridge.() -> Boolean
+    private fun requireAccessibility(
+        actionType: String,
+        block: () -> CrossAppUiResult
     ): AutomationActionResult {
-        if (!accessibility.isEnabled()) {
-            return accessibilityMissing(action.type)
-        }
-        return if (accessibility.block()) {
-            AutomationActionResult(action.type, AutomationRunStatus.Success, "Cross-app action completed")
-        } else {
-            AutomationActionResult(action.type, AutomationRunStatus.Failed, "Cross-app action could not find its target")
-        }
+        if (!accessibility.isEnabled()) return accessibilityMissing(actionType)
+        val result = block()
+        return AutomationActionResult(
+            actionType,
+            if (result.success) AutomationRunStatus.Success else AutomationRunStatus.Failed,
+            result.message
+        )
+    }
+
+    private suspend fun settle(action: AutomationAction) {
+        val delayMillis = action.metadata[AutomationActionMetadata.SettleMillis]?.toLongOrNull()
+            ?.coerceIn(0L, 10_000L)
+            ?: DEFAULT_SETTLE_MILLIS
+        if (delayMillis > 0L) delay(delayMillis)
+    }
+
+    private fun rendered(value: String, event: AutomationEvent): String =
+        renderer.render(value, event.values)
+
+    private fun AutomationAction.selector(
+        event: AutomationEvent,
+        fallbackTextKey: String? = null
+    ): CrossAppUiSelector {
+        val selectorText = fallbackTextKey
+            ?.let { metadata[it] }
+            ?: metadata[AutomationActionMetadata.Text]
+        return CrossAppUiSelector(
+            text = rendered(selectorText.orEmpty(), event).ifBlank { null },
+            contentDescription = rendered(metadata[AutomationActionMetadata.ContentDescription].orEmpty(), event).ifBlank { null },
+            viewId = metadata[AutomationActionMetadata.ViewId]?.ifBlank { null },
+            className = metadata[AutomationActionMetadata.ClassName]?.ifBlank { null },
+            packageName = metadata[AutomationActionMetadata.PackageName]?.ifBlank { null },
+            partialMatch = metadata[AutomationActionMetadata.PartialMatch]?.toBooleanStrictOrNull() ?: true,
+            clickableOnly = metadata[AutomationActionMetadata.ClickableOnly]?.toBooleanStrictOrNull() ?: false,
+            editableOnly = metadata[AutomationActionMetadata.EditableOnly]?.toBooleanStrictOrNull() ?: false,
+            enabledOnly = metadata[AutomationActionMetadata.EnabledOnly]?.toBooleanStrictOrNull() ?: true,
+            occurrence = metadata[AutomationActionMetadata.Occurrence]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        )
+    }
+
+    private fun AutomationAction.optionalSelector(
+        event: AutomationEvent,
+        fallbackTextKey: String? = null
+    ): CrossAppUiSelector? =
+        takeIf { it.hasSelector(fallbackTextKey) }?.selector(event, fallbackTextKey)
+
+    private fun AutomationAction.hasSelector(fallbackTextKey: String? = null): Boolean =
+        listOfNotNull(
+            fallbackTextKey ?: AutomationActionMetadata.Text,
+            AutomationActionMetadata.ContentDescription,
+            AutomationActionMetadata.ViewId,
+            AutomationActionMetadata.ClassName
+        ).any { key -> metadata[key]?.isNotBlank() == true }
+
+    private fun AutomationAction.timeoutMillis(): Long =
+        metadata[AutomationActionMetadata.TimeoutMillis]?.toLongOrNull()?.coerceIn(250L, 120_000L)
+            ?: DEFAULT_TIMEOUT_MILLIS
+
+    private fun AutomationAction.durationMillis(): Long =
+        metadata[AutomationActionMetadata.DurationMillis]?.toLongOrNull()?.coerceIn(50L, 2_000L)
+            ?: DEFAULT_GESTURE_MILLIS
+
+    private fun AutomationAction.describeTarget(event: AutomationEvent): String {
+        val target = listOf(
+            AutomationActionMetadata.Text,
+            AutomationActionMetadata.TargetText,
+            AutomationActionMetadata.ContentDescription,
+            AutomationActionMetadata.ViewId,
+            AutomationActionMetadata.ClassName
+        ).firstNotNullOfOrNull { key -> metadata[key]?.takeIf { it.isNotBlank() } }
+            ?.let { rendered(it, event) }
+        return target ?: "target"
     }
 
     private fun accessibilityMissing(actionType: String): AutomationActionResult =
         AutomationActionResult(actionType, AutomationRunStatus.Failed, "Aura Accessibility Service is not enabled")
 
     companion object {
+        private const val POLL_INTERVAL_MILLIS = 250L
+        private const val DEFAULT_TIMEOUT_MILLIS = 5_000L
+        private const val DEFAULT_SETTLE_MILLIS = 150L
+        private const val DEFAULT_GESTURE_MILLIS = 300L
+
         fun openAccessibilitySettingsIntent(): Intent =
             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 
 private data class TapBounds(val left: Int, val top: Int, val right: Int, val bottom: Int)
+private data class SwipePoints(val startX: Int, val startY: Int, val endX: Int, val endY: Int)
 
 private fun AutomationAction.bounds(): TapBounds? {
     val left = metadata[AutomationActionMetadata.BoundsLeft]?.toIntOrNull() ?: return null
@@ -136,4 +247,12 @@ private fun AutomationAction.bounds(): TapBounds? {
     val bottom = metadata[AutomationActionMetadata.BoundsBottom]?.toIntOrNull() ?: return null
     if (right <= left || bottom <= top) return null
     return TapBounds(left, top, right, bottom)
+}
+
+private fun AutomationAction.swipePoints(): SwipePoints? {
+    val startX = metadata[AutomationActionMetadata.StartX]?.toIntOrNull() ?: return null
+    val startY = metadata[AutomationActionMetadata.StartY]?.toIntOrNull() ?: return null
+    val endX = metadata[AutomationActionMetadata.EndX]?.toIntOrNull() ?: return null
+    val endY = metadata[AutomationActionMetadata.EndY]?.toIntOrNull() ?: return null
+    return SwipePoints(startX, startY, endX, endY)
 }

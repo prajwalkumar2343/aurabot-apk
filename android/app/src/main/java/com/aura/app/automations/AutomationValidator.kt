@@ -132,6 +132,11 @@ object AutomationValidator {
                 AutomationActionTypes.TapBounds,
                 AutomationActionTypes.TypeText,
                 AutomationActionTypes.WaitForText,
+                AutomationActionTypes.TapTarget,
+                AutomationActionTypes.LongPressTarget,
+                AutomationActionTypes.ClearText,
+                AutomationActionTypes.Scroll,
+                AutomationActionTypes.Swipe,
                 AutomationActionTypes.PressBack,
                 AutomationActionTypes.PressHome
             )
@@ -159,6 +164,11 @@ object AutomationValidator {
                 "${action.type} actions need text metadata"
             }
         }
+        if (action.type == AutomationActionTypes.TapTarget || action.type == AutomationActionTypes.LongPressTarget) {
+            require(action.hasSelector()) {
+                "${action.type} actions need at least one selector metadata field: text, contentDescription, viewId, or className"
+            }
+        }
         if (action.type == AutomationActionTypes.TapBounds) {
             require(action.bounds() != null) { "Tap bounds actions need numeric boundsLeft, boundsTop, boundsRight, and boundsBottom metadata" }
         }
@@ -167,7 +177,32 @@ object AutomationValidator {
                 "Type text actions need text metadata"
             }
         }
+        if (action.type == AutomationActionTypes.ClearText) {
+            require(action.hasSelector()) {
+                "Clear text actions need at least one selector metadata field: text, contentDescription, viewId, or className"
+            }
+        }
+        if (action.type == AutomationActionTypes.Scroll) {
+            val direction = action.metadata[AutomationActionMetadata.Direction]?.lowercase().orEmpty()
+            require(direction in setOf("", "up", "down", "left", "right", "forward", "backward")) {
+                "Scroll direction must be up, down, left, right, forward, or backward"
+            }
+        }
+        if (action.type == AutomationActionTypes.Swipe) {
+            require(action.swipePoints() != null) {
+                "Swipe actions need numeric startX, startY, endX, and endY metadata"
+            }
+        }
     }
+
+    private fun AutomationAction.hasSelector(): Boolean =
+        listOf(
+            AutomationActionMetadata.Text,
+            AutomationActionMetadata.TargetText,
+            AutomationActionMetadata.ContentDescription,
+            AutomationActionMetadata.ViewId,
+            AutomationActionMetadata.ClassName
+        ).any { key -> metadata[key]?.isNotBlank() == true }
 
     private fun AutomationAction.bounds(): List<Int>? {
         val values = listOf(
@@ -175,6 +210,16 @@ object AutomationValidator {
             metadata[AutomationActionMetadata.BoundsTop],
             metadata[AutomationActionMetadata.BoundsRight],
             metadata[AutomationActionMetadata.BoundsBottom]
+        ).map { it?.toIntOrNull() }
+        return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
+    }
+
+    private fun AutomationAction.swipePoints(): List<Int>? {
+        val values = listOf(
+            metadata[AutomationActionMetadata.StartX],
+            metadata[AutomationActionMetadata.StartY],
+            metadata[AutomationActionMetadata.EndX],
+            metadata[AutomationActionMetadata.EndY]
         ).map { it?.toIntOrNull() }
         return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
     }

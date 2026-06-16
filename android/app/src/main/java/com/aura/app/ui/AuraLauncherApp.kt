@@ -3914,6 +3914,11 @@ private fun actionIcon(actionType: String): ImageVector =
         AutomationActionTypes.TapBounds,
         AutomationActionTypes.TypeText,
         AutomationActionTypes.WaitForText,
+        AutomationActionTypes.TapTarget,
+        AutomationActionTypes.LongPressTarget,
+        AutomationActionTypes.ClearText,
+        AutomationActionTypes.Scroll,
+        AutomationActionTypes.Swipe,
         AutomationActionTypes.PressBack,
         AutomationActionTypes.PressHome -> Icons.Rounded.TouchApp
         else -> Icons.Rounded.AutoAwesome

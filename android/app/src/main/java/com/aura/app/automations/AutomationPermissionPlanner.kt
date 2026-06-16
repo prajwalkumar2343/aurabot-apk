@@ -38,6 +38,11 @@ class AutomationPermissionPlanner {
             AutomationActionTypes.TapBounds,
             AutomationActionTypes.TypeText,
             AutomationActionTypes.WaitForText,
+            AutomationActionTypes.TapTarget,
+            AutomationActionTypes.LongPressTarget,
+            AutomationActionTypes.ClearText,
+            AutomationActionTypes.Scroll,
+            AutomationActionTypes.Swipe,
             AutomationActionTypes.PressBack,
             AutomationActionTypes.PressHome
         )
