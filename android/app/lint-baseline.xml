@@ -2,90 +2,13 @@
 <issues format="6" by="lint 8.13.2" type="baseline" client="gradle" dependencies="false" name="AGP (8.13.2)" variant="all" version="8.13.2">
 
     <issue
-        id="MissingPermission"
-        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
-        errorLine1="        NotificationManagerCompat.from(context).notify(nextNotificationId(), notification)"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/automations/AndroidAutomationActionExecutor.kt"
-            line="60"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="MissingPermission"
-        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
-        errorLine1="        NotificationManagerCompat.from(context).notify(nextNotificationId(), notification)"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/automations/AndroidAutomationActionExecutor.kt"
-            line="92"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="MissingPermission"
-        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
-        errorLine1="        val audioRecord = AudioRecord("
-        errorLine2="                          ^">
-        <location
-            file="src/main/java/com/aura/app/voice/AuraListeningService.kt"
-            line="156"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="MissingPermission"
-        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
-        errorLine1="        geofencingClient.addGeofences(request, pendingIntent()).await()"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/automations/GeofenceAutomationRegistrar.kt"
-            line="28"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 30 (current min is 29): `android.content.pm.ServiceInfo#FOREGROUND_SERVICE_TYPE_MICROPHONE`"
-        errorLine1="                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE"
-        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/voice/AuraListeningService.kt"
-            line="104"
-            column="17"/>
-    </issue>
-
-    <issue
-        id="NewApi"
-        message="`android:windowLightNavigationBar` requires API level 27 (current min is 26)"
-        errorLine1="    &lt;item name=&quot;android:windowLightNavigationBar&quot;>false&lt;/item>"
-        errorLine2="          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/styles.xml"
-            line="6"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="NewApi"
-        message="`android:windowLayoutInDisplayCutoutMode` requires API level 27 (current min is 26)"
-        errorLine1="    &lt;item name=&quot;android:windowLayoutInDisplayCutoutMode&quot;>shortEdges&lt;/item>"
-        errorLine2="          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/styles.xml"
-            line="9"
-            column="11"/>
-    </issue>
-
-    <issue
         id="UnusedAttribute"
         message="Attribute `enableOnBackInvokedCallback` is only used in API level 33 and higher (current min is 26)"
         errorLine1="    android:enableOnBackInvokedCallback=&quot;true&quot;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="27"
+            line="29"
             column="5"/>
     </issue>
 
@@ -96,7 +19,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/LauncherActivity.kt"
-            line="29"
+            line="30"
             column="9"/>
     </issue>
 
@@ -107,7 +30,7 @@
         errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="40"
+            line="42"
             column="7"/>
     </issue>
 
@@ -118,7 +41,7 @@
         errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="57"
+            line="59"
             column="7"/>
     </issue>
 
@@ -140,7 +63,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="53"
+            line="82"
             column="20"/>
     </issue>
 
@@ -151,7 +74,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="58"
+            line="87"
             column="20"/>
     </issue>
 
@@ -162,7 +85,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="59"
+            line="88"
             column="20"/>
     </issue>
 
@@ -173,30 +96,8 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="62"
+            line="91"
             column="20"/>
-    </issue>
-
-    <issue
-        id="LockedOrientationActivity"
-        message="Expecting `android:screenOrientation=&quot;unspecified&quot;` or `&quot;fullSensor&quot;` for this activity so the user can use the application in any orientation and provide a great experience on Chrome OS devices"
-        errorLine1="      android:screenOrientation=&quot;portrait&quot;>"
-        errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="44"
-            column="7"/>
-    </issue>
-
-    <issue
-        id="LockedOrientationActivity"
-        message="Expecting `android:screenOrientation=&quot;unspecified&quot;` or `&quot;fullSensor&quot;` for this activity so the user can use the application in any orientation and provide a great experience on Chrome OS devices"
-        errorLine1="      android:screenOrientation=&quot;portrait&quot;"
-        errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="59"
-            column="7"/>
     </issue>
 
     <issue
@@ -206,7 +107,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="67"
+            line="96"
             column="20"/>
     </issue>
 
@@ -217,7 +118,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="70"
+            line="99"
             column="20"/>
     </issue>
 
@@ -228,7 +129,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="71"
+            line="100"
             column="20"/>
     </issue>
 
@@ -239,41 +140,8 @@
         errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="77"
+            line="106"
             column="24"/>
-    </issue>
-
-    <issue
-        id="DiscouragedApi"
-        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
-        errorLine1="      android:screenOrientation=&quot;portrait&quot;>"
-        errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="44"
-            column="7"/>
-    </issue>
-
-    <issue
-        id="DiscouragedApi"
-        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
-        errorLine1="      android:screenOrientation=&quot;portrait&quot;"
-        errorLine2="      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="59"
-            column="7"/>
-    </issue>
-
-    <issue
-        id="PermissionImpliesUnsupportedChromeOsHardware"
-        message="Permission exists without corresponding hardware `&lt;uses-feature android:name=&quot;android.hardware.telephony&quot; required=&quot;false&quot;>` tag"
-        errorLine1="  &lt;uses-permission android:name=&quot;android.permission.SEND_SMS&quot; />"
-        errorLine2="   ~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="7"
-            column="4"/>
     </issue>
 
     <issue
@@ -283,7 +151,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="1964"
+            line="2036"
             column="25"/>
     </issue>
 
@@ -305,7 +173,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/automations/AndroidAutomationActionExecutor.kt"
-            line="127"
+            line="142"
             column="13"/>
     </issue>
 
@@ -316,7 +184,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/voice/AuraListeningService.kt"
-            line="322"
+            line="329"
             column="13"/>
     </issue>
 
@@ -327,7 +195,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/voice/AuraListeningService.kt"
-            line="331"
+            line="338"
             column="13"/>
     </issue>
 
@@ -338,7 +206,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/automations/ScheduleAutomationScheduler.kt"
-            line="29"
+            line="38"
             column="13"/>
     </issue>
 
@@ -356,7 +224,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="924"
+            line="989"
             column="20"/>
     </issue>
 
@@ -367,7 +235,7 @@
         errorLine2="                           ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="3885"
+            line="4100"
             column="28"/>
     </issue>
 
@@ -378,7 +246,7 @@
         errorLine2="                                ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5398"
+            line="5618"
             column="33"/>
     </issue>
 
@@ -389,7 +257,7 @@
         errorLine2="                                ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5399"
+            line="5619"
             column="33"/>
     </issue>
 
@@ -624,7 +492,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/automations/AndroidAutomationActionExecutor.kt"
-            line="68"
+            line="72"
             column="20"/>
     </issue>
 
@@ -635,7 +503,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/automations/AndroidAutomationActionExecutor.kt"
-            line="68"
+            line="72"
             column="20"/>
     </issue>
 
@@ -646,7 +514,7 @@
         errorLine2="              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="3102"
+            line="3178"
             column="15"/>
     </issue>
 
@@ -657,7 +525,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5076"
+            line="5296"
             column="25"/>
     </issue>
 
@@ -668,7 +536,7 @@
         errorLine2="                      ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5115"
+            line="5335"
             column="23"/>
     </issue>
 
@@ -679,7 +547,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/aura/app/LauncherActivity.kt"
-            line="126"
+            line="132"
             column="21"/>
     </issue>
 
