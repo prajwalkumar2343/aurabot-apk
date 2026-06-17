@@ -1,5 +1,6 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -173,6 +174,8 @@ class AutomationEngine(
                 message = lastMessage
             )
             if (lastStatus != AutomationRunStatus.Failed || attempt == maxAttempts) break
+            val backoffMillis = step.retryPolicy.backoffMillis.coerceAtLeast(0L)
+            if (backoffMillis > 0L) delay(backoffMillis)
         }
         return AutomationStepResult(
             stepId = step.id,

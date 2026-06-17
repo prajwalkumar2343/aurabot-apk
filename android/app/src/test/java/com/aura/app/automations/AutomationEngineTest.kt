@@ -1,5 +1,6 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -415,6 +416,34 @@ class AutomationEngineTest {
         assertEquals(AutomationRunStatus.Success, result.status)
         assertEquals(2, result.stepResults.first().attempts)
         assertEquals(2, executor.calls)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun flowAutomationAppliesRetryBackoffBetweenFailedAttempts() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = FlakyActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "flaky",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Try"),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2, backoffMillis = 1_500L)
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(2, result.stepResults.first().attempts)
+        assertEquals(1_500L, testScheduler.currentTime)
     }
 
     private fun leaveWorkSpec() = AutomationSpec(
