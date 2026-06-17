@@ -101,6 +101,17 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
             }
         }
 
+        override fun hasPackage(packageName: String): CrossAppUiResult {
+            val service = activeService ?: return missingService()
+            val visiblePackages = service.visiblePackageNames()
+            return if (packageName in visiblePackages) {
+                CrossAppUiResult(true, "Package $packageName is visible")
+            } else {
+                val visible = visiblePackages.take(5).joinToString(", ").ifBlank { "none" }
+                CrossAppUiResult(false, "Package $packageName is not visible; visible packages: $visible")
+            }
+        }
+
         override fun inspect(packageName: String?, maxNodes: Int): CrossAppUiResult {
             val service = activeService ?: return missingService()
             val snapshot = service.inspectNodes(packageName, maxNodes.coerceIn(1, 80))
@@ -165,6 +176,13 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
         val suffix = if (nodes.size > maxNodes) "\n... truncated after $maxNodes nodes" else ""
         return "Visible UI nodes:\n${lines.joinToString("\n")}$suffix"
     }
+
+    private fun visiblePackageNames(): Set<String> =
+        rootNodes()
+            .flatMap { it.depthFirst() }
+            .filter { it.visibleToUser() }
+            .mapNotNull { it.packageName?.toString()?.takeIf { packageName -> packageName.isNotBlank() } }
+            .toSet()
 
     private fun clickNode(node: AccessibilityNodeInfo): Boolean {
         var current: AccessibilityNodeInfo? = node

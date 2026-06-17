@@ -138,6 +138,7 @@ object AutomationValidator {
                 AutomationActionTypes.EtaMessage,
                 AutomationActionTypes.DirectSms,
                 AutomationActionTypes.OpenApp,
+                AutomationActionTypes.WaitForApp,
                 AutomationActionTypes.TapText,
                 AutomationActionTypes.TapBounds,
                 AutomationActionTypes.TypeText,
@@ -170,6 +171,11 @@ object AutomationValidator {
                 action.metadata[AutomationActionMetadata.PackageName]?.isNotBlank() == true ||
                     action.metadata[AutomationActionMetadata.AppQuery]?.isNotBlank() == true
             ) { "Open app actions need packageName or appQuery metadata" }
+        }
+        if (action.type == AutomationActionTypes.WaitForApp) {
+            require(action.metadata[AutomationActionMetadata.PackageName]?.isNotBlank() == true) {
+                "Wait for app actions need packageName metadata"
+            }
         }
         if (action.type == AutomationActionTypes.TapText || action.type == AutomationActionTypes.WaitForText) {
             require(action.metadata[AutomationActionMetadata.Text]?.isNotBlank() == true) {

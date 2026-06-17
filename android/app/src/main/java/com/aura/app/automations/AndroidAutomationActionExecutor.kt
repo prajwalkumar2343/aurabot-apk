@@ -33,6 +33,7 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
                 AutomationActionTypes.DirectSms -> sendDirectSms(action, event)
                 AutomationActionTypes.OpenApp,
+                AutomationActionTypes.WaitForApp,
                 AutomationActionTypes.TapText,
                 AutomationActionTypes.TapBounds,
                 AutomationActionTypes.TypeText,

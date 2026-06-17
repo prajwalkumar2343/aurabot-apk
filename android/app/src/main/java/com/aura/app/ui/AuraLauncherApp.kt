@@ -3910,6 +3910,7 @@ private fun actionIcon(actionType: String): ImageVector =
         AutomationActionTypes.EtaMessage, AutomationActionTypes.DraftMessage, AutomationActionTypes.DirectSms -> Icons.Rounded.Mail
         AutomationActionTypes.Notify -> Icons.Rounded.Refresh
         AutomationActionTypes.OpenApp -> Icons.Rounded.Apps
+        AutomationActionTypes.WaitForApp,
         AutomationActionTypes.TapText,
         AutomationActionTypes.TapBounds,
         AutomationActionTypes.TypeText,

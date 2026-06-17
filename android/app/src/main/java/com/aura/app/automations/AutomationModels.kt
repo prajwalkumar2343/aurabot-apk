@@ -168,6 +168,7 @@ object AutomationActionTypes {
     const val EtaMessage = "eta_message"
     const val DirectSms = "direct_sms"
     const val OpenApp = "open_app"
+    const val WaitForApp = "wait_for_app"
     const val TapText = "tap_text"
     const val TapBounds = "tap_bounds"
     const val TypeText = "type_text"

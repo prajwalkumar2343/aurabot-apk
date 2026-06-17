@@ -86,6 +86,7 @@ def test_create_automation_tool_schema_supports_cross_app_actions():
     action_types = spec["properties"]["flow"]["properties"]["steps"]["items"]["properties"]["action"]["properties"]["type"]["enum"]
 
     assert "open_app" in action_types
+    assert "wait_for_app" in action_types
     assert "tap_text" in action_types
     assert "type_text" in action_types
     assert "wait_for_text" in action_types

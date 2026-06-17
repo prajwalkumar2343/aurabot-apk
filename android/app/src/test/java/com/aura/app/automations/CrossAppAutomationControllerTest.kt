@@ -118,6 +118,43 @@ class CrossAppAutomationControllerTest {
     }
 
     @Test
+    fun waitForAppPollsUntilPackageIsVisible() = runTest {
+        val bridge = RecordingAccessibilityBridge(packageResults = listOf(false, false, true))
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.WaitForApp,
+                metadata = mapOf(
+                    AutomationActionMetadata.PackageName to "com.example",
+                    AutomationActionMetadata.TimeoutMillis to "1000"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(listOf("com.example", "com.example", "com.example"), bridge.packageChecks)
+    }
+
+    @Test
+    fun waitForAppRequiresAccessibilityService() = runTest {
+        val bridge = RecordingAccessibilityBridge(enabled = false)
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.WaitForApp,
+                metadata = mapOf(AutomationActionMetadata.PackageName to "com.example")
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertTrue(result.message.contains("Accessibility Service"))
+    }
+
+    @Test
     fun scrollUntilTargetScrollsUntilSelectorAppears() = runTest {
         val bridge = RecordingAccessibilityBridge(hasResults = listOf(false, false, true))
         val controller = CrossAppAutomationController(testContext(), bridge)
@@ -193,16 +230,19 @@ private fun testContext() = ContextWrapper(null)
 private class RecordingAccessibilityBridge(
     private val enabled: Boolean = true,
     hasResults: List<Boolean> = listOf(true),
-    tapResults: List<Boolean> = listOf(true)
+    tapResults: List<Boolean> = listOf(true),
+    packageResults: List<Boolean> = listOf(true)
 ) : CrossAppAccessibilityBridge {
     private val hasQueue = hasResults.toMutableList()
     private val tapQueue = tapResults.toMutableList()
+    private val packageQueue = packageResults.toMutableList()
     val tappedSelectors = mutableListOf<CrossAppUiSelector>()
     val typedText = mutableListOf<String>()
     val typedSelectors = mutableListOf<CrossAppUiSelector?>()
     val hasSelectors = mutableListOf<CrossAppUiSelector>()
     val inspectCalls = mutableListOf<Pair<String?, Int>>()
     val scrollDirections = mutableListOf<String>()
+    val packageChecks = mutableListOf<String>()
 
     override fun isEnabled(): Boolean = enabled
 
@@ -237,6 +277,12 @@ private class RecordingAccessibilityBridge(
         hasSelectors += selector
         val success = if (hasQueue.isNotEmpty()) hasQueue.removeAt(0) else true
         return CrossAppUiResult(success, if (success) "found" else "missing")
+    }
+
+    override fun hasPackage(packageName: String): CrossAppUiResult {
+        packageChecks += packageName
+        val success = if (packageQueue.isNotEmpty()) packageQueue.removeAt(0) else true
+        return CrossAppUiResult(success, if (success) "visible" else "not visible")
     }
 
     override fun inspect(packageName: String?, maxNodes: Int): CrossAppUiResult {

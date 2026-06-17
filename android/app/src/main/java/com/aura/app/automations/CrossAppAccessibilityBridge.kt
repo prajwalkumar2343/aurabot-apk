@@ -28,6 +28,7 @@ interface CrossAppAccessibilityBridge {
     fun typeText(text: String, selector: CrossAppUiSelector? = null): CrossAppUiResult
     fun clearText(selector: CrossAppUiSelector): CrossAppUiResult
     fun has(selector: CrossAppUiSelector): CrossAppUiResult
+    fun hasPackage(packageName: String): CrossAppUiResult
     fun inspect(packageName: String? = null, maxNodes: Int = 40): CrossAppUiResult
     fun pressBack(): CrossAppUiResult
     fun pressHome(): CrossAppUiResult

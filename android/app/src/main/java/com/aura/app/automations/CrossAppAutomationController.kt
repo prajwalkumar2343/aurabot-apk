@@ -16,6 +16,7 @@ class CrossAppAutomationController(
         withContext(Dispatchers.IO) {
             val result = when (action.type) {
                 AutomationActionTypes.OpenApp -> openApp(action, event)
+                AutomationActionTypes.WaitForApp -> waitForApp(action, event)
                 AutomationActionTypes.TapText -> waitThen(action, event) {
                     accessibility.tap(action.selector(event, fallbackTextKey = AutomationActionMetadata.Text))
                 }
@@ -56,30 +57,37 @@ class CrossAppAutomationController(
             diagnosed
         }
 
-    private fun openApp(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+    private suspend fun openApp(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
         val packageName = action.metadata[AutomationActionMetadata.PackageName]
             ?: event.values[AutomationActionMetadata.PackageName]
         val query = action.metadata[AutomationActionMetadata.AppQuery]
-        val intent = packageName
+        val target = packageName
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-            ?.let { context.packageManager.getLaunchIntentForPackage(it) }
+            ?.let { packageId ->
+                context.packageManager.getLaunchIntentForPackage(packageId)
+                    ?.let { LaunchTarget(it, packageId) }
+            }
             ?: query
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveLaunchIntentByLabel(it) }
-        if (intent == null) {
+        if (target == null) {
             return AutomationActionResult(action.type, AutomationRunStatus.Failed, "App could not be found")
         }
+        val intent = target.intent
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        return if (runCatching { context.startActivity(intent) }.isSuccess) {
-            AutomationActionResult(action.type, AutomationRunStatus.Success, "App opened")
+        if (runCatching { context.startActivity(intent) }.isFailure) {
+            return AutomationActionResult(action.type, AutomationRunStatus.Failed, "App could not be opened")
+        }
+        return if (target.packageName != null && accessibility.isEnabled()) {
+            waitForPackage(action.type, target.packageName, action.timeoutMillis(), successPrefix = "App opened")
         } else {
-            AutomationActionResult(action.type, AutomationRunStatus.Failed, "App could not be opened")
+            AutomationActionResult(action.type, AutomationRunStatus.Success, "App opened")
         }
     }
 
-    private fun resolveLaunchIntentByLabel(query: String): Intent? {
+    private fun resolveLaunchIntentByLabel(query: String): LaunchTarget? {
         val normalized = query.lowercase()
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return context.packageManager.queryIntentActivities(launcherIntent, 0)
@@ -89,11 +97,21 @@ class CrossAppAutomationController(
             }
             ?.activityInfo
             ?.let { info ->
-                Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_LAUNCHER)
-                    setClassName(info.packageName, info.name)
-                }
+                LaunchTarget(
+                    intent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_LAUNCHER)
+                        setClassName(info.packageName, info.name)
+                    },
+                    packageName = info.packageName
+                )
             }
+    }
+
+    private suspend fun waitForApp(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
+        val packageName = action.packageName(event)
+            ?: return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Package name is missing")
+        return waitForPackage(action.type, packageName, action.timeoutMillis(), successPrefix = "App visible")
     }
 
     private suspend fun waitThen(
@@ -206,6 +224,28 @@ class CrossAppAutomationController(
         )
     }
 
+    private suspend fun waitForPackage(
+        actionType: String,
+        packageName: String,
+        timeoutMillis: Long,
+        successPrefix: String
+    ): AutomationActionResult {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        var last = CrossAppUiResult(false, "Package $packageName is not visible")
+        while (System.currentTimeMillis() <= deadline) {
+            last = accessibility.hasPackage(packageName)
+            if (last.success) {
+                return AutomationActionResult(actionType, AutomationRunStatus.Success, "$successPrefix: $packageName")
+            }
+            delay(POLL_INTERVAL_MILLIS)
+        }
+        return AutomationActionResult(
+            actionType,
+            AutomationRunStatus.Failed,
+            "Timed out after ${timeoutMillis}ms waiting for app $packageName: ${last.message}"
+        )
+    }
+
     private fun AutomationActionResult.withFailureDiagnostics(action: AutomationAction): AutomationActionResult {
         if (status != AutomationRunStatus.Failed) return this
         if (action.type == AutomationActionTypes.InspectScreen) return this
@@ -228,6 +268,11 @@ class CrossAppAutomationController(
 
     private fun rendered(value: String, event: AutomationEvent): String =
         renderer.render(value, event.values)
+
+    private fun AutomationAction.packageName(event: AutomationEvent): String? =
+        (metadata[AutomationActionMetadata.PackageName] ?: event.values[AutomationActionMetadata.PackageName])
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
 
     private fun AutomationAction.selector(
         event: AutomationEvent,
@@ -313,6 +358,7 @@ class CrossAppAutomationController(
 }
 
 private data class TapBounds(val left: Int, val top: Int, val right: Int, val bottom: Int)
+private data class LaunchTarget(val intent: Intent, val packageName: String?)
 private data class SwipePoints(val startX: Int, val startY: Int, val endX: Int, val endY: Int)
 
 private fun AutomationAction.bounds(): TapBounds? {
