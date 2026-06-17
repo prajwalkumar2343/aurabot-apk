@@ -39,6 +39,7 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.TypeText,
                 AutomationActionTypes.WaitForText,
                 AutomationActionTypes.WaitForTarget,
+                AutomationActionTypes.WaitUntilGone,
                 AutomationActionTypes.TapTarget,
                 AutomationActionTypes.LongPressTarget,
                 AutomationActionTypes.ClearText,

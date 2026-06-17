@@ -104,6 +104,27 @@ class CrossAppAutomationControllerTest {
     }
 
     @Test
+    fun waitUntilGonePollsUntilTargetDisappears() = runTest {
+        val bridge = RecordingAccessibilityBridge(hasResults = listOf(true, true, false))
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.WaitUntilGone,
+                metadata = mapOf(
+                    AutomationActionMetadata.ContentDescription to "Loading",
+                    AutomationActionMetadata.TimeoutMillis to "1000"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(3, bridge.hasSelectors.size)
+        assertEquals("Loading", bridge.hasSelectors.last().contentDescription)
+    }
+
+    @Test
     fun disabledAccessibilityFailsClearly() = runTest {
         val bridge = RecordingAccessibilityBridge(enabled = false)
         val controller = CrossAppAutomationController(testContext(), bridge)

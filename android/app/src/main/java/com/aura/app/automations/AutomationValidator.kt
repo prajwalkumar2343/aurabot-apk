@@ -144,6 +144,7 @@ object AutomationValidator {
                 AutomationActionTypes.TypeText,
                 AutomationActionTypes.WaitForText,
                 AutomationActionTypes.WaitForTarget,
+                AutomationActionTypes.WaitUntilGone,
                 AutomationActionTypes.TapTarget,
                 AutomationActionTypes.LongPressTarget,
                 AutomationActionTypes.ClearText,
@@ -186,6 +187,11 @@ object AutomationValidator {
         if (action.type == AutomationActionTypes.WaitForTarget) {
             require(action.hasSelector()) {
                 "Wait for target actions need at least one selector metadata field: text, contentDescription, viewId, or className"
+            }
+        }
+        if (action.type == AutomationActionTypes.WaitUntilGone) {
+            require(action.hasSelector()) {
+                "Wait until gone actions need at least one selector metadata field: text, contentDescription, viewId, or className"
             }
         }
         if (action.type == AutomationActionTypes.TapTarget || action.type == AutomationActionTypes.LongPressTarget) {

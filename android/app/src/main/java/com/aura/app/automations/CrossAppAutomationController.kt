@@ -42,6 +42,7 @@ class CrossAppAutomationController(
                 AutomationActionTypes.WaitForTarget -> waitThen(action, event) {
                     accessibility.has(action.selector(event))
                 }
+                AutomationActionTypes.WaitUntilGone -> waitUntilGone(action, event)
                 AutomationActionTypes.Scroll -> waitThen(action, event, selectorRequired = false) {
                     accessibility.scroll(
                         selector = action.optionalSelector(event),
@@ -142,6 +143,29 @@ class CrossAppAutomationController(
             action.type,
             AutomationRunStatus.Failed,
             "Timed out after ${timeout}ms waiting for $renderedTarget: ${last.message}"
+        )
+    }
+
+    private suspend fun waitUntilGone(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
+        if (!action.hasSelector()) {
+            return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Cross-app selector is missing")
+        }
+        val selector = action.selector(event)
+        val timeout = action.timeoutMillis()
+        val deadline = System.currentTimeMillis() + timeout
+        var last = CrossAppUiResult(false, "Target still visible")
+        while (System.currentTimeMillis() <= deadline) {
+            last = accessibility.has(selector)
+            if (!last.success) {
+                return AutomationActionResult(action.type, AutomationRunStatus.Success, "Target is gone")
+            }
+            delay(POLL_INTERVAL_MILLIS)
+        }
+        return AutomationActionResult(
+            action.type,
+            AutomationRunStatus.Failed,
+            "Timed out after ${timeout}ms waiting for ${action.describeTarget(event)} to disappear: ${last.message}"
         )
     }
 

@@ -3916,6 +3916,7 @@ private fun actionIcon(actionType: String): ImageVector =
         AutomationActionTypes.TypeText,
         AutomationActionTypes.WaitForText,
         AutomationActionTypes.WaitForTarget,
+        AutomationActionTypes.WaitUntilGone,
         AutomationActionTypes.TapTarget,
         AutomationActionTypes.LongPressTarget,
         AutomationActionTypes.ClearText,
