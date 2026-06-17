@@ -34,16 +34,23 @@ class AutomationEngine(
         )
     }
 
-    suspend fun resumeRun(runId: String, values: Map<String, String> = emptyMap()): AutomationRunResult {
+    suspend fun resumeRun(runId: String, values: Map<String, String> = emptyMap()): AutomationRunResult = mutex.withLock {
         val run = repository.getRun(runId)
             ?: return AutomationRunResult("", AutomationRunStatus.Failed, "Automation run not found", runId = runId)
+        if (run.status != AutomationRunStatus.Waiting) {
+            return AutomationRunResult(
+                run.automationId,
+                AutomationRunStatus.Skipped,
+                "Automation run is not waiting",
+                runId = runId
+            )
+        }
         val spec = repository.get(run.automationId)
             ?: return AutomationRunResult(run.automationId, AutomationRunStatus.Failed, "Automation not found", runId = runId)
-        val completedStepIndexes = repository.stepRuns(runId)
-            .filter { it.status == AutomationRunStatus.Success || it.status == AutomationRunStatus.Waiting }
-            .map { it.stepIndex }
-            .toSet()
-        val nextStepIndex = ((completedStepIndexes.maxOrNull() ?: -1) + 1)
+        val waitingStep = repository.stepRuns(runId)
+            .lastOrNull { it.status == AutomationRunStatus.Waiting }
+            ?: return failWaitingRun(run, "Automation run is waiting without a resumable step")
+        val nextStepIndex = waitingStep.stepIndex + 1
         return runAutomation(
             spec = spec,
             event = AutomationEvent(
@@ -54,6 +61,13 @@ class AutomationEngine(
             existingRunId = runId,
             startStepIndex = nextStepIndex
         )
+    }
+
+    private suspend fun failWaitingRun(run: AutomationRunRecord, message: String): AutomationRunResult {
+        repository.updateRun(run.id, AutomationRunStatus.Failed, message)
+        flowContinuationScheduler.cancel(run.id)
+        repository.log(run.automationId, run.eventType, AutomationRunStatus.Failed, message)
+        return AutomationRunResult(run.automationId, AutomationRunStatus.Failed, message, runId = run.id)
     }
 
     private suspend fun runAutomation(spec: AutomationSpec, event: AutomationEvent): AutomationRunResult {
