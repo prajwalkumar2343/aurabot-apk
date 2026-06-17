@@ -35,19 +35,46 @@ class AutomationRuntime(
         val automationById = automations.associateBy { it.id }
         repository.activeRuns().forEach { run ->
             val spec = automationById[run.automationId]
-            if (spec?.enabled != true) {
-                flowContinuationScheduler.cancel(run.id)
+            if (spec == null) {
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
+                return@forEach
+            }
+            if (!spec.enabled) {
+                terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
                 return@forEach
             }
             val waitingStep = repository.stepRuns(run.id)
                 .lastOrNull { it.status == AutomationRunStatus.Waiting }
-            val flowStep = spec.flow?.steps.orEmpty().firstOrNull { it.id == waitingStep?.stepId }
-            if (waitingStep != null && flowStep?.type == AutomationFlowStepTypes.Wait) {
-                flowContinuationScheduler.schedule(run.id, flowStep.remainingWaitMillis(waitingStep))
-            } else {
-                flowContinuationScheduler.cancel(run.id)
+                ?: return@forEach terminalizeRun(
+                    run,
+                    AutomationRunStatus.Failed,
+                    "Automation run is waiting without a resumable step"
+                )
+            val flowStep = spec.flow?.steps.orEmpty().firstOrNull { it.id == waitingStep.stepId }
+                ?: return@forEach terminalizeRun(
+                    run,
+                    AutomationRunStatus.Failed,
+                    "Automation run waiting step is no longer configured"
+                )
+            when (flowStep.type) {
+                AutomationFlowStepTypes.Wait -> flowContinuationScheduler.schedule(
+                    run.id,
+                    flowStep.remainingWaitMillis(waitingStep)
+                )
+                AutomationFlowStepTypes.Checkpoint -> flowContinuationScheduler.cancel(run.id)
+                else -> terminalizeRun(
+                    run,
+                    AutomationRunStatus.Failed,
+                    "Automation run waiting step is no longer resumable"
+                )
             }
         }
+    }
+
+    private suspend fun terminalizeRun(run: AutomationRunRecord, status: String, message: String) {
+        repository.updateRun(run.id, status, message)
+        flowContinuationScheduler.cancel(run.id)
+        repository.log(run.automationId, run.eventType, status, message)
     }
 
     private fun AutomationFlowStep.remainingWaitMillis(waitingStep: AutomationStepRunRecord): Long {

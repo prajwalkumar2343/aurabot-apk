@@ -114,6 +114,66 @@ class AutomationRuntimeTest {
         assertEquals(2_500L, continuations.scheduled[run.id])
     }
 
+    @Test
+    fun restoreTriggersTerminalizesDisabledWaitingFlowContinuations() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+        repository.setEnabled(saved.id, false)
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Skipped, repository.getRun(run.id)?.status)
+        assertEquals("Automation is disabled", repository.getRun(run.id)?.message)
+        assertTrue(run.id in continuations.cancelled)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun restoreTriggersTerminalizesMissingWaitingFlowContinuations() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+        repository.delete(saved.id)
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
+        assertEquals("Automation not found", repository.getRun(run.id)?.message)
+        assertTrue(run.id in continuations.cancelled)
+    }
+
+    @Test
+    fun restoreTriggersLeavesCheckpointRunsWaitingWithoutRearmingAlarm() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val saved = repository.upsert(checkpointFlowSpec())
+        val checkpointStep = saved.flow?.steps?.first() ?: error("checkpoint step missing")
+        val run = waitingRun(repository, saved, checkpointStep)
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Waiting, repository.getRun(run.id)?.status)
+        assertTrue(run.id in continuations.cancelled)
+        assertFalse(run.id in continuations.scheduled)
+    }
+
     private fun geofenceSpec() = AutomationSpec(
         id = "leave-work",
         name = "Leave work",
@@ -150,6 +210,47 @@ class AutomationRuntimeTest {
             )
         )
     )
+
+    private fun checkpointFlowSpec() = AutomationSpec(
+        id = "checkpoint-flow",
+        name = "Checkpoint flow",
+        trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
+        actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Fallback")),
+        flow = AutomationFlow(
+            steps = listOf(
+                AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                AutomationFlowStep(
+                    id = "notify",
+                    type = AutomationFlowStepTypes.Action,
+                    action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Done")
+                )
+            )
+        )
+    )
+
+    private suspend fun waitingRun(
+        repository: AutomationRepository,
+        spec: AutomationSpec,
+        step: AutomationFlowStep
+    ): AutomationRunRecord {
+        val run = repository.createRun(
+            automationId = spec.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Waiting,
+            message = "waiting"
+        )
+        repository.recordStep(
+            runId = run.id,
+            automationId = spec.id,
+            step = step,
+            stepIndex = 0,
+            status = AutomationRunStatus.Waiting,
+            attempt = 1,
+            message = "waiting"
+        )
+        return run
+    }
 }
 
 private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
