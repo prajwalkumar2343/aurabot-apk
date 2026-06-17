@@ -92,6 +92,7 @@ def test_create_automation_tool_schema_supports_cross_app_actions():
     assert "wait_for_text" in action_types
     assert "wait_for_target" in action_types
     assert "wait_until_gone" in action_types
+    assert "wait_for_idle" in action_types
     assert "tap_target" in action_types
     assert "long_press_target" in action_types
     assert "clear_text" in action_types

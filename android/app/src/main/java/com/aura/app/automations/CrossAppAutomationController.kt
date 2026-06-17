@@ -43,6 +43,7 @@ class CrossAppAutomationController(
                     accessibility.has(action.selector(event))
                 }
                 AutomationActionTypes.WaitUntilGone -> waitUntilGone(action, event)
+                AutomationActionTypes.WaitForIdle -> waitForIdle(action)
                 AutomationActionTypes.Scroll -> waitThen(action, event, selectorRequired = false) {
                     accessibility.scroll(
                         selector = action.optionalSelector(event),
@@ -166,6 +167,40 @@ class CrossAppAutomationController(
             action.type,
             AutomationRunStatus.Failed,
             "Timed out after ${timeout}ms waiting for ${action.describeTarget(event)} to disappear: ${last.message}"
+        )
+    }
+
+    private suspend fun waitForIdle(action: AutomationAction): AutomationActionResult {
+        if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
+        val timeout = action.timeoutMillis()
+        val deadline = System.currentTimeMillis() + timeout
+        val stableSamples = action.stableSamples()
+        var lastSnapshot: String? = null
+        var consecutiveMatches = 0
+        var last = CrossAppUiResult(false, "No screen snapshot yet")
+        while (System.currentTimeMillis() <= deadline) {
+            last = accessibility.inspect(
+                packageName = action.metadata[AutomationActionMetadata.PackageName]?.ifBlank { null },
+                maxNodes = action.metadata[AutomationActionMetadata.MaxNodes]?.toIntOrNull()?.coerceIn(1, 80) ?: DEFAULT_IDLE_MAX_NODES
+            )
+            if (last.success) {
+                val snapshot = last.message
+                consecutiveMatches = if (snapshot == lastSnapshot) consecutiveMatches + 1 else 1
+                lastSnapshot = snapshot
+                if (consecutiveMatches >= stableSamples) {
+                    return AutomationActionResult(
+                        action.type,
+                        AutomationRunStatus.Success,
+                        "Screen idle after $consecutiveMatches stable sample(s)"
+                    )
+                }
+            }
+            delay(POLL_INTERVAL_MILLIS)
+        }
+        return AutomationActionResult(
+            action.type,
+            AutomationRunStatus.Failed,
+            "Timed out after ${timeout}ms waiting for screen idle: ${last.message}"
         )
     }
 
@@ -351,6 +386,10 @@ class CrossAppAutomationController(
         metadata[AutomationActionMetadata.DiagnosticMaxNodes]?.toIntOrNull()?.coerceIn(1, 40)
             ?: DEFAULT_DIAGNOSTIC_MAX_NODES
 
+    private fun AutomationAction.stableSamples(): Int =
+        metadata[AutomationActionMetadata.StableSamples]?.toIntOrNull()?.coerceIn(2, 6)
+            ?: DEFAULT_STABLE_SAMPLES
+
     private fun AutomationAction.scrollSettleMillis(): Long =
         metadata[AutomationActionMetadata.SettleMillis]?.toLongOrNull()?.coerceIn(0L, 5_000L)
             ?: DEFAULT_SCROLL_SETTLE_MILLIS
@@ -378,6 +417,8 @@ class CrossAppAutomationController(
         private const val DEFAULT_GESTURE_MILLIS = 300L
         private const val DEFAULT_MAX_SCROLLS = 8
         private const val DEFAULT_DIAGNOSTIC_MAX_NODES = 12
+        private const val DEFAULT_IDLE_MAX_NODES = 20
+        private const val DEFAULT_STABLE_SAMPLES = 2
 
         fun openAccessibilitySettingsIntent(): Intent =
             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

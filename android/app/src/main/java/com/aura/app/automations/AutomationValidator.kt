@@ -145,6 +145,7 @@ object AutomationValidator {
                 AutomationActionTypes.WaitForText,
                 AutomationActionTypes.WaitForTarget,
                 AutomationActionTypes.WaitUntilGone,
+                AutomationActionTypes.WaitForIdle,
                 AutomationActionTypes.TapTarget,
                 AutomationActionTypes.LongPressTarget,
                 AutomationActionTypes.ClearText,
@@ -192,6 +193,16 @@ object AutomationValidator {
         if (action.type == AutomationActionTypes.WaitUntilGone) {
             require(action.hasSelector()) {
                 "Wait until gone actions need at least one selector metadata field: text, contentDescription, viewId, or className"
+            }
+        }
+        if (action.type == AutomationActionTypes.WaitForIdle) {
+            action.metadata[AutomationActionMetadata.MaxNodes]?.let { value ->
+                val maxNodes = value.toIntOrNull()
+                require(maxNodes != null && maxNodes in 1..80) { "Wait for idle maxNodes must be between 1 and 80" }
+            }
+            action.metadata[AutomationActionMetadata.StableSamples]?.let { value ->
+                val stableSamples = value.toIntOrNull()
+                require(stableSamples != null && stableSamples in 2..6) { "Wait for idle stableSamples must be between 2 and 6" }
             }
         }
         if (action.type == AutomationActionTypes.TapTarget || action.type == AutomationActionTypes.LongPressTarget) {

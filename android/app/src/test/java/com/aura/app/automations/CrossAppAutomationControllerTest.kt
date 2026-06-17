@@ -125,6 +125,33 @@ class CrossAppAutomationControllerTest {
     }
 
     @Test
+    fun waitForIdlePollsUntilScreenSnapshotIsStable() = runTest {
+        val bridge = RecordingAccessibilityBridge(
+            inspectResults = listOf(
+                "Visible UI nodes:\n1. text=Loading",
+                "Visible UI nodes:\n1. text=Ready",
+                "Visible UI nodes:\n1. text=Ready"
+            )
+        )
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.WaitForIdle,
+                metadata = mapOf(
+                    AutomationActionMetadata.MaxNodes to "5",
+                    AutomationActionMetadata.StableSamples to "2",
+                    AutomationActionMetadata.TimeoutMillis to "1000"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(listOf(null to 5, null to 5, null to 5), bridge.inspectCalls)
+    }
+
+    @Test
     fun disabledAccessibilityFailsClearly() = runTest {
         val bridge = RecordingAccessibilityBridge(enabled = false)
         val controller = CrossAppAutomationController(testContext(), bridge)
@@ -275,11 +302,13 @@ private class RecordingAccessibilityBridge(
     private val enabled: Boolean = true,
     hasResults: List<Boolean> = listOf(true),
     tapResults: List<Boolean> = listOf(true),
-    packageResults: List<Boolean> = listOf(true)
+    packageResults: List<Boolean> = listOf(true),
+    inspectResults: List<String> = listOf("Visible UI nodes:\n1. text=Ready")
 ) : CrossAppAccessibilityBridge {
     private val hasQueue = hasResults.toMutableList()
     private val tapQueue = tapResults.toMutableList()
     private val packageQueue = packageResults.toMutableList()
+    private val inspectQueue = inspectResults.toMutableList()
     val tappedSelectors = mutableListOf<CrossAppUiSelector>()
     val typedText = mutableListOf<String>()
     val typedSelectors = mutableListOf<CrossAppUiSelector?>()
@@ -331,7 +360,12 @@ private class RecordingAccessibilityBridge(
 
     override fun inspect(packageName: String?, maxNodes: Int): CrossAppUiResult {
         inspectCalls += packageName to maxNodes
-        return CrossAppUiResult(true, "Visible UI nodes:\n1. text=Ready")
+        val snapshot = if (inspectQueue.isNotEmpty()) {
+            inspectQueue.removeAt(0)
+        } else {
+            "Visible UI nodes:\n1. text=Ready"
+        }
+        return CrossAppUiResult(true, snapshot)
     }
 
     override fun pressBack(): CrossAppUiResult = CrossAppUiResult(true, "back")
