@@ -174,6 +174,31 @@ class AutomationRuntimeTest {
         assertFalse(run.id in continuations.scheduled)
     }
 
+    @Test
+    fun restoreTriggersFailsInterruptedRunningRuns() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val saved = repository.upsert(waitFlowSpec())
+        val run = repository.createRun(
+            automationId = saved.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Running,
+            message = "running"
+        )
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
+        assertEquals("Automation run was interrupted before completion", repository.getRun(run.id)?.message)
+        assertTrue(run.id in continuations.cancelled)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
     private fun geofenceSpec() = AutomationSpec(
         id = "leave-work",
         name = "Leave work",
