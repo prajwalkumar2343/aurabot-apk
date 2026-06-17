@@ -12,6 +12,11 @@ object AutomationValidator {
         validateTrigger(spec.trigger)
         spec.conditions.forEach { validateCondition(it) }
         spec.actions.forEach { validateAction(it) }
+        if (normalizedFlow == null) {
+            require(spec.actions.none { it.isHighImpactCrossAppAction() }) {
+                "High-impact cross-app actions must be modeled as flow steps with a checkpoint before the action"
+            }
+        }
         normalizedFlow?.let { validateFlow(it) }
         require(spec.cooldownMillis >= 0L) { "Cooldown cannot be negative" }
         return spec.copy(
@@ -70,6 +75,7 @@ object AutomationValidator {
             "Unsupported flow concurrency policy: ${flow.concurrencyPolicy}"
         }
         val ids = mutableSetOf<String>()
+        var hasPriorCheckpoint = false
         flow.steps.forEach { step ->
             require(step.id.isNotBlank()) { "Flow step id is required" }
             require(ids.add(step.id)) { "Flow step ids must be unique" }
@@ -85,16 +91,20 @@ object AutomationValidator {
             require(step.retryPolicy.backoffMillis >= 0L) { "Flow step backoff cannot be negative" }
             require(step.waitMillis >= 0L) { "Flow step waitMillis cannot be negative" }
             when (step.type) {
-                AutomationFlowStepTypes.Action -> validateAction(
-                    requireNotNull(step.action) { "Action flow steps need an action" }
-                )
+                AutomationFlowStepTypes.Action -> {
+                    val action = requireNotNull(step.action) { "Action flow steps need an action" }
+                    validateAction(action)
+                    require(!action.isHighImpactCrossAppAction() || hasPriorCheckpoint) {
+                        "High-impact cross-app action '${action.type}' needs a prior checkpoint step"
+                    }
+                }
                 AutomationFlowStepTypes.Condition -> validateCondition(
                     requireNotNull(step.condition) { "Condition flow steps need a condition" }
                 )
                 AutomationFlowStepTypes.Wait -> require(step.waitMillis > 0L) {
                     "Wait flow steps need positive waitMillis"
                 }
-                AutomationFlowStepTypes.Checkpoint -> Unit
+                AutomationFlowStepTypes.Checkpoint -> hasPriorCheckpoint = true
             }
         }
     }
@@ -230,4 +240,43 @@ object AutomationValidator {
         ).map { it?.toIntOrNull() }
         return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
     }
+
+    private fun AutomationAction.isHighImpactCrossAppAction(): Boolean {
+        if (type !in highImpactGestureActionTypes) return false
+        if (metadata[AutomationActionMetadata.RiskLevel]?.equals("high", ignoreCase = true) == true) {
+            return true
+        }
+        val targetText = listOf(
+            metadata[AutomationActionMetadata.Text],
+            metadata[AutomationActionMetadata.TargetText],
+            metadata[AutomationActionMetadata.ContentDescription]
+        ).joinToString(" ").lowercase()
+        return highImpactTerms.any { term -> Regex("\\b${Regex.escape(term)}\\b").containsMatchIn(targetText) }
+    }
+
+    private val highImpactGestureActionTypes = setOf(
+        AutomationActionTypes.TapText,
+        AutomationActionTypes.TapTarget,
+        AutomationActionTypes.TapBounds,
+        AutomationActionTypes.LongPressTarget
+    )
+
+    private val highImpactTerms = setOf(
+        "buy",
+        "cancel",
+        "confirm",
+        "delete",
+        "order",
+        "pay",
+        "post",
+        "publish",
+        "purchase",
+        "remove",
+        "send",
+        "share",
+        "submit",
+        "transfer",
+        "unsubscribe",
+        "withdraw"
+    )
 }

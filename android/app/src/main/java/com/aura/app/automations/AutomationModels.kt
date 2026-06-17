@@ -208,6 +208,7 @@ object AutomationActionMetadata {
     const val EndY = "endY"
     const val DurationMillis = "durationMillis"
     const val MaxNodes = "maxNodes"
+    const val RiskLevel = "riskLevel"
 }
 
 object AutomationFlowStepTypes {

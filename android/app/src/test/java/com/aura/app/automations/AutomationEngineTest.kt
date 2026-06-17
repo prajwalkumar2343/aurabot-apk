@@ -169,6 +169,63 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRequiresCheckpointBeforeHighImpactCrossAppGesture() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = listOf(
+                        AutomationAction(
+                            type = AutomationActionTypes.TapTarget,
+                            metadata = mapOf(AutomationActionMetadata.Text to "Send")
+                        )
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = emptyList(),
+                    flow = AutomationFlow(
+                        steps = listOf(
+                            AutomationFlowStep(
+                                id = "send",
+                                type = AutomationFlowStepTypes.Action,
+                                action = AutomationAction(
+                                    type = AutomationActionTypes.TapTarget,
+                                    metadata = mapOf(AutomationActionMetadata.Text to "Send")
+                                )
+                            ),
+                            AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint)
+                        )
+                    )
+                )
+            )
+        }
+
+        val validated = AutomationValidator.validate(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "send",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(
+                                type = AutomationActionTypes.TapTarget,
+                                metadata = mapOf(AutomationActionMetadata.Text to "Send")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        assertEquals(listOf("confirm", "send"), validated.flow?.steps?.map { it.id })
+    }
+
+    @Test
     fun dailyScheduleHonorsDaysOfWeek() {
         val zone = ZoneId.of("UTC")
         val mondayAfterRunTime = ZonedDateTime.of(2026, 6, 8, 10, 0, 0, 0, zone)
