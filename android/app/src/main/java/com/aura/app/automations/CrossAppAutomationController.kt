@@ -44,6 +44,7 @@ class CrossAppAutomationController(
                         direction = action.metadata[AutomationActionMetadata.Direction] ?: "down"
                     )
                 }
+                AutomationActionTypes.ScrollUntilTarget -> scrollUntilTarget(action, event)
                 AutomationActionTypes.Swipe -> swipe(action)
                 AutomationActionTypes.InspectScreen -> inspectScreen(action)
                 AutomationActionTypes.PressBack -> requireAccessibility(action.type) { accessibility.pressBack() }
@@ -146,6 +147,43 @@ class CrossAppAutomationController(
         }
     }
 
+    private suspend fun scrollUntilTarget(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
+        if (!action.hasSelector()) {
+            return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Cross-app selector is missing")
+        }
+        val selector = action.selector(event)
+        val direction = action.metadata[AutomationActionMetadata.Direction] ?: "down"
+        val maxScrolls = action.metadata[AutomationActionMetadata.MaxScrolls]?.toIntOrNull()?.coerceIn(1, 50)
+            ?: DEFAULT_MAX_SCROLLS
+        var last = CrossAppUiResult(false, "No matching UI target")
+        for (scrollCount in 0..maxScrolls) {
+            last = accessibility.has(selector)
+            if (last.success) {
+                return AutomationActionResult(
+                    action.type,
+                    AutomationRunStatus.Success,
+                    "Found target after $scrollCount scroll(s): ${last.message}"
+                )
+            }
+            if (scrollCount == maxScrolls) break
+            val scrollResult = accessibility.scroll(selector = null, direction = direction)
+            if (!scrollResult.success) {
+                return AutomationActionResult(
+                    action.type,
+                    AutomationRunStatus.Failed,
+                    "Could not scroll while looking for ${action.describeTarget(event)}: ${scrollResult.message}"
+                )
+            }
+            delay(action.scrollSettleMillis())
+        }
+        return AutomationActionResult(
+            action.type,
+            AutomationRunStatus.Failed,
+            "Target ${action.describeTarget(event)} not found after $maxScrolls scroll(s): ${last.message}"
+        )
+    }
+
     private fun inspectScreen(action: AutomationAction): AutomationActionResult =
         requireAccessibility(action.type) {
             accessibility.inspect(
@@ -220,6 +258,10 @@ class CrossAppAutomationController(
         metadata[AutomationActionMetadata.DurationMillis]?.toLongOrNull()?.coerceIn(50L, 2_000L)
             ?: DEFAULT_GESTURE_MILLIS
 
+    private fun AutomationAction.scrollSettleMillis(): Long =
+        metadata[AutomationActionMetadata.SettleMillis]?.toLongOrNull()?.coerceIn(0L, 5_000L)
+            ?: DEFAULT_SCROLL_SETTLE_MILLIS
+
     private fun AutomationAction.describeTarget(event: AutomationEvent): String {
         val target = listOf(
             AutomationActionMetadata.Text,
@@ -239,7 +281,9 @@ class CrossAppAutomationController(
         private const val POLL_INTERVAL_MILLIS = 250L
         private const val DEFAULT_TIMEOUT_MILLIS = 5_000L
         private const val DEFAULT_SETTLE_MILLIS = 150L
+        private const val DEFAULT_SCROLL_SETTLE_MILLIS = 250L
         private const val DEFAULT_GESTURE_MILLIS = 300L
+        private const val DEFAULT_MAX_SCROLLS = 8
 
         fun openAccessibilitySettingsIntent(): Intent =
             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

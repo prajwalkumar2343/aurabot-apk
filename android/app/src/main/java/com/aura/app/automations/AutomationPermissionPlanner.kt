@@ -42,6 +42,7 @@ class AutomationPermissionPlanner {
             AutomationActionTypes.LongPressTarget,
             AutomationActionTypes.ClearText,
             AutomationActionTypes.Scroll,
+            AutomationActionTypes.ScrollUntilTarget,
             AutomationActionTypes.Swipe,
             AutomationActionTypes.InspectScreen,
             AutomationActionTypes.PressBack,

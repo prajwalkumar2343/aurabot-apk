@@ -176,6 +176,7 @@ object AutomationActionTypes {
     const val LongPressTarget = "long_press_target"
     const val ClearText = "clear_text"
     const val Scroll = "scroll"
+    const val ScrollUntilTarget = "scroll_until_target"
     const val Swipe = "swipe"
     const val InspectScreen = "inspect_screen"
     const val PressBack = "press_back"
@@ -208,6 +209,7 @@ object AutomationActionMetadata {
     const val EndY = "endY"
     const val DurationMillis = "durationMillis"
     const val MaxNodes = "maxNodes"
+    const val MaxScrolls = "maxScrolls"
     const val RiskLevel = "riskLevel"
 }
 

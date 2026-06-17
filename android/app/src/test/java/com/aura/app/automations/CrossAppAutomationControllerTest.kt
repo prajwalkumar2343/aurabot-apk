@@ -116,6 +116,30 @@ class CrossAppAutomationControllerTest {
         assertEquals(AutomationRunStatus.Success, result.status)
         assertEquals("com.example" to 12, bridge.inspectCalls.single())
     }
+
+    @Test
+    fun scrollUntilTargetScrollsUntilSelectorAppears() = runTest {
+        val bridge = RecordingAccessibilityBridge(hasResults = listOf(false, false, true))
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.ScrollUntilTarget,
+                metadata = mapOf(
+                    AutomationActionMetadata.Text to "Advanced",
+                    AutomationActionMetadata.Direction to "down",
+                    AutomationActionMetadata.MaxScrolls to "5",
+                    AutomationActionMetadata.SettleMillis to "0"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(3, bridge.hasSelectors.size)
+        assertEquals(listOf("down", "down"), bridge.scrollDirections)
+        assertEquals("Advanced", bridge.hasSelectors.last().text)
+    }
 }
 
 private fun testContext() = ContextWrapper(null)
@@ -130,6 +154,7 @@ private class RecordingAccessibilityBridge(
     val typedSelectors = mutableListOf<CrossAppUiSelector?>()
     val hasSelectors = mutableListOf<CrossAppUiSelector>()
     val inspectCalls = mutableListOf<Pair<String?, Int>>()
+    val scrollDirections = mutableListOf<String>()
 
     override fun isEnabled(): Boolean = enabled
 
@@ -145,8 +170,10 @@ private class RecordingAccessibilityBridge(
 
     override fun swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMillis: Long): Boolean = true
 
-    override fun scroll(selector: CrossAppUiSelector?, direction: String): CrossAppUiResult =
-        CrossAppUiResult(true, "scrolled")
+    override fun scroll(selector: CrossAppUiSelector?, direction: String): CrossAppUiResult {
+        scrollDirections += direction
+        return CrossAppUiResult(true, "scrolled")
+    }
 
     override fun typeText(text: String, selector: CrossAppUiSelector?): CrossAppUiResult {
         typedText += text

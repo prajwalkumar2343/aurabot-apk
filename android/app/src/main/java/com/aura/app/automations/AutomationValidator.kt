@@ -146,6 +146,7 @@ object AutomationValidator {
                 AutomationActionTypes.LongPressTarget,
                 AutomationActionTypes.ClearText,
                 AutomationActionTypes.Scroll,
+                AutomationActionTypes.ScrollUntilTarget,
                 AutomationActionTypes.Swipe,
                 AutomationActionTypes.InspectScreen,
                 AutomationActionTypes.PressBack,
@@ -193,10 +194,19 @@ object AutomationValidator {
                 "Clear text actions need at least one selector metadata field: text, contentDescription, viewId, or className"
             }
         }
-        if (action.type == AutomationActionTypes.Scroll) {
+        if (action.type == AutomationActionTypes.Scroll || action.type == AutomationActionTypes.ScrollUntilTarget) {
             val direction = action.metadata[AutomationActionMetadata.Direction]?.lowercase().orEmpty()
             require(direction in setOf("", "up", "down", "left", "right", "forward", "backward")) {
                 "Scroll direction must be up, down, left, right, forward, or backward"
+            }
+        }
+        if (action.type == AutomationActionTypes.ScrollUntilTarget) {
+            require(action.hasSelector()) {
+                "Scroll until target actions need at least one selector metadata field: text, contentDescription, viewId, or className"
+            }
+            action.metadata[AutomationActionMetadata.MaxScrolls]?.let { value ->
+                val maxScrolls = value.toIntOrNull()
+                require(maxScrolls != null && maxScrolls in 1..50) { "Scroll until target maxScrolls must be between 1 and 50" }
             }
         }
         if (action.type == AutomationActionTypes.Swipe) {

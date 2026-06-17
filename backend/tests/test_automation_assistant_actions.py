@@ -93,6 +93,7 @@ def test_create_automation_tool_schema_supports_cross_app_actions():
     assert "long_press_target" in action_types
     assert "clear_text" in action_types
     assert "scroll" in action_types
+    assert "scroll_until_target" in action_types
     assert "swipe" in action_types
     assert "inspect_screen" in action_types
     assert "press_back" in action_types

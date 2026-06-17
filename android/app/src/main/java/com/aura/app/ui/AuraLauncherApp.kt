@@ -3918,6 +3918,7 @@ private fun actionIcon(actionType: String): ImageVector =
         AutomationActionTypes.LongPressTarget,
         AutomationActionTypes.ClearText,
         AutomationActionTypes.Scroll,
+        AutomationActionTypes.ScrollUntilTarget,
         AutomationActionTypes.Swipe,
         AutomationActionTypes.InspectScreen,
         AutomationActionTypes.PressBack,
