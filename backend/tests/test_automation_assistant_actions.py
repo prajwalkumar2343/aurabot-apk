@@ -1,6 +1,6 @@
 import json
 
-from app.services.llm import assistant_tool_definitions, parse_tool_response
+from app.services.llm import AUTOMATION_ACTION_TYPES, assistant_tool_definitions, parse_tool_response
 
 
 def test_parse_create_automation_action_preserves_spec():
@@ -75,7 +75,21 @@ def test_create_automation_tool_schema_supports_flow_steps():
 
     assert flow["properties"]["concurrencyPolicy"]["enum"] == ["skip_if_running", "allow_parallel"]
     assert step["properties"]["type"]["enum"] == ["action", "condition", "wait", "checkpoint"]
+    assert "Exclusive step shape" in step["description"]
     assert "retryPolicy" in step["properties"]
+
+
+def test_create_automation_tool_schema_reuses_action_type_enum():
+    tools = assistant_tool_definitions()
+    create_automation = next(tool for tool in tools if tool["name"] == "create_automation")
+
+    spec = create_automation["parameters"]["properties"]["automation_spec"]
+    top_level_action_types = spec["properties"]["actions"]["items"]["properties"]["type"]["enum"]
+    flow_action_types = spec["properties"]["flow"]["properties"]["steps"]["items"]["properties"]["action"]["properties"]["type"]["enum"]
+
+    assert top_level_action_types == AUTOMATION_ACTION_TYPES
+    assert flow_action_types == AUTOMATION_ACTION_TYPES
+    assert top_level_action_types == flow_action_types
 
 
 def test_create_automation_tool_schema_supports_cross_app_actions():
