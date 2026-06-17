@@ -155,6 +155,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
+import com.aura.app.automations.AutomationActionTypeSets
 import com.aura.app.automations.AutomationActionTypes
 import com.aura.app.automations.AutomationEvents
 import com.aura.app.automations.AutomationRunLog
@@ -3907,26 +3908,10 @@ private fun automationIcon(automation: AutomationSpec): ImageVector =
 
 private fun actionIcon(actionType: String): ImageVector =
     when (actionType) {
-        AutomationActionTypes.EtaMessage, AutomationActionTypes.DraftMessage, AutomationActionTypes.DirectSms -> Icons.Rounded.Mail
+        in AutomationActionTypeSets.Message -> Icons.Rounded.Mail
         AutomationActionTypes.Notify -> Icons.Rounded.Refresh
         AutomationActionTypes.OpenApp -> Icons.Rounded.Apps
-        AutomationActionTypes.WaitForApp,
-        AutomationActionTypes.TapText,
-        AutomationActionTypes.TapBounds,
-        AutomationActionTypes.TypeText,
-        AutomationActionTypes.WaitForText,
-        AutomationActionTypes.WaitForTarget,
-        AutomationActionTypes.WaitUntilGone,
-        AutomationActionTypes.WaitForIdle,
-        AutomationActionTypes.TapTarget,
-        AutomationActionTypes.LongPressTarget,
-        AutomationActionTypes.ClearText,
-        AutomationActionTypes.Scroll,
-        AutomationActionTypes.ScrollUntilTarget,
-        AutomationActionTypes.Swipe,
-        AutomationActionTypes.InspectScreen,
-        AutomationActionTypes.PressBack,
-        AutomationActionTypes.PressHome -> Icons.Rounded.TouchApp
+        in AutomationActionTypeSets.CrossApp -> Icons.Rounded.TouchApp
         else -> Icons.Rounded.AutoAwesome
     }
 

@@ -21,7 +21,7 @@ class AutomationPermissionPlanner {
         if (actions.any { it.type == AutomationActionTypes.DirectSms }) {
             permissions += Manifest.permission.SEND_SMS
         }
-        if (actions.any { it.type in crossAppActionTypes }) {
+        if (actions.any { it.type in AutomationActionTypeSets.CrossApp }) {
             permissions += AccessibilityService
         }
         return permissions
@@ -32,25 +32,5 @@ class AutomationPermissionPlanner {
 
     companion object {
         const val AccessibilityService = "aura.permission.ACCESSIBILITY_SERVICE"
-
-        private val crossAppActionTypes = setOf(
-            AutomationActionTypes.TapText,
-            AutomationActionTypes.TapBounds,
-            AutomationActionTypes.TypeText,
-            AutomationActionTypes.WaitForText,
-            AutomationActionTypes.WaitForTarget,
-            AutomationActionTypes.WaitUntilGone,
-            AutomationActionTypes.WaitForIdle,
-            AutomationActionTypes.WaitForApp,
-            AutomationActionTypes.TapTarget,
-            AutomationActionTypes.LongPressTarget,
-            AutomationActionTypes.ClearText,
-            AutomationActionTypes.Scroll,
-            AutomationActionTypes.ScrollUntilTarget,
-            AutomationActionTypes.Swipe,
-            AutomationActionTypes.InspectScreen,
-            AutomationActionTypes.PressBack,
-            AutomationActionTypes.PressHome
-        )
     }
 }

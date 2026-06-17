@@ -187,6 +187,37 @@ object AutomationActionTypes {
     const val PressHome = "press_home"
 }
 
+object AutomationActionTypeSets {
+    val Message = setOf(
+        AutomationActionTypes.DraftMessage,
+        AutomationActionTypes.EtaMessage,
+        AutomationActionTypes.DirectSms
+    )
+
+    val CrossApp = setOf(
+        AutomationActionTypes.OpenApp,
+        AutomationActionTypes.WaitForApp,
+        AutomationActionTypes.TapText,
+        AutomationActionTypes.TapBounds,
+        AutomationActionTypes.TypeText,
+        AutomationActionTypes.WaitForText,
+        AutomationActionTypes.WaitForTarget,
+        AutomationActionTypes.WaitUntilGone,
+        AutomationActionTypes.WaitForIdle,
+        AutomationActionTypes.TapTarget,
+        AutomationActionTypes.LongPressTarget,
+        AutomationActionTypes.ClearText,
+        AutomationActionTypes.Scroll,
+        AutomationActionTypes.ScrollUntilTarget,
+        AutomationActionTypes.Swipe,
+        AutomationActionTypes.InspectScreen,
+        AutomationActionTypes.PressBack,
+        AutomationActionTypes.PressHome
+    )
+
+    val All = setOf(AutomationActionTypes.Notify) + Message + CrossApp
+}
+
 object AutomationActionMetadata {
     const val PackageName = "packageName"
     const val AppQuery = "appQuery"

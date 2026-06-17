@@ -32,24 +32,7 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
                 AutomationActionTypes.DirectSms -> sendDirectSms(action, event)
-                AutomationActionTypes.OpenApp,
-                AutomationActionTypes.WaitForApp,
-                AutomationActionTypes.TapText,
-                AutomationActionTypes.TapBounds,
-                AutomationActionTypes.TypeText,
-                AutomationActionTypes.WaitForText,
-                AutomationActionTypes.WaitForTarget,
-                AutomationActionTypes.WaitUntilGone,
-                AutomationActionTypes.WaitForIdle,
-                AutomationActionTypes.TapTarget,
-                AutomationActionTypes.LongPressTarget,
-                AutomationActionTypes.ClearText,
-                AutomationActionTypes.Scroll,
-                AutomationActionTypes.ScrollUntilTarget,
-                AutomationActionTypes.Swipe,
-                AutomationActionTypes.InspectScreen,
-                AutomationActionTypes.PressBack,
-                AutomationActionTypes.PressHome -> crossAppController.execute(action, event)
+                in AutomationActionTypeSets.CrossApp -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")
             }
         }

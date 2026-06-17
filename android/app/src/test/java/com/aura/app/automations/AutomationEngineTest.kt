@@ -137,6 +137,15 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun actionTypeSetsClassifyCrossAppAndMessageActions() {
+        assertTrue(AutomationActionTypes.WaitForIdle in AutomationActionTypeSets.CrossApp)
+        assertTrue(AutomationActionTypes.DirectSms in AutomationActionTypeSets.Message)
+        assertTrue(AutomationActionTypes.Notify in AutomationActionTypeSets.All)
+        assertTrue(AutomationActionTypeSets.CrossApp.all { it in AutomationActionTypeSets.All })
+        assertTrue(AutomationActionTypeSets.Message.all { it in AutomationActionTypeSets.All })
+    }
+
+    @Test
     fun validatorRejectsCrossAppActionsWithoutTargets() {
         assertThrows(IllegalArgumentException::class.java) {
             AutomationValidator.validate(

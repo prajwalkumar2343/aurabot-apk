@@ -131,40 +131,11 @@ object AutomationValidator {
         }
 
     private fun validateAction(action: AutomationAction) {
-        require(
-            action.type in setOf(
-                AutomationActionTypes.Notify,
-                AutomationActionTypes.DraftMessage,
-                AutomationActionTypes.EtaMessage,
-                AutomationActionTypes.DirectSms,
-                AutomationActionTypes.OpenApp,
-                AutomationActionTypes.WaitForApp,
-                AutomationActionTypes.TapText,
-                AutomationActionTypes.TapBounds,
-                AutomationActionTypes.TypeText,
-                AutomationActionTypes.WaitForText,
-                AutomationActionTypes.WaitForTarget,
-                AutomationActionTypes.WaitUntilGone,
-                AutomationActionTypes.WaitForIdle,
-                AutomationActionTypes.TapTarget,
-                AutomationActionTypes.LongPressTarget,
-                AutomationActionTypes.ClearText,
-                AutomationActionTypes.Scroll,
-                AutomationActionTypes.ScrollUntilTarget,
-                AutomationActionTypes.Swipe,
-                AutomationActionTypes.InspectScreen,
-                AutomationActionTypes.PressBack,
-                AutomationActionTypes.PressHome
-            )
-        ) {
+        require(action.type in AutomationActionTypeSets.All) {
             "Unsupported automation action: ${action.type}"
         }
         validateCommonMetadata(action)
-        if (
-            action.type == AutomationActionTypes.DraftMessage ||
-            action.type == AutomationActionTypes.EtaMessage ||
-            action.type == AutomationActionTypes.DirectSms
-        ) {
+        if (action.type in AutomationActionTypeSets.Message) {
             require(action.messageTemplate?.isNotBlank() == true) { "Message actions need a messageTemplate" }
         }
         if (action.type == AutomationActionTypes.DirectSms) {
