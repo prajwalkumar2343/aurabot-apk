@@ -1,6 +1,6 @@
 package com.aura.app.automations
 
-import android.test.mock.MockContext
+import android.content.ContextWrapper
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -10,7 +10,7 @@ class CrossAppAutomationControllerTest {
     @Test
     fun tapTargetBuildsCompositeSelector() = runTest {
         val bridge = RecordingAccessibilityBridge()
-        val controller = CrossAppAutomationController(MockContext(), bridge)
+        val controller = CrossAppAutomationController(testContext(), bridge)
         val action = AutomationAction(
             type = AutomationActionTypes.TapTarget,
             metadata = mapOf(
@@ -46,7 +46,7 @@ class CrossAppAutomationControllerTest {
     @Test
     fun typeTextUsesTargetTextAsSelectorAndTextAsInput() = runTest {
         val bridge = RecordingAccessibilityBridge()
-        val controller = CrossAppAutomationController(MockContext(), bridge)
+        val controller = CrossAppAutomationController(testContext(), bridge)
         val action = AutomationAction(
             type = AutomationActionTypes.TypeText,
             metadata = mapOf(
@@ -65,7 +65,7 @@ class CrossAppAutomationControllerTest {
     @Test
     fun waitForTextPollsUntilTargetAppears() = runTest {
         val bridge = RecordingAccessibilityBridge(hasResults = listOf(false, false, true))
-        val controller = CrossAppAutomationController(MockContext(), bridge)
+        val controller = CrossAppAutomationController(testContext(), bridge)
         val action = AutomationAction(
             type = AutomationActionTypes.WaitForText,
             metadata = mapOf(
@@ -83,7 +83,7 @@ class CrossAppAutomationControllerTest {
     @Test
     fun disabledAccessibilityFailsClearly() = runTest {
         val bridge = RecordingAccessibilityBridge(enabled = false)
-        val controller = CrossAppAutomationController(MockContext(), bridge)
+        val controller = CrossAppAutomationController(testContext(), bridge)
 
         val result = controller.execute(
             AutomationAction(
@@ -96,7 +96,29 @@ class CrossAppAutomationControllerTest {
         assertEquals(AutomationRunStatus.Failed, result.status)
         assertTrue(result.message.contains("Accessibility Service"))
     }
+
+    @Test
+    fun inspectScreenUsesPackageScopeAndBoundedNodeLimit() = runTest {
+        val bridge = RecordingAccessibilityBridge()
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.InspectScreen,
+                metadata = mapOf(
+                    AutomationActionMetadata.PackageName to "com.example",
+                    AutomationActionMetadata.MaxNodes to "12"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals("com.example" to 12, bridge.inspectCalls.single())
+    }
 }
+
+private fun testContext() = ContextWrapper(null)
 
 private class RecordingAccessibilityBridge(
     private val enabled: Boolean = true,
@@ -107,6 +129,7 @@ private class RecordingAccessibilityBridge(
     val typedText = mutableListOf<String>()
     val typedSelectors = mutableListOf<CrossAppUiSelector?>()
     val hasSelectors = mutableListOf<CrossAppUiSelector>()
+    val inspectCalls = mutableListOf<Pair<String?, Int>>()
 
     override fun isEnabled(): Boolean = enabled
 
@@ -138,6 +161,11 @@ private class RecordingAccessibilityBridge(
         hasSelectors += selector
         val success = if (hasQueue.isNotEmpty()) hasQueue.removeAt(0) else true
         return CrossAppUiResult(success, if (success) "found" else "missing")
+    }
+
+    override fun inspect(packageName: String?, maxNodes: Int): CrossAppUiResult {
+        inspectCalls += packageName to maxNodes
+        return CrossAppUiResult(true, "Visible UI nodes:\n1. text=Ready")
     }
 
     override fun pressBack(): CrossAppUiResult = CrossAppUiResult(true, "back")

@@ -137,6 +137,7 @@ object AutomationValidator {
                 AutomationActionTypes.ClearText,
                 AutomationActionTypes.Scroll,
                 AutomationActionTypes.Swipe,
+                AutomationActionTypes.InspectScreen,
                 AutomationActionTypes.PressBack,
                 AutomationActionTypes.PressHome
             )
@@ -191,6 +192,12 @@ object AutomationValidator {
         if (action.type == AutomationActionTypes.Swipe) {
             require(action.swipePoints() != null) {
                 "Swipe actions need numeric startX, startY, endX, and endY metadata"
+            }
+        }
+        if (action.type == AutomationActionTypes.InspectScreen) {
+            action.metadata[AutomationActionMetadata.MaxNodes]?.let { value ->
+                val maxNodes = value.toIntOrNull()
+                require(maxNodes != null && maxNodes in 1..80) { "Inspect screen maxNodes must be between 1 and 80" }
             }
         }
     }

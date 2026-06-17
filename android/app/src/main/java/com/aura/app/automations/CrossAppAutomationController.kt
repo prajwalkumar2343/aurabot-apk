@@ -45,6 +45,7 @@ class CrossAppAutomationController(
                     )
                 }
                 AutomationActionTypes.Swipe -> swipe(action)
+                AutomationActionTypes.InspectScreen -> inspectScreen(action)
                 AutomationActionTypes.PressBack -> requireAccessibility(action.type) { accessibility.pressBack() }
                 AutomationActionTypes.PressHome -> requireAccessibility(action.type) { accessibility.pressHome() }
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported cross-app action")
@@ -144,6 +145,14 @@ class CrossAppAutomationController(
             }
         }
     }
+
+    private fun inspectScreen(action: AutomationAction): AutomationActionResult =
+        requireAccessibility(action.type) {
+            accessibility.inspect(
+                packageName = action.metadata[AutomationActionMetadata.PackageName]?.ifBlank { null },
+                maxNodes = action.metadata[AutomationActionMetadata.MaxNodes]?.toIntOrNull()?.coerceIn(1, 80) ?: 40
+            )
+        }
 
     private fun requireAccessibility(
         actionType: String,

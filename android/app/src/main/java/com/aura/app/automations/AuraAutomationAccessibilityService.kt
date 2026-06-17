@@ -39,8 +39,8 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
         override fun longPress(selector: CrossAppUiSelector): CrossAppUiResult {
             val service = activeService ?: return missingService()
             val node = service.findNode(selector) ?: return CrossAppUiResult(false, "No matching UI target")
-            val bounds = node.screenBounds()
-            return if (!bounds.isEmpty && service.dispatchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat(), 650L)) {
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            return if (!bounds.isEmpty() && service.dispatchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat(), 650L)) {
                 CrossAppUiResult(true, "Long pressed ${service.nodeSummary(node)}")
             } else {
                 CrossAppUiResult(false, "Matched target but could not long press it")
@@ -101,6 +101,16 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
             }
         }
 
+        override fun inspect(packageName: String?, maxNodes: Int): CrossAppUiResult {
+            val service = activeService ?: return missingService()
+            val snapshot = service.inspectNodes(packageName, maxNodes.coerceIn(1, 80))
+            return if (snapshot.isBlank()) {
+                CrossAppUiResult(false, "No visible UI nodes found")
+            } else {
+                CrossAppUiResult(true, snapshot)
+            }
+        }
+
         override fun pressBack(): CrossAppUiResult =
             if (activeService?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) == true) {
                 CrossAppUiResult(true, "Pressed back")
@@ -139,6 +149,23 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
             .flatMap { it.depthFirst() }
             .firstOrNull { it.visibleToUser() && it.isEditable && it.isEnabled }
 
+    private fun inspectNodes(packageName: String?, maxNodes: Int): String {
+        val nodes = rootNodes()
+            .flatMap { it.depthFirst() }
+            .filter { node ->
+                node.visibleToUser() &&
+                    (packageName.isNullOrBlank() || node.packageName?.toString() == packageName) &&
+                    node.isWorthInspecting()
+            }
+            .take(maxNodes + 1)
+            .toList()
+        if (nodes.isEmpty()) return ""
+        val visibleNodes = nodes.take(maxNodes)
+        val lines = visibleNodes.mapIndexed { index, node -> "${index + 1}. ${node.inspectSummary()}" }
+        val suffix = if (nodes.size > maxNodes) "\n... truncated after $maxNodes nodes" else ""
+        return "Visible UI nodes:\n${lines.joinToString("\n")}$suffix"
+    }
+
     private fun clickNode(node: AccessibilityNodeInfo): Boolean {
         var current: AccessibilityNodeInfo? = node
         while (current != null) {
@@ -148,7 +175,7 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
             current = current.parent
         }
         val bounds = node.screenBounds()
-        return !bounds.isEmpty && dispatchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        return !bounds.isEmpty() && dispatchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
     }
 
     private fun dispatchTap(x: Float, y: Float, durationMillis: Long = 80L): Boolean {
@@ -229,6 +256,39 @@ class AuraAutomationAccessibilityService : AccessibilityService() {
             ?: "target"
         return label.take(80)
     }
+
+    private fun AccessibilityNodeInfo.isWorthInspecting(): Boolean =
+        !text.isNullOrBlank() ||
+            !contentDescription.isNullOrBlank() ||
+            !viewIdResourceName.isNullOrBlank() ||
+            isClickable ||
+            isEditable ||
+            isScrollable
+
+    private fun AccessibilityNodeInfo.inspectSummary(): String {
+        val bounds = screenBounds()
+        val flags = listOfNotNull(
+            "clickable".takeIf { isClickable },
+            "editable".takeIf { isEditable },
+            "scrollable".takeIf { isScrollable },
+            "disabled".takeIf { !isEnabled }
+        )
+        return listOfNotNull(
+            "pkg=${packageName.toStringOrEmpty()}".takeIf { !packageName.isNullOrBlank() },
+            "class=${className.toStringOrEmpty()}".takeIf { !className.isNullOrBlank() },
+            "id=$viewIdResourceName".takeIf { !viewIdResourceName.isNullOrBlank() },
+            "text=${text.toStringOrEmpty().inspectValue()}".takeIf { !text.isNullOrBlank() },
+            "desc=${contentDescription.toStringOrEmpty().inspectValue()}".takeIf { !contentDescription.isNullOrBlank() },
+            "bounds=${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}".takeIf { !bounds.isEmpty() },
+            "flags=${flags.joinToString(",")}".takeIf { flags.isNotEmpty() }
+        ).joinToString(" ")
+    }
+
+    private fun String.inspectValue(): String =
+        replace('\n', ' ')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(80)
 
     private fun CrossAppUiSelector.hasAnyTarget(): Boolean =
         !text.isNullOrBlank() ||

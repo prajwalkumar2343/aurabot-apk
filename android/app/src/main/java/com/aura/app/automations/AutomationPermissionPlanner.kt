@@ -43,6 +43,7 @@ class AutomationPermissionPlanner {
             AutomationActionTypes.ClearText,
             AutomationActionTypes.Scroll,
             AutomationActionTypes.Swipe,
+            AutomationActionTypes.InspectScreen,
             AutomationActionTypes.PressBack,
             AutomationActionTypes.PressHome
         )

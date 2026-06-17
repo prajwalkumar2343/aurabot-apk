@@ -42,6 +42,7 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.ClearText,
                 AutomationActionTypes.Scroll,
                 AutomationActionTypes.Swipe,
+                AutomationActionTypes.InspectScreen,
                 AutomationActionTypes.PressBack,
                 AutomationActionTypes.PressHome -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")

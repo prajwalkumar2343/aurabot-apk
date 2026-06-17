@@ -177,6 +177,7 @@ object AutomationActionTypes {
     const val ClearText = "clear_text"
     const val Scroll = "scroll"
     const val Swipe = "swipe"
+    const val InspectScreen = "inspect_screen"
     const val PressBack = "press_back"
     const val PressHome = "press_home"
 }
@@ -206,6 +207,7 @@ object AutomationActionMetadata {
     const val EndX = "endX"
     const val EndY = "endY"
     const val DurationMillis = "durationMillis"
+    const val MaxNodes = "maxNodes"
 }
 
 object AutomationFlowStepTypes {
