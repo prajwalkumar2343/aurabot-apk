@@ -55,7 +55,7 @@ class AutomationRuntimeTest {
         val geofences = RecordingGeofenceRegistrar()
         val schedules = RecordingScheduleScheduler()
         val continuations = RecordingRuntimeFlowContinuationScheduler()
-        val runtime = AutomationRuntime(repository, geofences, schedules, continuations)
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
         val saved = repository.upsert(waitFlowSpec())
         val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
         val run = repository.createRun(
@@ -78,6 +78,40 @@ class AutomationRuntimeTest {
         runtime.restoreTriggers()
 
         assertEquals(5_000L, continuations.scheduled[run.id])
+    }
+
+    @Test
+    fun restoreTriggersSchedulesRemainingWaitForWaitingFlowContinuations() = runTest {
+        var now = 1_000L
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { now })
+        val geofences = RecordingGeofenceRegistrar()
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { now })
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = repository.createRun(
+            automationId = saved.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Waiting,
+            message = "waiting"
+        )
+        repository.recordStep(
+            runId = run.id,
+            automationId = saved.id,
+            step = waitStep,
+            stepIndex = 0,
+            status = AutomationRunStatus.Waiting,
+            attempt = 1,
+            message = "waiting"
+        )
+        now = 3_500L
+
+        runtime.restoreTriggers()
+
+        assertEquals(2_500L, continuations.scheduled[run.id])
     }
 
     private fun geofenceSpec() = AutomationSpec(

@@ -7,7 +7,8 @@ class AutomationRuntime(
     private val repository: AutomationRepository,
     private val geofenceRegistrar: AutomationGeofenceRegistrar,
     private val scheduleScheduler: AutomationScheduleScheduler,
-    private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler
+    private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
         val automations = repository.list()
@@ -41,11 +42,17 @@ class AutomationRuntime(
             val waitingStep = repository.stepRuns(run.id)
                 .lastOrNull { it.status == AutomationRunStatus.Waiting }
             val flowStep = spec.flow?.steps.orEmpty().firstOrNull { it.id == waitingStep?.stepId }
-            if (flowStep?.type == AutomationFlowStepTypes.Wait) {
-                flowContinuationScheduler.schedule(run.id, flowStep.waitMillis)
+            if (waitingStep != null && flowStep?.type == AutomationFlowStepTypes.Wait) {
+                flowContinuationScheduler.schedule(run.id, flowStep.remainingWaitMillis(waitingStep))
             } else {
                 flowContinuationScheduler.cancel(run.id)
             }
         }
+    }
+
+    private fun AutomationFlowStep.remainingWaitMillis(waitingStep: AutomationStepRunRecord): Long {
+        val waitStartedAt = waitingStep.completedAt ?: waitingStep.startedAt
+        val elapsedMillis = clock() - waitStartedAt
+        return (waitMillis - elapsedMillis).coerceAtLeast(0L)
     }
 }
