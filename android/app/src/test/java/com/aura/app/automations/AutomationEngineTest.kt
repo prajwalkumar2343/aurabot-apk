@@ -429,6 +429,36 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun manualRunSkipsWhenFlowAlreadyWaiting() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+
+        val waiting = engine.runNow(saved.id)
+        val duplicate = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Waiting, waiting.status)
+        assertEquals(AutomationRunStatus.Skipped, duplicate.status)
+        assertEquals("Automation already has an active run", duplicate.message)
+        assertEquals(waiting.runId, duplicate.runId)
+        assertEquals(0, executor.events.size)
+    }
+
+    @Test
     fun resumeRunSkipsTerminalRunsWithoutReplayingActions() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val executor = RecordingActionExecutor()

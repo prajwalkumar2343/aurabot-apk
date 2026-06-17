@@ -21,7 +21,7 @@ class AutomationEngine(
             .map { runAutomation(it, event) }
     }
 
-    suspend fun runNow(automationId: String, values: Map<String, String> = emptyMap()): AutomationRunResult {
+    suspend fun runNow(automationId: String, values: Map<String, String> = emptyMap()): AutomationRunResult = mutex.withLock {
         val spec = repository.get(automationId)
             ?: return AutomationRunResult(automationId, AutomationRunStatus.Failed, "Automation not found")
         return runAutomation(
