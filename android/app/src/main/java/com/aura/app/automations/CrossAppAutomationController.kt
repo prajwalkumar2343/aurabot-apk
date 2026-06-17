@@ -39,6 +39,9 @@ class CrossAppAutomationController(
                 AutomationActionTypes.WaitForText -> waitThen(action, event) {
                     accessibility.has(action.selector(event, fallbackTextKey = AutomationActionMetadata.Text))
                 }
+                AutomationActionTypes.WaitForTarget -> waitThen(action, event) {
+                    accessibility.has(action.selector(event))
+                }
                 AutomationActionTypes.Scroll -> waitThen(action, event, selectorRequired = false) {
                     accessibility.scroll(
                         selector = action.optionalSelector(event),

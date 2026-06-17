@@ -38,6 +38,7 @@ class AutomationPermissionPlanner {
             AutomationActionTypes.TapBounds,
             AutomationActionTypes.TypeText,
             AutomationActionTypes.WaitForText,
+            AutomationActionTypes.WaitForTarget,
             AutomationActionTypes.WaitForApp,
             AutomationActionTypes.TapTarget,
             AutomationActionTypes.LongPressTarget,

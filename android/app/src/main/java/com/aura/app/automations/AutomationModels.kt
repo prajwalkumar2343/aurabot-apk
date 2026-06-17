@@ -173,6 +173,7 @@ object AutomationActionTypes {
     const val TapBounds = "tap_bounds"
     const val TypeText = "type_text"
     const val WaitForText = "wait_for_text"
+    const val WaitForTarget = "wait_for_target"
     const val TapTarget = "tap_target"
     const val LongPressTarget = "long_press_target"
     const val ClearText = "clear_text"

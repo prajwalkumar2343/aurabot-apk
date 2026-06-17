@@ -81,6 +81,29 @@ class CrossAppAutomationControllerTest {
     }
 
     @Test
+    fun waitForTargetCanUseStableSelectorWithoutText() = runTest {
+        val bridge = RecordingAccessibilityBridge(hasResults = listOf(false, true))
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.WaitForTarget,
+                metadata = mapOf(
+                    AutomationActionMetadata.ViewId to "com.example:id/login",
+                    AutomationActionMetadata.PackageName to "com.example",
+                    AutomationActionMetadata.TimeoutMillis to "1000"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(2, bridge.hasSelectors.size)
+        assertEquals("com.example:id/login", bridge.hasSelectors.last().viewId)
+        assertEquals("com.example", bridge.hasSelectors.last().packageName)
+    }
+
+    @Test
     fun disabledAccessibilityFailsClearly() = runTest {
         val bridge = RecordingAccessibilityBridge(enabled = false)
         val controller = CrossAppAutomationController(testContext(), bridge)
