@@ -143,7 +143,9 @@ class AutomationEngine(
         val stepResults = mutableListOf<AutomationStepResult>()
         val actionResults = mutableListOf<AutomationActionResult>()
         var finalStatus = AutomationRunStatus.Success
-        var finalMessage = "Automation ran ${steps.size} step(s)"
+        var finalMessage = ""
+        var nonBlockingSkippedSteps = 0
+        var nonBlockingFailedSteps = 0
         for ((index, step) in steps.withIndex().drop(startStepIndex)) {
             val stepResult = executeStep(run.id, spec.id, index, step, enrichedEvent)
             stepResults += stepResult
@@ -164,6 +166,7 @@ class AutomationEngine(
                         finalMessage = stepResult.message
                         break
                     }
+                    nonBlockingSkippedSteps += 1
                 }
                 AutomationRunStatus.Failed -> {
                     if (!step.continueOnFailure) {
@@ -171,8 +174,16 @@ class AutomationEngine(
                         finalMessage = stepResult.message
                         break
                     }
+                    nonBlockingFailedSteps += 1
                 }
             }
+        }
+        if (finalStatus == AutomationRunStatus.Success) {
+            finalMessage = successMessage(
+                executedSteps = stepResults.size,
+                skippedSteps = nonBlockingSkippedSteps,
+                failedSteps = nonBlockingFailedSteps
+            )
         }
         repository.updateRun(run.id, finalStatus, finalMessage, enrichedEvent.values)
         if (finalStatus != AutomationRunStatus.Waiting) {
@@ -180,6 +191,15 @@ class AutomationEngine(
         }
         repository.log(spec.id, event.type, finalStatus, finalMessage)
         return AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
+    }
+
+    private fun successMessage(executedSteps: Int, skippedSteps: Int, failedSteps: Int): String {
+        val base = "Automation ran $executedSteps step(s)"
+        val nonBlocking = buildList {
+            if (skippedSteps > 0) add("$skippedSteps non-blocking skipped")
+            if (failedSteps > 0) add("$failedSteps non-blocking failed")
+        }
+        return if (nonBlocking.isEmpty()) base else "$base with ${nonBlocking.joinToString(" and ")} step(s)"
     }
 
     private suspend fun executeStep(

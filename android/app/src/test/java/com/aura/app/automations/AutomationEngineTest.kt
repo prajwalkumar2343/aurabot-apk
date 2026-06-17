@@ -721,6 +721,76 @@ class AutomationEngineTest {
         assertEquals(2, executor.calls)
     }
 
+    @Test
+    fun flowAutomationReportsNonBlockingSkippedSteps() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "optional-condition",
+                            type = AutomationFlowStepTypes.Condition,
+                            condition = AutomationCondition(
+                                key = "ready",
+                                operator = AutomationOperators.Equals,
+                                value = "true"
+                            ),
+                            continueOnFailure = true
+                        ),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Still running")
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id, mapOf("ready" to "false"))
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals("Automation ran 2 step(s) with 1 non-blocking skipped step(s)", result.message)
+        assertEquals(listOf(AutomationRunStatus.Skipped, AutomationRunStatus.Success), result.stepResults.map { it.status })
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun flowAutomationReportsNonBlockingFailedSteps() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = StepAwareActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "optional-action",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Optional"),
+                            continueOnFailure = true
+                        ),
+                        AutomationFlowStep(
+                            id = "required-action",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.DraftMessage, messageTemplate = "Required")
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals("Automation ran 2 step(s) with 1 non-blocking failed step(s)", result.message)
+        assertEquals(listOf(AutomationRunStatus.Failed, AutomationRunStatus.Success), result.stepResults.map { it.status })
+        assertEquals(listOf(AutomationActionTypes.Notify, AutomationActionTypes.DraftMessage), executor.actionTypes)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun flowAutomationAppliesRetryBackoffBetweenFailedAttempts() = runTest {
@@ -812,6 +882,19 @@ private class FlakyActionExecutor : AutomationActionExecutor {
         calls += 1
         return if (calls == 1) {
             AutomationActionResult(action.type, AutomationRunStatus.Failed, "try again")
+        } else {
+            AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+        }
+    }
+}
+
+private class StepAwareActionExecutor : AutomationActionExecutor {
+    val actionTypes = mutableListOf<String>()
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        actionTypes += action.type
+        return if (actionTypes.size == 1) {
+            AutomationActionResult(action.type, AutomationRunStatus.Failed, "optional failed")
         } else {
             AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
         }
