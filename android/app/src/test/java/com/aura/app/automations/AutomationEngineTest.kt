@@ -261,6 +261,44 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRejectsAmbiguousFlowStepShapes() {
+        fun invalid(step: AutomationFlowStep) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(
+                    manualSpec().copy(
+                        actions = emptyList(),
+                        flow = AutomationFlow(steps = listOf(step))
+                    )
+                )
+            }
+        }
+
+        invalid(
+            AutomationFlowStep(
+                id = "wait-with-action",
+                type = AutomationFlowStepTypes.Wait,
+                waitMillis = 1_000L,
+                action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ignored")
+            )
+        )
+        invalid(
+            AutomationFlowStep(
+                id = "action-with-wait",
+                type = AutomationFlowStepTypes.Action,
+                waitMillis = 1_000L,
+                action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Run")
+            )
+        )
+        invalid(
+            AutomationFlowStep(
+                id = "checkpoint-with-condition",
+                type = AutomationFlowStepTypes.Checkpoint,
+                condition = AutomationCondition(key = "ready")
+            )
+        )
+    }
+
+    @Test
     fun dailyScheduleHonorsDaysOfWeek() {
         val zone = ZoneId.of("UTC")
         val mondayAfterRunTime = ZonedDateTime.of(2026, 6, 8, 10, 0, 0, 0, zone)

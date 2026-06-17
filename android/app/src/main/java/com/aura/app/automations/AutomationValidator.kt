@@ -92,19 +92,32 @@ object AutomationValidator {
             require(step.waitMillis >= 0L) { "Flow step waitMillis cannot be negative" }
             when (step.type) {
                 AutomationFlowStepTypes.Action -> {
+                    require(step.condition == null) { "Action flow steps cannot include a condition" }
+                    require(step.waitMillis == 0L) { "Action flow steps cannot include waitMillis" }
                     val action = requireNotNull(step.action) { "Action flow steps need an action" }
                     validateAction(action)
                     require(!action.isHighImpactCrossAppAction() || hasPriorCheckpoint) {
                         "High-impact cross-app action '${action.type}' needs a prior checkpoint step"
                     }
                 }
-                AutomationFlowStepTypes.Condition -> validateCondition(
-                    requireNotNull(step.condition) { "Condition flow steps need a condition" }
-                )
-                AutomationFlowStepTypes.Wait -> require(step.waitMillis > 0L) {
-                    "Wait flow steps need positive waitMillis"
+                AutomationFlowStepTypes.Condition -> {
+                    require(step.action == null) { "Condition flow steps cannot include an action" }
+                    require(step.waitMillis == 0L) { "Condition flow steps cannot include waitMillis" }
+                    validateCondition(
+                        requireNotNull(step.condition) { "Condition flow steps need a condition" }
+                    )
                 }
-                AutomationFlowStepTypes.Checkpoint -> hasPriorCheckpoint = true
+                AutomationFlowStepTypes.Wait -> {
+                    require(step.action == null) { "Wait flow steps cannot include an action" }
+                    require(step.condition == null) { "Wait flow steps cannot include a condition" }
+                    require(step.waitMillis > 0L) { "Wait flow steps need positive waitMillis" }
+                }
+                AutomationFlowStepTypes.Checkpoint -> {
+                    require(step.action == null) { "Checkpoint flow steps cannot include an action" }
+                    require(step.condition == null) { "Checkpoint flow steps cannot include a condition" }
+                    require(step.waitMillis == 0L) { "Checkpoint flow steps cannot include waitMillis" }
+                    hasPriorCheckpoint = true
+                }
             }
         }
     }
