@@ -140,15 +140,63 @@ class CrossAppAutomationControllerTest {
         assertEquals(listOf("down", "down"), bridge.scrollDirections)
         assertEquals("Advanced", bridge.hasSelectors.last().text)
     }
+
+    @Test
+    fun failedCrossAppActionIncludesScreenDiagnostics() = runTest {
+        val bridge = RecordingAccessibilityBridge(tapResults = List(4) { false })
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.TapTarget,
+                metadata = mapOf(
+                    AutomationActionMetadata.Text to "Continue",
+                    AutomationActionMetadata.TimeoutMillis to "250",
+                    AutomationActionMetadata.SettleMillis to "0"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertTrue(result.message.contains("tap failed"))
+        assertTrue(result.message.contains("Screen snapshot:"))
+        assertEquals(null to 12, bridge.inspectCalls.single())
+    }
+
+    @Test
+    fun failedCrossAppActionCanDisableScreenDiagnostics() = runTest {
+        val bridge = RecordingAccessibilityBridge(tapResults = List(4) { false })
+        val controller = CrossAppAutomationController(testContext(), bridge)
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.TapTarget,
+                metadata = mapOf(
+                    AutomationActionMetadata.Text to "Continue",
+                    AutomationActionMetadata.TimeoutMillis to "250",
+                    AutomationActionMetadata.SettleMillis to "0",
+                    AutomationActionMetadata.IncludeDiagnostics to "false"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertTrue(!result.message.contains("Screen snapshot:"))
+        assertEquals(emptyList<Pair<String?, Int>>(), bridge.inspectCalls)
+    }
 }
 
 private fun testContext() = ContextWrapper(null)
 
 private class RecordingAccessibilityBridge(
     private val enabled: Boolean = true,
-    hasResults: List<Boolean> = listOf(true)
+    hasResults: List<Boolean> = listOf(true),
+    tapResults: List<Boolean> = listOf(true)
 ) : CrossAppAccessibilityBridge {
     private val hasQueue = hasResults.toMutableList()
+    private val tapQueue = tapResults.toMutableList()
     val tappedSelectors = mutableListOf<CrossAppUiSelector>()
     val typedText = mutableListOf<String>()
     val typedSelectors = mutableListOf<CrossAppUiSelector?>()
@@ -160,7 +208,8 @@ private class RecordingAccessibilityBridge(
 
     override fun tap(selector: CrossAppUiSelector): CrossAppUiResult {
         tappedSelectors += selector
-        return CrossAppUiResult(true, "tapped")
+        val success = if (tapQueue.isNotEmpty()) tapQueue.removeAt(0) else true
+        return CrossAppUiResult(success, if (success) "tapped" else "tap failed")
     }
 
     override fun longPress(selector: CrossAppUiSelector): CrossAppUiResult =

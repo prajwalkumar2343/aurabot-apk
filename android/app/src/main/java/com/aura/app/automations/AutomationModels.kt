@@ -210,6 +210,8 @@ object AutomationActionMetadata {
     const val DurationMillis = "durationMillis"
     const val MaxNodes = "maxNodes"
     const val MaxScrolls = "maxScrolls"
+    const val IncludeDiagnostics = "includeDiagnostics"
+    const val DiagnosticMaxNodes = "diagnosticMaxNodes"
     const val RiskLevel = "riskLevel"
 }
 

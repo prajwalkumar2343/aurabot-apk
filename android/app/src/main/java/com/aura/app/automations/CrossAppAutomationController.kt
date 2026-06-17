@@ -51,8 +51,9 @@ class CrossAppAutomationController(
                 AutomationActionTypes.PressHome -> requireAccessibility(action.type) { accessibility.pressHome() }
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported cross-app action")
             }
+            val diagnosed = result.withFailureDiagnostics(action)
             settle(action)
-            result
+            diagnosed
         }
 
     private fun openApp(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
@@ -205,6 +206,19 @@ class CrossAppAutomationController(
         )
     }
 
+    private fun AutomationActionResult.withFailureDiagnostics(action: AutomationAction): AutomationActionResult {
+        if (status != AutomationRunStatus.Failed) return this
+        if (action.type == AutomationActionTypes.InspectScreen) return this
+        if (!action.includeDiagnostics()) return this
+        if (!accessibility.isEnabled()) return this
+        val snapshot = accessibility.inspect(
+            packageName = action.metadata[AutomationActionMetadata.PackageName]?.ifBlank { null },
+            maxNodes = action.diagnosticMaxNodes()
+        )
+        if (!snapshot.success || snapshot.message.isBlank()) return this
+        return copy(message = "$message\nScreen snapshot:\n${snapshot.message}")
+    }
+
     private suspend fun settle(action: AutomationAction) {
         val delayMillis = action.metadata[AutomationActionMetadata.SettleMillis]?.toLongOrNull()
             ?.coerceIn(0L, 10_000L)
@@ -258,6 +272,13 @@ class CrossAppAutomationController(
         metadata[AutomationActionMetadata.DurationMillis]?.toLongOrNull()?.coerceIn(50L, 2_000L)
             ?: DEFAULT_GESTURE_MILLIS
 
+    private fun AutomationAction.includeDiagnostics(): Boolean =
+        metadata[AutomationActionMetadata.IncludeDiagnostics]?.toBooleanStrictOrNull() ?: true
+
+    private fun AutomationAction.diagnosticMaxNodes(): Int =
+        metadata[AutomationActionMetadata.DiagnosticMaxNodes]?.toIntOrNull()?.coerceIn(1, 40)
+            ?: DEFAULT_DIAGNOSTIC_MAX_NODES
+
     private fun AutomationAction.scrollSettleMillis(): Long =
         metadata[AutomationActionMetadata.SettleMillis]?.toLongOrNull()?.coerceIn(0L, 5_000L)
             ?: DEFAULT_SCROLL_SETTLE_MILLIS
@@ -284,6 +305,7 @@ class CrossAppAutomationController(
         private const val DEFAULT_SCROLL_SETTLE_MILLIS = 250L
         private const val DEFAULT_GESTURE_MILLIS = 300L
         private const val DEFAULT_MAX_SCROLLS = 8
+        private const val DEFAULT_DIAGNOSTIC_MAX_NODES = 12
 
         fun openAccessibilitySettingsIntent(): Intent =
             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
