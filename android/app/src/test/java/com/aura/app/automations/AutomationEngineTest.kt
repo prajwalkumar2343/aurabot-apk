@@ -170,6 +170,31 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRejectsInvalidCrossAppMetadataValues() {
+        fun invalid(metadata: Map<String, String>) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(
+                    manualSpec().copy(
+                        actions = listOf(
+                            AutomationAction(
+                                type = AutomationActionTypes.TapTarget,
+                                metadata = mapOf(AutomationActionMetadata.Text to "Continue") + metadata
+                            )
+                        )
+                    )
+                )
+            }
+        }
+
+        invalid(mapOf(AutomationActionMetadata.TimeoutMillis to "100"))
+        invalid(mapOf(AutomationActionMetadata.PartialMatch to "yes"))
+        invalid(mapOf(AutomationActionMetadata.Occurrence to "-1"))
+        invalid(mapOf(AutomationActionMetadata.DiagnosticMaxNodes to "0"))
+        invalid(mapOf(AutomationActionMetadata.StableSamples to "1"))
+        invalid(mapOf(AutomationActionMetadata.RiskLevel to "urgent"))
+    }
+
+    @Test
     fun validatorRequiresCheckpointBeforeHighImpactCrossAppGesture() {
         assertThrows(IllegalArgumentException::class.java) {
             AutomationValidator.validate(

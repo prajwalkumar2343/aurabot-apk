@@ -159,6 +159,7 @@ object AutomationValidator {
         ) {
             "Unsupported automation action: ${action.type}"
         }
+        validateCommonMetadata(action)
         if (
             action.type == AutomationActionTypes.DraftMessage ||
             action.type == AutomationActionTypes.EtaMessage ||
@@ -249,6 +250,59 @@ object AutomationValidator {
                 require(maxNodes != null && maxNodes in 1..80) { "Inspect screen maxNodes must be between 1 and 80" }
             }
         }
+    }
+
+    private fun validateCommonMetadata(action: AutomationAction) {
+        action.metadata[AutomationActionMetadata.TimeoutMillis]?.let {
+            requireLongMetadata(it, AutomationActionMetadata.TimeoutMillis, 250L, 120_000L)
+        }
+        action.metadata[AutomationActionMetadata.SettleMillis]?.let {
+            requireLongMetadata(it, AutomationActionMetadata.SettleMillis, 0L, 10_000L)
+        }
+        action.metadata[AutomationActionMetadata.DurationMillis]?.let {
+            requireLongMetadata(it, AutomationActionMetadata.DurationMillis, 50L, 2_000L)
+        }
+        action.metadata[AutomationActionMetadata.Occurrence]?.let {
+            requireIntMetadata(it, AutomationActionMetadata.Occurrence, 0, 100)
+        }
+        action.metadata[AutomationActionMetadata.MaxNodes]?.let {
+            requireIntMetadata(it, AutomationActionMetadata.MaxNodes, 1, 80)
+        }
+        action.metadata[AutomationActionMetadata.MaxScrolls]?.let {
+            requireIntMetadata(it, AutomationActionMetadata.MaxScrolls, 1, 50)
+        }
+        action.metadata[AutomationActionMetadata.DiagnosticMaxNodes]?.let {
+            requireIntMetadata(it, AutomationActionMetadata.DiagnosticMaxNodes, 1, 40)
+        }
+        action.metadata[AutomationActionMetadata.StableSamples]?.let {
+            requireIntMetadata(it, AutomationActionMetadata.StableSamples, 2, 6)
+        }
+        listOf(
+            AutomationActionMetadata.PartialMatch,
+            AutomationActionMetadata.ClickableOnly,
+            AutomationActionMetadata.EditableOnly,
+            AutomationActionMetadata.EnabledOnly,
+            AutomationActionMetadata.IncludeDiagnostics
+        ).forEach { key ->
+            action.metadata[key]?.let { value ->
+                require(value.toBooleanStrictOrNull() != null) { "$key metadata must be true or false" }
+            }
+        }
+        action.metadata[AutomationActionMetadata.RiskLevel]?.let { value ->
+            require(value.lowercase() in setOf("low", "medium", "high")) {
+                "riskLevel metadata must be low, medium, or high"
+            }
+        }
+    }
+
+    private fun requireIntMetadata(value: String, key: String, min: Int, max: Int) {
+        val parsed = value.toIntOrNull()
+        require(parsed != null && parsed in min..max) { "$key metadata must be between $min and $max" }
+    }
+
+    private fun requireLongMetadata(value: String, key: String, min: Long, max: Long) {
+        val parsed = value.toLongOrNull()
+        require(parsed != null && parsed in min..max) { "$key metadata must be between $min and $max" }
     }
 
     private fun AutomationAction.hasSelector(): Boolean =
