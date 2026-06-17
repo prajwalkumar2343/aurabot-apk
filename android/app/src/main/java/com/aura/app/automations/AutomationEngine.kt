@@ -46,10 +46,10 @@ class AutomationEngine(
             )
         }
         val spec = repository.get(run.automationId)
-            ?: return AutomationRunResult(run.automationId, AutomationRunStatus.Failed, "Automation not found", runId = runId)
+            ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
         val waitingStep = repository.stepRuns(runId)
             .lastOrNull { it.status == AutomationRunStatus.Waiting }
-            ?: return failWaitingRun(run, "Automation run is waiting without a resumable step")
+            ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation run is waiting without a resumable step")
         val nextStepIndex = waitingStep.stepIndex + 1
         return runAutomation(
             spec = spec,
@@ -63,11 +63,15 @@ class AutomationEngine(
         )
     }
 
-    private suspend fun failWaitingRun(run: AutomationRunRecord, message: String): AutomationRunResult {
-        repository.updateRun(run.id, AutomationRunStatus.Failed, message)
+    private suspend fun terminalizeRun(
+        run: AutomationRunRecord,
+        status: String,
+        message: String
+    ): AutomationRunResult {
+        repository.updateRun(run.id, status, message)
         flowContinuationScheduler.cancel(run.id)
-        repository.log(run.automationId, run.eventType, AutomationRunStatus.Failed, message)
-        return AutomationRunResult(run.automationId, AutomationRunStatus.Failed, message, runId = run.id)
+        repository.log(run.automationId, run.eventType, status, message)
+        return AutomationRunResult(run.automationId, status, message, runId = run.id)
     }
 
     private suspend fun runAutomation(spec: AutomationSpec, event: AutomationEvent): AutomationRunResult {
@@ -81,7 +85,13 @@ class AutomationEngine(
         startStepIndex: Int
     ): AutomationRunResult {
         if (!spec.enabled) {
-            return result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is disabled")
+            return result(
+                spec.id,
+                event.type,
+                AutomationRunStatus.Skipped,
+                "Automation is disabled",
+                existingRunId = existingRunId
+            )
         }
         if (existingRunId == null && spec.flow?.concurrencyPolicy != AutomationConcurrencyPolicies.AllowParallel) {
             val activeRun = repository.activeRun(spec.id)
@@ -105,11 +115,23 @@ class AutomationEngine(
             return result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is cooling down")
         }
         if (!conditionEvaluator.passes(spec.conditions, event)) {
-            return result(spec.id, event.type, AutomationRunStatus.Skipped, "Conditions did not pass")
+            return result(
+                spec.id,
+                event.type,
+                AutomationRunStatus.Skipped,
+                "Conditions did not pass",
+                existingRunId = existingRunId
+            )
         }
         val steps = spec.effectiveSteps()
         if (steps.isEmpty()) {
-            return result(spec.id, event.type, AutomationRunStatus.Skipped, "No flow steps configured")
+            return result(
+                spec.id,
+                event.type,
+                AutomationRunStatus.Skipped,
+                "No flow steps configured",
+                existingRunId = existingRunId
+            )
         }
 
         val enrichedEvent = contextEnricher.enrich(spec, event)
@@ -249,10 +271,15 @@ class AutomationEngine(
         eventType: String,
         status: String,
         message: String,
-        runId: String? = null
+        runId: String? = null,
+        existingRunId: String? = null
     ): AutomationRunResult {
+        existingRunId?.let { id ->
+            repository.updateRun(id, status, message)
+            flowContinuationScheduler.cancel(id)
+        }
         repository.log(automationId, eventType, status, message)
-        return AutomationRunResult(automationId, status, message, runId = runId)
+        return AutomationRunResult(automationId, status, message, runId = runId ?: existingRunId)
     }
 
     private fun AutomationSpec.effectiveSteps(): List<AutomationFlowStep> =

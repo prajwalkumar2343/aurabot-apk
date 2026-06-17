@@ -499,6 +499,137 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun resumeRunTerminalizesWaitingRunWhenAutomationIsDisabled() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val scheduler = RecordingEngineFlowContinuationScheduler()
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            flowContinuationScheduler = scheduler,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+        repository.setEnabled(saved.id, false)
+
+        val result = engine.resumeRun(runId)
+
+        assertEquals(AutomationRunStatus.Skipped, result.status)
+        assertEquals("Automation is disabled", result.message)
+        assertEquals(AutomationRunStatus.Skipped, repository.getRun(runId)?.status)
+        assertTrue(runId in scheduler.cancelled)
+        assertEquals(0, executor.events.size)
+    }
+
+    @Test
+    fun resumeRunTerminalizesWaitingRunWhenAutomationIsMissing() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val scheduler = RecordingEngineFlowContinuationScheduler()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = scheduler,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+        repository.delete(saved.id)
+
+        val result = engine.resumeRun(runId)
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation not found", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertTrue(runId in scheduler.cancelled)
+    }
+
+    @Test
+    fun resumeRunTerminalizesWaitingRunWhenConditionsNoLongerPass() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val scheduler = RecordingEngineFlowContinuationScheduler()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = scheduler,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                conditions = listOf(
+                    AutomationCondition(
+                        key = "ready",
+                        operator = AutomationOperators.Equals,
+                        value = "true"
+                    )
+                ),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+        val waitingStep = saved.flow?.steps?.first() ?: error("waiting step missing")
+        val run = repository.createRun(
+            automationId = saved.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Waiting,
+            message = "waiting"
+        )
+        repository.recordStep(
+            runId = run.id,
+            automationId = saved.id,
+            step = waitingStep,
+            stepIndex = 0,
+            status = AutomationRunStatus.Waiting,
+            attempt = 1,
+            message = "waiting"
+        )
+
+        val result = engine.resumeRun(run.id)
+
+        assertEquals(AutomationRunStatus.Skipped, result.status)
+        assertEquals("Conditions did not pass", result.message)
+        assertEquals(AutomationRunStatus.Skipped, repository.getRun(run.id)?.status)
+        assertTrue(run.id in scheduler.cancelled)
+    }
+
+    @Test
     fun waitStepSchedulesContinuationBeforeResume() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val scheduler = RecordingEngineFlowContinuationScheduler()
