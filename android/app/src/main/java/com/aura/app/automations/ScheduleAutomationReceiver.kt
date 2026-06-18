@@ -16,18 +16,34 @@ class ScheduleAutomationReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val container = (context.applicationContext as AuraApplication).container
-                container.automationEngine.handle(
-                    AutomationEvent(
-                        type = AutomationEvents.ScheduleTick,
-                        automationId = automationId
-                    )
+                ScheduleAutomationCoordinator.handle(
+                    execute = {
+                        container.automationEngine.handle(
+                            AutomationEvent(
+                                type = AutomationEvents.ScheduleTick,
+                                automationId = automationId
+                            )
+                        )
+                    },
+                    reschedule = {
+                        container.automationRepository.get(automationId)?.takeIf { it.enabled }?.let { spec ->
+                            container.scheduleAutomationScheduler.schedule(spec)
+                        }
+                    }
                 )
-                container.automationRepository.get(automationId)?.takeIf { it.enabled }?.let { spec ->
-                    container.scheduleAutomationScheduler.schedule(spec)
-                }
             } finally {
                 pending.finish()
             }
+        }
+    }
+}
+
+internal object ScheduleAutomationCoordinator {
+    suspend fun handle(execute: suspend () -> Unit, reschedule: suspend () -> Unit) {
+        try {
+            execute()
+        } finally {
+            reschedule()
         }
     }
 }
