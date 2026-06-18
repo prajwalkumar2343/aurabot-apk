@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 
 interface AutomationGeofenceRegistrar {
@@ -24,21 +25,27 @@ class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeof
     @SuppressLint("MissingPermission")
     override suspend fun restore(automations: List<AutomationSpec>) {
         val automationIds = automations.map { it.id }.filter { it.isNotBlank() }
-        if (automationIds.isNotEmpty()) {
-            runCatching { geofencingClient.removeGeofences(automationIds).await() }
-        }
-        val geofences = automations
+        val enabledGeofenceAutomations = automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Geofence }
+        val geofences = enabledGeofenceAutomations
             .mapNotNull { it.toGeofence() }
-        if (geofences.isEmpty() || !hasGeofencePermissions()) return
-
-        val request = GeofencingRequest.Builder()
-            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_EXIT)
-            .addGeofences(geofences)
-            .build()
-        runCatching {
-            geofencingClient.addGeofences(request, pendingIntent()).await()
-        }
+        GeofenceRegistrationCoordinator.restore(
+            automationIds = automationIds,
+            hasEnabledGeofences = geofences.isNotEmpty(),
+            hasPermissions = hasGeofencePermissions(),
+            removeGeofences = { ids -> geofencingClient.removeGeofences(ids).await() },
+            addGeofences = {
+                val request = GeofencingRequest.Builder()
+                    .setInitialTrigger(
+                        GeofenceRegistrationCoordinator.initialTrigger(
+                            enabledGeofenceAutomations.mapNotNull { it.trigger.geofence?.transition }
+                        )
+                    )
+                    .addGeofences(geofences)
+                    .build()
+                geofencingClient.addGeofences(request, pendingIntent()).await()
+            }
+        )
     }
 
     override suspend fun remove(automationId: String) {
@@ -77,5 +84,60 @@ class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeof
             Intent(context, GeofenceTransitionReceiver::class.java),
             flags
         )
+    }
+}
+
+internal object GeofenceRegistrationCoordinator {
+    fun initialTrigger(transitions: List<String>): Int =
+        transitions.fold(0) { triggerMask, transition ->
+            triggerMask or when (transition) {
+                AutomationTriggerTypes.GeofenceEnter -> GeofencingRequest.INITIAL_TRIGGER_ENTER
+                else -> GeofencingRequest.INITIAL_TRIGGER_EXIT
+            }
+        }
+
+    suspend fun restore(
+        automationIds: List<String>,
+        hasEnabledGeofences: Boolean,
+        hasPermissions: Boolean,
+        removeGeofences: suspend (List<String>) -> Unit,
+        addGeofences: suspend () -> Unit
+    ) {
+        val failures = mutableListOf<Exception>()
+        if (automationIds.isNotEmpty()) {
+            captureFailure { removeGeofences(automationIds) }?.let(failures::add)
+        }
+        if (hasEnabledGeofences) {
+            if (!hasPermissions) {
+                failures += IllegalStateException(
+                    "Fine and background location permissions are required to arm geofence automations"
+                )
+            } else {
+                captureFailure(addGeofences)?.let(failures::add)
+            }
+        }
+        if (failures.isNotEmpty()) throw GeofenceRegistrationException(failures)
+    }
+
+    private suspend fun captureFailure(block: suspend () -> Unit): Exception? =
+        try {
+            block()
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error
+        }
+}
+
+internal class GeofenceRegistrationException(failures: List<Exception>) : Exception(
+    failures.joinToString(
+        prefix = "Geofence registration failed: ",
+        separator = "; "
+    ) { it.message ?: it::class.simpleName ?: "Unknown error" },
+    failures.firstOrNull()
+) {
+    init {
+        failures.drop(1).forEach(::addSuppressed)
     }
 }
