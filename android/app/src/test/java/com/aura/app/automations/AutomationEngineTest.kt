@@ -1,7 +1,9 @@
 package com.aura.app.automations
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -594,6 +596,132 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun concurrentManualRunSkipsWhileDefaultPolicyRunIsExecuting() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-check"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(manualSpec())
+
+        val first = async { engine.runNow(saved.id) }
+        executor.firstStarted.await()
+        val overlapping = engine.runNow(saved.id)
+        executor.release.complete(Unit)
+        val completed = first.await()
+
+        assertEquals(AutomationRunStatus.Success, completed.status)
+        assertEquals(AutomationRunStatus.Skipped, overlapping.status)
+        assertEquals("Automation already has an active run", overlapping.message)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun automationDisabledDuringEnrichmentDoesNotStart() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val saved = repository.upsert(manualSpec())
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = object : AutomationContextEnricher {
+                override suspend fun enrich(spec: AutomationSpec, event: AutomationEvent): AutomationEvent {
+                    repository.setEnabled(spec.id, false)
+                    return event.copy(automationId = spec.id)
+                }
+            },
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+
+        val result = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Skipped, result.status)
+        assertEquals("Automation is disabled", result.message)
+        assertEquals(0, executor.events.size)
+        assertTrue(repository.runs(saved.id).isEmpty())
+    }
+
+    @Test
+    fun allowParallelPolicyRunsActionsConcurrently() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    concurrencyPolicy = AutomationConcurrencyPolicies.AllowParallel,
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Run")
+                        )
+                    )
+                )
+            )
+        )
+
+        val first = async { engine.runNow(saved.id) }
+        val second = async { engine.runNow(saved.id) }
+        executor.twoStarted.await()
+        executor.release.complete(Unit)
+        val results = listOf(first.await(), second.await())
+
+        assertEquals(listOf(AutomationRunStatus.Success, AutomationRunStatus.Success), results.map { it.status })
+        assertEquals(2, executor.events.size)
+        assertEquals(2, repository.runs(saved.id).size)
+    }
+
+    @Test
+    fun executingAutomationDoesNotBlockDifferentAutomation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-a"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(manualSpec().copy(id = "manual-a", name = "Manual A"))
+        val secondSpec = repository.upsert(manualSpec().copy(id = "manual-b", name = "Manual B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = engine.runNow(secondSpec.id)
+        executor.release.complete(Unit)
+
+        assertEquals(AutomationRunStatus.Success, second.status)
+        assertEquals(AutomationRunStatus.Success, first.await().status)
+        assertEquals(listOf("manual-a", "manual-b"), executor.events.map { it.automationId })
+    }
+
+    @Test
+    fun duplicateResumeSkipsWhileFirstResumeIsExecuting() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-check"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Confirmed")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+
+        val firstResume = async { engine.resumeRun(runId) }
+        executor.firstStarted.await()
+        val duplicate = engine.resumeRun(runId)
+        executor.release.complete(Unit)
+
+        assertEquals(AutomationRunStatus.Success, firstResume.await().status)
+        assertEquals(AutomationRunStatus.Skipped, duplicate.status)
+        assertEquals("Automation run is not waiting", duplicate.message)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
     fun resumeRunSkipsTerminalRunsWithoutReplayingActions() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val executor = RecordingActionExecutor()
@@ -1104,6 +1232,24 @@ private class RecordingActionExecutor : AutomationActionExecutor {
 
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
         events += event
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+    }
+}
+
+private class ControlledConcurrencyExecutor(
+    private val blockedAutomationIds: Set<String> = emptySet(),
+    private val blockAll: Boolean = false
+) : AutomationActionExecutor {
+    val events = mutableListOf<AutomationEvent>()
+    val firstStarted = CompletableDeferred<Unit>()
+    val twoStarted = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        events += event
+        firstStarted.complete(Unit)
+        if (events.size >= 2) twoStarted.complete(Unit)
+        if (blockAll || event.automationId in blockedAutomationIds) release.await()
         return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
     }
 }

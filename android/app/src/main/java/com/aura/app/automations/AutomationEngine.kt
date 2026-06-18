@@ -16,15 +16,14 @@ class AutomationEngine(
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
-    private val mutex = Mutex()
+    private val stateMutexes = List(StateMutexCount) { Mutex() }
 
-    suspend fun handle(event: AutomationEvent): List<AutomationRunResult> = mutex.withLock {
+    suspend fun handle(event: AutomationEvent): List<AutomationRunResult> =
         repository.listEnabled()
             .filter { triggerMatcher.matches(it, event) }
             .map { runAutomation(it, event) }
-    }
 
-    suspend fun runNow(automationId: String, values: Map<String, String> = emptyMap()): AutomationRunResult = mutex.withLock {
+    suspend fun runNow(automationId: String, values: Map<String, String> = emptyMap()): AutomationRunResult {
         val spec = repository.get(automationId)
             ?: return AutomationRunResult(automationId, AutomationRunStatus.Failed, "Automation not found")
         return runAutomation(
@@ -37,38 +36,96 @@ class AutomationEngine(
         )
     }
 
-    suspend fun resumeRun(runId: String, values: Map<String, String> = emptyMap()): AutomationRunResult = mutex.withLock {
-        val run = repository.getRun(runId)
+    suspend fun resumeRun(runId: String, values: Map<String, String> = emptyMap()): AutomationRunResult {
+        val requestedRun = repository.getRun(runId)
             ?: return AutomationRunResult("", AutomationRunStatus.Failed, "Automation run not found", runId = runId)
-        if (run.status != AutomationRunStatus.Waiting) {
+        if (requestedRun.status != AutomationRunStatus.Waiting) {
             return AutomationRunResult(
-                run.automationId,
+                requestedRun.automationId,
                 AutomationRunStatus.Skipped,
                 "Automation run is not waiting",
                 runId = runId
             )
         }
-        val spec = repository.get(run.automationId)
-            ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
-        if (!spec.enabled) {
-            return terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
+        val expectedWaitingStepId = repository.stepRuns(runId)
+            .lastOrNull { it.status == AutomationRunStatus.Waiting }
+            ?.id
+        val preparation = stateMutex("run:$runId").withLock {
+            prepareResume(runId, expectedWaitingStepId, values)
         }
-        if (run.automationRevision != repository.revision(spec)) {
-            return terminalizeRun(run, AutomationRunStatus.Failed, "Automation changed while run was waiting")
+        return when (preparation) {
+            is ResumePreparation.Ready -> runAutomation(
+                spec = preparation.spec,
+                event = preparation.event,
+                existingRunId = runId,
+                startStepIndex = preparation.startStepIndex
+            )
+            is ResumePreparation.Rejected -> preparation.result
+        }
+    }
+
+    private suspend fun prepareResume(
+        runId: String,
+        expectedWaitingStepId: String?,
+        values: Map<String, String>
+    ): ResumePreparation {
+        val run = repository.getRun(runId)
+            ?: return ResumePreparation.Rejected(
+                AutomationRunResult("", AutomationRunStatus.Failed, "Automation run not found", runId = runId)
+            )
+        if (run.status != AutomationRunStatus.Waiting) {
+            return ResumePreparation.Rejected(
+                AutomationRunResult(
+                    run.automationId,
+                    AutomationRunStatus.Skipped,
+                    "Automation run is not waiting",
+                    runId = runId
+                )
+            )
         }
         val waitingStep = repository.stepRuns(runId)
             .lastOrNull { it.status == AutomationRunStatus.Waiting }
-            ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation run is waiting without a resumable step")
-        val nextStepIndex = waitingStep.stepIndex + 1
-        return runAutomation(
+            ?: return ResumePreparation.Rejected(
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation run is waiting without a resumable step")
+            )
+        if (waitingStep.id != expectedWaitingStepId) {
+            return ResumePreparation.Rejected(
+                AutomationRunResult(
+                    run.automationId,
+                    AutomationRunStatus.Skipped,
+                    "Automation run advanced before this resume request",
+                    runId = runId
+                )
+            )
+        }
+        val spec = repository.get(run.automationId)
+            ?: return ResumePreparation.Rejected(
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
+            )
+        if (!spec.enabled) {
+            return ResumePreparation.Rejected(
+                terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
+            )
+        }
+        if (run.automationRevision != repository.revision(spec)) {
+            return ResumePreparation.Rejected(
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation changed while run was waiting")
+            )
+        }
+        repository.updateRun(
+            runId = run.id,
+            status = AutomationRunStatus.Running,
+            message = "Automation flow resumed",
+            completed = false
+        )
+        return ResumePreparation.Ready(
             spec = spec,
             event = AutomationEvent(
                 type = run.eventType,
                 automationId = run.automationId,
                 values = run.values + values
             ),
-            existingRunId = runId,
-            startStepIndex = nextStepIndex
+            startStepIndex = waitingStep.stepIndex + 1
         )
     }
 
@@ -102,27 +159,6 @@ class AutomationEngine(
                 existingRunId = existingRunId
             )
         }
-        if (existingRunId == null && spec.flow?.concurrencyPolicy != AutomationConcurrencyPolicies.AllowParallel) {
-            val activeRun = repository.activeRun(spec.id)
-            if (activeRun != null) {
-                return result(
-                    spec.id,
-                    event.type,
-                    AutomationRunStatus.Skipped,
-                    "Automation already has an active run",
-                    activeRun.id
-                )
-            }
-        }
-        val lastTriggeredAt = repository.lastTriggeredAt(spec.id)
-        if (
-            existingRunId == null &&
-            lastTriggeredAt != null &&
-            spec.cooldownMillis > 0L &&
-            clock() - lastTriggeredAt < spec.cooldownMillis
-        ) {
-            return result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is cooling down")
-        }
         if (!conditionEvaluator.passes(spec.conditions, event)) {
             return result(
                 spec.id,
@@ -143,13 +179,39 @@ class AutomationEngine(
             )
         }
 
-        val enrichedEvent = contextEnricher.enrich(spec, event)
-        val run = existingRunId?.let { repository.getRun(it) }
-            ?: repository.createRun(spec.id, enrichedEvent.type, enrichedEvent.values)
-        return try {
-            if (existingRunId == null) {
-                repository.markTriggered(spec.id, event.occurredAt)
+        val existingRun = existingRunId?.let { repository.getRun(it) }
+        if (existingRunId != null && existingRun == null) {
+            return result(
+                spec.id,
+                event.type,
+                AutomationRunStatus.Failed,
+                "Automation run not found",
+                runId = existingRunId
+            )
+        }
+        val enrichedEvent = try {
+            contextEnricher.enrich(spec, event)
+        } catch (error: CancellationException) {
+            existingRun?.let { run ->
+                withContext(NonCancellable) {
+                    terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
+                }
             }
+            throw error
+        } catch (error: Exception) {
+            val message = failureMessage("Automation context enrichment failed", error)
+            return existingRun?.let { terminalizeRun(it, AutomationRunStatus.Failed, message) }
+                ?: result(spec.id, event.type, AutomationRunStatus.Failed, message)
+        }
+        val run = if (existingRun != null) {
+            existingRun
+        } else {
+            when (val preparation = prepareNewRun(spec, event, enrichedEvent)) {
+                is StartPreparation.Ready -> preparation.run
+                is StartPreparation.Rejected -> return preparation.result
+            }
+        }
+        return try {
             val stepResults = mutableListOf<AutomationStepResult>()
             val actionResults = mutableListOf<AutomationActionResult>()
             var finalStatus = AutomationRunStatus.Success
@@ -215,6 +277,72 @@ class AutomationEngine(
             throw error
         }
     }
+
+    private suspend fun prepareNewRun(
+        spec: AutomationSpec,
+        event: AutomationEvent,
+        enrichedEvent: AutomationEvent
+    ): StartPreparation = stateMutex("automation:${spec.id}").withLock {
+        val currentSpec = repository.get(spec.id)
+            ?: return@withLock StartPreparation.Rejected(
+                result(spec.id, event.type, AutomationRunStatus.Failed, "Automation not found")
+            )
+        if (!currentSpec.enabled) {
+            return@withLock StartPreparation.Rejected(
+                result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is disabled")
+            )
+        }
+        if (repository.revision(currentSpec) != repository.revision(spec)) {
+            return@withLock StartPreparation.Rejected(
+                result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation changed before execution")
+            )
+        }
+        if (spec.flow?.concurrencyPolicy != AutomationConcurrencyPolicies.AllowParallel) {
+            val activeRun = repository.activeRun(spec.id)
+            if (activeRun != null) {
+                return@withLock StartPreparation.Rejected(
+                    result(
+                        spec.id,
+                        event.type,
+                        AutomationRunStatus.Skipped,
+                        "Automation already has an active run",
+                        activeRun.id
+                    )
+                )
+            }
+        }
+        val lastTriggeredAt = repository.lastTriggeredAt(spec.id)
+        if (
+            lastTriggeredAt != null &&
+            spec.cooldownMillis > 0L &&
+            clock() - lastTriggeredAt < spec.cooldownMillis
+        ) {
+            return@withLock StartPreparation.Rejected(
+                result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is cooling down")
+            )
+        }
+        val run = repository.createRun(spec.id, enrichedEvent.type, enrichedEvent.values)
+        try {
+            repository.markTriggered(spec.id, event.occurredAt)
+        } catch (error: CancellationException) {
+            withContext(NonCancellable) {
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
+            }
+            throw error
+        } catch (error: Exception) {
+            return@withLock StartPreparation.Rejected(
+                terminalizeRun(
+                    run,
+                    AutomationRunStatus.Failed,
+                    failureMessage("Failed to persist automation trigger", error)
+                )
+            )
+        }
+        StartPreparation.Ready(run)
+    }
+
+    private fun stateMutex(key: String): Mutex =
+        stateMutexes[Math.floorMod(key.hashCode(), stateMutexes.size)]
 
     private fun successMessage(executedSteps: Int, skippedSteps: Int, failedSteps: Int): String {
         val base = "Automation ran $executedSteps step(s)"
@@ -356,4 +484,23 @@ class AutomationEngine(
                     action = action
                 )
             }
+
+    private sealed class StartPreparation {
+        data class Ready(val run: AutomationRunRecord) : StartPreparation()
+        data class Rejected(val result: AutomationRunResult) : StartPreparation()
+    }
+
+    private sealed class ResumePreparation {
+        data class Ready(
+            val spec: AutomationSpec,
+            val event: AutomationEvent,
+            val startStepIndex: Int
+        ) : ResumePreparation()
+
+        data class Rejected(val result: AutomationRunResult) : ResumePreparation()
+    }
+
+    private companion object {
+        const val StateMutexCount = 64
+    }
 }
