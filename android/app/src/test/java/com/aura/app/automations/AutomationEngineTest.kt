@@ -831,7 +831,8 @@ class AutomationEngineTest {
 
     @Test
     fun resumeRunTerminalizesWaitingRunWhenAutomationIsMissing() = runTest {
-        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
         val scheduler = RecordingEngineFlowContinuationScheduler()
         val engine = AutomationEngine(
             repository = repository,
@@ -855,7 +856,7 @@ class AutomationEngineTest {
         )
         val waiting = engine.runNow(saved.id)
         val runId = waiting.runId ?: error("runId missing")
-        repository.delete(saved.id)
+        dao.deleteAutomation(saved.id)
 
         val result = engine.resumeRun(runId)
 
@@ -1356,12 +1357,33 @@ private class FakeAutomationDao : AutomationDao {
         automations.remove(id)
     }
 
+    override suspend fun deleteRunLogs(automationId: String) {
+        logs.removeAll { it.automationId == automationId }
+    }
+
+    override suspend fun deleteStepRuns(automationId: String) {
+        stepRuns.removeAll { it.automationId == automationId }
+    }
+
+    override suspend fun deleteRuns(automationId: String) {
+        runs.entries.removeAll { it.value.automationId == automationId }
+    }
+
     override suspend fun insertRunLog(entity: AutomationRunLogEntity) {
         logs += entity
     }
 
     override suspend fun runLogs(automationId: String, limit: Int): List<AutomationRunLogEntity> =
         logs.filter { it.automationId == automationId }.sortedByDescending { it.createdAt }.take(limit)
+
+    override suspend fun pruneRunLogs(automationId: String, retainCount: Int) {
+        val retainedIds = logs
+            .filter { it.automationId == automationId }
+            .sortedWith(compareByDescending<AutomationRunLogEntity> { it.createdAt }.thenByDescending { it.id })
+            .take(retainCount)
+            .mapTo(mutableSetOf()) { it.id }
+        logs.removeAll { it.automationId == automationId && it.id !in retainedIds }
+    }
 
     private val runs = linkedMapOf<String, AutomationRunEntity>()
     private val stepRuns = mutableListOf<AutomationStepRunEntity>()
@@ -1385,6 +1407,9 @@ private class FakeAutomationDao : AutomationDao {
             .filter { it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting) }
             .sortedByDescending { it.updatedAt }
 
+    override suspend fun activeRuns(automationId: String): List<AutomationRunEntity> =
+        activeRuns().filter { it.automationId == automationId }
+
     override suspend fun runs(automationId: String, limit: Int): List<AutomationRunEntity> =
         runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
 
@@ -1394,4 +1419,22 @@ private class FakeAutomationDao : AutomationDao {
 
     override suspend fun stepRuns(runId: String): List<AutomationStepRunEntity> =
         stepRuns.filter { it.runId == runId }.sortedWith(compareBy<AutomationStepRunEntity> { it.stepIndex }.thenBy { it.attempt })
+
+    override suspend fun pruneStepRuns(automationId: String, retainCount: Int) {
+        val prunedRunIds = terminalRunsToPrune(automationId, retainCount).mapTo(mutableSetOf()) { it.id }
+        stepRuns.removeAll { it.runId in prunedRunIds }
+    }
+
+    override suspend fun pruneRuns(automationId: String, retainCount: Int) {
+        terminalRunsToPrune(automationId, retainCount).forEach { runs.remove(it.id) }
+    }
+
+    private fun terminalRunsToPrune(automationId: String, retainCount: Int): List<AutomationRunEntity> =
+        runs.values
+            .filter {
+                it.automationId == automationId &&
+                    it.status !in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting)
+            }
+            .sortedWith(compareByDescending<AutomationRunEntity> { it.updatedAt }.thenByDescending { it.id })
+            .drop(retainCount)
 }

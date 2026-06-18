@@ -24,10 +24,12 @@ class AutomationRuntime(
     }
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
-        repository.activeRun(id)?.let { flowContinuationScheduler.cancel(it.id) }
+        repository.activeRuns(id).forEach { run ->
+            runCatching { flowContinuationScheduler.cancel(run.id) }
+        }
         repository.delete(id)
         runCatching { geofenceRegistrar.remove(id) }
-        scheduleScheduler.cancel(id)
+        runCatching { scheduleScheduler.cancel(id) }
         restoreTriggers()
     }
 

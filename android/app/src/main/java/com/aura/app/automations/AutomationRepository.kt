@@ -8,7 +8,9 @@ import java.util.UUID
 class AutomationRepository(
     private val dao: AutomationDao,
     private val gson: Gson = Gson(),
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val runHistoryLimit: Int = DefaultRunHistoryLimit,
+    private val logHistoryLimit: Int = DefaultLogHistoryLimit
 ) {
     private val stringMapType = object : TypeToken<Map<String, String>>() {}.type
 
@@ -39,7 +41,7 @@ class AutomationRepository(
     }
 
     suspend fun delete(id: String) {
-        dao.deleteAutomation(id)
+        dao.deleteAutomationData(id)
     }
 
     suspend fun markTriggered(id: String, triggeredAt: Long) {
@@ -65,6 +67,7 @@ class AutomationRepository(
                 createdAt = clock()
             )
         )
+        pruneHistory(automationId)
     }
 
     suspend fun logs(automationId: String, limit: Int = 50): List<AutomationRunLog> =
@@ -125,6 +128,7 @@ class AutomationRepository(
                 completedAt = if (completed) now else existing.completedAt
             )
         )
+        if (completed) pruneHistory(existing.automationId)
     }
 
     suspend fun getRun(id: String): AutomationRunRecord? =
@@ -135,6 +139,9 @@ class AutomationRepository(
 
     suspend fun activeRuns(): List<AutomationRunRecord> =
         dao.activeRuns().map { it.record() }
+
+    suspend fun activeRuns(automationId: String): List<AutomationRunRecord> =
+        dao.activeRuns(automationId).map { it.record() }
 
     suspend fun runs(automationId: String, limit: Int = 20): List<AutomationRunRecord> =
         dao.runs(automationId, limit).map { it.record() }
@@ -169,6 +176,14 @@ class AutomationRepository(
 
     suspend fun stepRuns(runId: String): List<AutomationStepRunRecord> =
         dao.stepRuns(runId).map { it.record() }
+
+    private suspend fun pruneHistory(automationId: String) {
+        dao.pruneHistory(
+            automationId = automationId,
+            runRetainCount = runHistoryLimit.coerceAtLeast(0),
+            logRetainCount = logHistoryLimit.coerceAtLeast(0)
+        )
+    }
 
     internal fun revision(spec: AutomationSpec): String {
         val revisionSource = gson.toJson(spec.copy(createdAt = 0L, updatedAt = 0L))
@@ -231,6 +246,9 @@ class AutomationRepository(
     )
 
     private companion object {
+        const val DefaultRunHistoryLimit = 100
+        const val DefaultLogHistoryLimit = 200
+
         val terminalStatuses = setOf(
             AutomationRunStatus.Success,
             AutomationRunStatus.Skipped,
