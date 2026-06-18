@@ -81,6 +81,34 @@ class CrossAppAutomationControllerTest {
     }
 
     @Test
+    fun waitTimeoutUsesInjectedMonotonicClock() = runTest {
+        val bridge = RecordingAccessibilityBridge(tapResults = listOf(false))
+        val clock = ScriptedClock(0L, 0L, 300L)
+        val controller = CrossAppAutomationController(
+            context = testContext(),
+            accessibility = bridge,
+            monotonicClockMillis = clock::now
+        )
+
+        val result = controller.execute(
+            AutomationAction(
+                type = AutomationActionTypes.TapTarget,
+                metadata = mapOf(
+                    AutomationActionMetadata.Text to "Continue",
+                    AutomationActionMetadata.TimeoutMillis to "250",
+                    AutomationActionMetadata.SettleMillis to "0",
+                    AutomationActionMetadata.IncludeDiagnostics to "false"
+                )
+            ),
+            AutomationEvent()
+        )
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertTrue(result.message.contains("Timed out after 250ms"))
+        assertEquals(1, bridge.tappedSelectors.size)
+    }
+
+    @Test
     fun waitForTargetCanUseStableSelectorWithoutText() = runTest {
         val bridge = RecordingAccessibilityBridge(hasResults = listOf(false, true))
         val controller = CrossAppAutomationController(testContext(), bridge)
@@ -297,6 +325,16 @@ class CrossAppAutomationControllerTest {
 }
 
 private fun testContext() = ContextWrapper(null)
+
+private class ScriptedClock(vararg values: Long) {
+    private val queue = values.toMutableList()
+    private var last = values.lastOrNull() ?: 0L
+
+    fun now(): Long {
+        if (queue.isNotEmpty()) last = queue.removeAt(0)
+        return last
+    }
+}
 
 private class RecordingAccessibilityBridge(
     private val enabled: Boolean = true,

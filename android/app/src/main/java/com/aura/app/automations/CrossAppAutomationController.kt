@@ -10,7 +10,8 @@ import kotlinx.coroutines.withContext
 class CrossAppAutomationController(
     private val context: Context,
     private val accessibility: CrossAppAccessibilityBridge = AuraAutomationAccessibilityService,
-    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer()
+    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer(),
+    private val monotonicClockMillis: () -> Long = { System.nanoTime() / 1_000_000L }
 ) {
     suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
         withContext(Dispatchers.IO) {
@@ -130,9 +131,9 @@ class CrossAppAutomationController(
             return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Cross-app selector is missing")
         }
         val timeout = action.timeoutMillis()
-        val deadline = System.currentTimeMillis() + timeout
+        val deadline = monotonicClockMillis() + timeout
         var last = CrossAppUiResult(false, "No matching UI target")
-        while (System.currentTimeMillis() <= deadline) {
+        while (monotonicClockMillis() <= deadline) {
             last = block()
             if (last.success) {
                 return AutomationActionResult(action.type, AutomationRunStatus.Success, last.message)
@@ -154,9 +155,9 @@ class CrossAppAutomationController(
         }
         val selector = action.selector(event)
         val timeout = action.timeoutMillis()
-        val deadline = System.currentTimeMillis() + timeout
+        val deadline = monotonicClockMillis() + timeout
         var last = CrossAppUiResult(false, "Target still visible")
-        while (System.currentTimeMillis() <= deadline) {
+        while (monotonicClockMillis() <= deadline) {
             last = accessibility.has(selector)
             if (!last.success) {
                 return AutomationActionResult(action.type, AutomationRunStatus.Success, "Target is gone")
@@ -173,12 +174,12 @@ class CrossAppAutomationController(
     private suspend fun waitForIdle(action: AutomationAction): AutomationActionResult {
         if (!accessibility.isEnabled()) return accessibilityMissing(action.type)
         val timeout = action.timeoutMillis()
-        val deadline = System.currentTimeMillis() + timeout
+        val deadline = monotonicClockMillis() + timeout
         val stableSamples = action.stableSamples()
         var lastSnapshot: String? = null
         var consecutiveMatches = 0
         var last = CrossAppUiResult(false, "No screen snapshot yet")
-        while (System.currentTimeMillis() <= deadline) {
+        while (monotonicClockMillis() <= deadline) {
             last = accessibility.inspect(
                 packageName = action.metadata[AutomationActionMetadata.PackageName]?.ifBlank { null },
                 maxNodes = action.metadata[AutomationActionMetadata.MaxNodes]?.toIntOrNull()?.coerceIn(1, 80) ?: DEFAULT_IDLE_MAX_NODES
@@ -292,9 +293,9 @@ class CrossAppAutomationController(
         timeoutMillis: Long,
         successPrefix: String
     ): AutomationActionResult {
-        val deadline = System.currentTimeMillis() + timeoutMillis
+        val deadline = monotonicClockMillis() + timeoutMillis
         var last = CrossAppUiResult(false, "Package $packageName is not visible")
-        while (System.currentTimeMillis() <= deadline) {
+        while (monotonicClockMillis() <= deadline) {
             last = accessibility.hasPackage(packageName)
             if (last.success) {
                 return AutomationActionResult(actionType, AutomationRunStatus.Success, "$successPrefix: $packageName")
