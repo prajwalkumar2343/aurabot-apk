@@ -33,30 +33,65 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
         }
         val trigger = spec.trigger.schedule ?: return
         val nextAt = nextTriggerAt(trigger) ?: return
-        val pendingIntent = pendingIntent(spec.id)
+        cancelLegacyPendingIntent(spec.id)
+        val pendingIntent = createPendingIntent(spec.id)
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextAt, pendingIntent)
     }
 
     override fun cancel(automationId: String) {
-        alarmManager.cancel(pendingIntent(automationId))
+        cancelPendingIntent(existingPendingIntent(automationId))
+        cancelLegacyPendingIntent(automationId)
     }
 
     private fun nextTriggerAt(trigger: ScheduleTrigger): Long? {
         return nextTriggerAt(trigger, ZonedDateTime.now(ZoneId.systemDefault()))
     }
 
-    private fun pendingIntent(automationId: String): PendingIntent {
+    private fun createPendingIntent(automationId: String): PendingIntent {
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         return PendingIntent.getBroadcast(
             context,
             automationId.hashCode(),
-            Intent(context, ScheduleAutomationReceiver::class.java).putExtra(EXTRA_AUTOMATION_ID, automationId),
+            intent(automationId, includeIdentity = true),
             flags
         )
     }
 
+    private fun existingPendingIntent(automationId: String): PendingIntent? =
+        PendingIntent.getBroadcast(
+            context,
+            automationId.hashCode(),
+            intent(automationId, includeIdentity = true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
+        )
+
+    private fun cancelLegacyPendingIntent(automationId: String) {
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            automationId.hashCode(),
+            intent(automationId, includeIdentity = false),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
+        )
+        cancelPendingIntent(pendingIntent)
+    }
+
+    private fun cancelPendingIntent(pendingIntent: PendingIntent?) {
+        pendingIntent ?: return
+        alarmManager.cancel(pendingIntent)
+        pendingIntent.cancel()
+    }
+
+    private fun intent(automationId: String, includeIdentity: Boolean): Intent =
+        Intent(context, ScheduleAutomationReceiver::class.java).apply {
+            if (includeIdentity) action = alarmAction(automationId)
+            putExtra(EXTRA_AUTOMATION_ID, automationId)
+        }
+
     companion object {
         const val EXTRA_AUTOMATION_ID = "automation_id"
+        private const val ACTION_PREFIX = "com.aura.app.automation.schedule."
+
+        internal fun alarmAction(automationId: String): String = ACTION_PREFIX + automationId
 
         internal fun nextTriggerAt(trigger: ScheduleTrigger, now: ZonedDateTime): Long? {
             if (trigger.mode == "interval") {
