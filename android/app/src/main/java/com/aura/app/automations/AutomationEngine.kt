@@ -1,8 +1,11 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class AutomationEngine(
     private val repository: AutomationRepository,
@@ -69,7 +72,7 @@ class AutomationEngine(
         message: String
     ): AutomationRunResult {
         repository.updateRun(run.id, status, message)
-        flowContinuationScheduler.cancel(run.id)
+        cancelContinuation(run.id)
         repository.log(run.automationId, run.eventType, status, message)
         return AutomationRunResult(run.automationId, status, message, runId = run.id)
     }
@@ -137,60 +140,74 @@ class AutomationEngine(
         val enrichedEvent = contextEnricher.enrich(spec, event)
         val run = existingRunId?.let { repository.getRun(it) }
             ?: repository.createRun(spec.id, enrichedEvent.type, enrichedEvent.values)
-        if (existingRunId == null) {
-            repository.markTriggered(spec.id, event.occurredAt)
-        }
-        val stepResults = mutableListOf<AutomationStepResult>()
-        val actionResults = mutableListOf<AutomationActionResult>()
-        var finalStatus = AutomationRunStatus.Success
-        var finalMessage = ""
-        var nonBlockingSkippedSteps = 0
-        var nonBlockingFailedSteps = 0
-        for ((index, step) in steps.withIndex().drop(startStepIndex)) {
-            val stepResult = executeStep(run.id, spec.id, index, step, enrichedEvent)
-            stepResults += stepResult
-            stepResult.actionResult?.let { actionResults += it }
-            when (stepResult.status) {
-                AutomationRunStatus.Success -> Unit
-                AutomationRunStatus.Waiting -> {
-                    finalStatus = AutomationRunStatus.Waiting
-                    finalMessage = stepResult.message
-                    if (step.type == AutomationFlowStepTypes.Wait) {
-                        flowContinuationScheduler.schedule(run.id, step.waitMillis)
-                    }
-                    break
-                }
-                AutomationRunStatus.Skipped -> {
-                    if (!step.continueOnFailure) {
-                        finalStatus = AutomationRunStatus.Skipped
+        return try {
+            if (existingRunId == null) {
+                repository.markTriggered(spec.id, event.occurredAt)
+            }
+            val stepResults = mutableListOf<AutomationStepResult>()
+            val actionResults = mutableListOf<AutomationActionResult>()
+            var finalStatus = AutomationRunStatus.Success
+            var finalMessage = ""
+            var nonBlockingSkippedSteps = 0
+            var nonBlockingFailedSteps = 0
+            for ((index, step) in steps.withIndex().drop(startStepIndex)) {
+                val stepResult = executeStep(run.id, spec.id, index, step, enrichedEvent)
+                stepResults += stepResult
+                stepResult.actionResult?.let { actionResults += it }
+                when (stepResult.status) {
+                    AutomationRunStatus.Success -> Unit
+                    AutomationRunStatus.Waiting -> {
+                        finalStatus = AutomationRunStatus.Waiting
                         finalMessage = stepResult.message
+                        if (step.type == AutomationFlowStepTypes.Wait) {
+                            try {
+                                flowContinuationScheduler.schedule(run.id, step.waitMillis)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                finalStatus = AutomationRunStatus.Failed
+                                finalMessage = failureMessage("Failed to schedule flow continuation", error)
+                            }
+                        }
                         break
                     }
-                    nonBlockingSkippedSteps += 1
-                }
-                AutomationRunStatus.Failed -> {
-                    if (!step.continueOnFailure) {
-                        finalStatus = AutomationRunStatus.Failed
-                        finalMessage = stepResult.message
-                        break
+                    AutomationRunStatus.Skipped -> {
+                        if (!step.continueOnFailure) {
+                            finalStatus = AutomationRunStatus.Skipped
+                            finalMessage = stepResult.message
+                            break
+                        }
+                        nonBlockingSkippedSteps += 1
                     }
-                    nonBlockingFailedSteps += 1
+                    AutomationRunStatus.Failed -> {
+                        if (!step.continueOnFailure) {
+                            finalStatus = AutomationRunStatus.Failed
+                            finalMessage = stepResult.message
+                            break
+                        }
+                        nonBlockingFailedSteps += 1
+                    }
                 }
             }
+            if (finalStatus == AutomationRunStatus.Success) {
+                finalMessage = successMessage(
+                    executedSteps = stepResults.size,
+                    skippedSteps = nonBlockingSkippedSteps,
+                    failedSteps = nonBlockingFailedSteps
+                )
+            }
+            repository.updateRun(run.id, finalStatus, finalMessage, enrichedEvent.values)
+            if (finalStatus != AutomationRunStatus.Waiting) {
+                cancelContinuation(run.id)
+            }
+            repository.log(spec.id, event.type, finalStatus, finalMessage)
+            AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
+        } catch (error: CancellationException) {
+            withContext(NonCancellable) {
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
+            }
+            throw error
         }
-        if (finalStatus == AutomationRunStatus.Success) {
-            finalMessage = successMessage(
-                executedSteps = stepResults.size,
-                skippedSteps = nonBlockingSkippedSteps,
-                failedSteps = nonBlockingFailedSteps
-            )
-        }
-        repository.updateRun(run.id, finalStatus, finalMessage, enrichedEvent.values)
-        if (finalStatus != AutomationRunStatus.Waiting) {
-            flowContinuationScheduler.cancel(run.id)
-        }
-        repository.log(spec.id, event.type, finalStatus, finalMessage)
-        return AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
     }
 
     private fun successMessage(executedSteps: Int, skippedSteps: Int, failedSteps: Int): String {
@@ -253,7 +270,17 @@ class AutomationEngine(
                 if (action == null) {
                     AutomationStepResult(step.id, step.type, AutomationRunStatus.Failed, "Action step is missing an action")
                 } else {
-                    val actionResult = actionExecutor.execute(action, event)
+                    val actionResult = try {
+                        actionExecutor.execute(action, event)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        AutomationActionResult(
+                            actionType = action.type,
+                            status = AutomationRunStatus.Failed,
+                            message = failureMessage("Action execution failed", error)
+                        )
+                    }
                     AutomationStepResult(
                         step.id,
                         step.type,
@@ -286,6 +313,17 @@ class AutomationEngine(
             else -> AutomationStepResult(step.id, step.type, AutomationRunStatus.Failed, "Unsupported flow step")
         }
 
+    private fun failureMessage(prefix: String, error: Exception): String {
+        val detail = error.message?.takeIf { it.isNotBlank() }
+            ?: error::class.simpleName
+            ?: "Unknown error"
+        return "$prefix: $detail"
+    }
+
+    private fun cancelContinuation(runId: String) {
+        runCatching { flowContinuationScheduler.cancel(runId) }
+    }
+
     private suspend fun result(
         automationId: String,
         eventType: String,
@@ -296,7 +334,7 @@ class AutomationEngine(
     ): AutomationRunResult {
         existingRunId?.let { id ->
             repository.updateRun(id, status, message)
-            flowContinuationScheduler.cancel(id)
+            cancelContinuation(id)
         }
         repository.log(automationId, eventType, status, message)
         return AutomationRunResult(automationId, status, message, runId = runId ?: existingRunId)

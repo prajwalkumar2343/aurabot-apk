@@ -1,5 +1,6 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -783,6 +784,104 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun flowAutomationRetriesThrownActionException() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ThrowingOnceActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "flaky-exception",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Try"),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(2, result.stepResults.first().attempts)
+        assertEquals(
+            listOf(AutomationRunStatus.Failed, AutomationRunStatus.Success),
+            repository.stepRuns(runId).map { it.status }
+        )
+        assertEquals("Action execution failed: temporary executor failure", repository.stepRuns(runId).first().message)
+    }
+
+    @Test
+    fun flowAutomationTerminalizesRunWhenActionExceptionExhaustsRetries() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = AlwaysThrowingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Action execution failed: executor unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun waitStepTerminalizesRunWhenContinuationSchedulingFails() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = FailingEngineFlowContinuationScheduler(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L)
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Failed to schedule flow continuation: alarm service unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun flowAutomationPropagatesActionCancellation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = CancellingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+
+        val failure = runCatching { engine.runNow(saved.id) }.exceptionOrNull()
+        val run = repository.runs(saved.id).single()
+
+        assertTrue(failure is CancellationException)
+        assertEquals(AutomationRunStatus.Failed, run.status)
+        assertEquals("Automation run was cancelled", run.message)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
     fun flowAutomationReportsNonBlockingSkippedSteps() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val executor = RecordingActionExecutor()
@@ -949,6 +1048,28 @@ private class FlakyActionExecutor : AutomationActionExecutor {
     }
 }
 
+private class ThrowingOnceActionExecutor : AutomationActionExecutor {
+    var calls = 0
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        calls += 1
+        if (calls == 1) error("temporary executor failure")
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+    }
+}
+
+private class AlwaysThrowingActionExecutor : AutomationActionExecutor {
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        error("executor unavailable")
+    }
+}
+
+private class CancellingActionExecutor : AutomationActionExecutor {
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        throw CancellationException("cancelled")
+    }
+}
+
 private class StepAwareActionExecutor : AutomationActionExecutor {
     val actionTypes = mutableListOf<String>()
 
@@ -978,6 +1099,14 @@ private class RecordingEngineFlowContinuationScheduler : AutomationFlowContinuat
     override fun cancel(runId: String) {
         cancelled += runId
     }
+}
+
+private class FailingEngineFlowContinuationScheduler : AutomationFlowContinuationScheduler {
+    override fun schedule(runId: String, delayMillis: Long) {
+        error("alarm service unavailable")
+    }
+
+    override fun cancel(runId: String) = Unit
 }
 
 private class FakeAutomationDao : AutomationDao {

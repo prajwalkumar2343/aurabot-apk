@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -35,11 +34,7 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
         val trigger = spec.trigger.schedule ?: return
         val nextAt = nextTriggerAt(trigger) ?: return
         val pendingIntent = pendingIntent(spec.id)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextAt, pendingIntent)
-        } else {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, nextAt, pendingIntent)
-        }
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextAt, pendingIntent)
     }
 
     override fun cancel(automationId: String) {

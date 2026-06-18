@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 
 interface AutomationFlowContinuationScheduler {
     fun schedule(runId: String, delayMillis: Long)
@@ -31,11 +30,7 @@ class AlarmAutomationFlowContinuationScheduler(private val context: Context) : A
     private fun schedule(runId: String, delayMillis: Long, retryAttempt: Int) {
         val triggerAt = System.currentTimeMillis() + delayMillis.coerceAtLeast(0L)
         val pendingIntent = pendingIntent(runId, retryAttempt)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        } else {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
     }
 
     override fun cancel(runId: String) {
