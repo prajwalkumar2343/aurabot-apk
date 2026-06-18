@@ -33,6 +33,35 @@ android {
         baseline = file("lint-baseline.xml")
     }
 
+    testOptions {
+        managedDevices {
+            localDevices {
+                create("pixel2Api34") {
+                    device = "Pixel 2"
+                    apiLevel = 34
+                    systemImageSource = "aosp"
+                }
+                create("pixel2Api35") {
+                    device = "Pixel 2"
+                    apiLevel = 35
+                    systemImageSource = "aosp"
+                }
+                create("pixel2Api36") {
+                    device = "Pixel 2"
+                    apiLevel = 36
+                    systemImageSource = "aosp"
+                }
+            }
+            groups {
+                create("phoneApiMatrix") {
+                    targetDevices.add(allDevices["pixel2Api34"])
+                    targetDevices.add(allDevices["pixel2Api35"])
+                    targetDevices.add(allDevices["pixel2Api36"])
+                }
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

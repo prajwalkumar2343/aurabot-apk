@@ -28,7 +28,7 @@ async def create_todo(data: TodoCreate, user=Depends(get_current_user), db = Dep
 
 @router.patch("/{todo_id}", response_model=TodoOut)
 async def update_todo(todo_id: str, data: TodoUpdate, user=Depends(get_current_user), db = Depends(get_db)):
-    updates = {k: v for k, v in data.dict().items() if v is not None}
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     res = await db.todos.find_one_and_update(

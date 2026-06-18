@@ -8,6 +8,7 @@ data class AutomationSpec(
     val trigger: AutomationTrigger = AutomationTrigger(AutomationTriggerTypes.Manual),
     val conditions: List<AutomationCondition> = emptyList(),
     val actions: List<AutomationAction> = emptyList(),
+    val flow: AutomationFlow? = null,
     val cooldownMillis: Long = 0L,
     val createdBy: String = "assistant",
     val createdAt: Long = 0L,
@@ -57,6 +58,28 @@ data class AutomationAction(
     val metadata: Map<String, String> = emptyMap()
 )
 
+data class AutomationFlow(
+    val steps: List<AutomationFlowStep> = emptyList(),
+    val concurrencyPolicy: String = AutomationConcurrencyPolicies.SkipIfRunning
+)
+
+data class AutomationFlowStep(
+    val id: String = "",
+    val name: String = "",
+    val type: String = AutomationFlowStepTypes.Action,
+    val action: AutomationAction? = null,
+    val condition: AutomationCondition? = null,
+    val waitMillis: Long = 0L,
+    val retryPolicy: AutomationRetryPolicy = AutomationRetryPolicy(),
+    val continueOnFailure: Boolean = false,
+    val metadata: Map<String, String> = emptyMap()
+)
+
+data class AutomationRetryPolicy(
+    val maxAttempts: Int = 1,
+    val backoffMillis: Long = 0L
+)
+
 data class AutomationEvent(
     val type: String = AutomationEvents.Manual,
     val automationId: String? = null,
@@ -68,13 +91,24 @@ data class AutomationRunResult(
     val automationId: String,
     val status: String,
     val message: String,
-    val actionResults: List<AutomationActionResult> = emptyList()
+    val actionResults: List<AutomationActionResult> = emptyList(),
+    val runId: String? = null,
+    val stepResults: List<AutomationStepResult> = emptyList()
 )
 
 data class AutomationActionResult(
     val actionType: String,
     val status: String,
     val message: String
+)
+
+data class AutomationStepResult(
+    val stepId: String,
+    val stepType: String,
+    val status: String,
+    val message: String,
+    val attempts: Int = 1,
+    val actionResult: AutomationActionResult? = null
 )
 
 data class AutomationRunLog(
@@ -84,6 +118,33 @@ data class AutomationRunLog(
     val status: String,
     val message: String,
     val createdAt: Long
+)
+
+data class AutomationRunRecord(
+    val id: String,
+    val automationId: String,
+    val eventType: String,
+    val status: String,
+    val message: String,
+    val values: Map<String, String>,
+    val startedAt: Long,
+    val updatedAt: Long,
+    val completedAt: Long? = null
+)
+
+data class AutomationStepRunRecord(
+    val id: String,
+    val runId: String,
+    val automationId: String,
+    val stepId: String,
+    val stepIndex: Int,
+    val stepType: String,
+    val actionType: String?,
+    val status: String,
+    val attempt: Int,
+    val message: String,
+    val startedAt: Long,
+    val completedAt: Long? = null
 )
 
 object AutomationTriggerTypes {
@@ -106,6 +167,100 @@ object AutomationActionTypes {
     const val DraftMessage = "draft_message"
     const val EtaMessage = "eta_message"
     const val DirectSms = "direct_sms"
+    const val OpenApp = "open_app"
+    const val WaitForApp = "wait_for_app"
+    const val TapText = "tap_text"
+    const val TapBounds = "tap_bounds"
+    const val TypeText = "type_text"
+    const val WaitForText = "wait_for_text"
+    const val WaitForTarget = "wait_for_target"
+    const val WaitUntilGone = "wait_until_gone"
+    const val WaitForIdle = "wait_for_idle"
+    const val TapTarget = "tap_target"
+    const val LongPressTarget = "long_press_target"
+    const val ClearText = "clear_text"
+    const val Scroll = "scroll"
+    const val ScrollUntilTarget = "scroll_until_target"
+    const val Swipe = "swipe"
+    const val InspectScreen = "inspect_screen"
+    const val PressBack = "press_back"
+    const val PressHome = "press_home"
+}
+
+object AutomationActionTypeSets {
+    val Message = setOf(
+        AutomationActionTypes.DraftMessage,
+        AutomationActionTypes.EtaMessage,
+        AutomationActionTypes.DirectSms
+    )
+
+    val CrossApp = setOf(
+        AutomationActionTypes.OpenApp,
+        AutomationActionTypes.WaitForApp,
+        AutomationActionTypes.TapText,
+        AutomationActionTypes.TapBounds,
+        AutomationActionTypes.TypeText,
+        AutomationActionTypes.WaitForText,
+        AutomationActionTypes.WaitForTarget,
+        AutomationActionTypes.WaitUntilGone,
+        AutomationActionTypes.WaitForIdle,
+        AutomationActionTypes.TapTarget,
+        AutomationActionTypes.LongPressTarget,
+        AutomationActionTypes.ClearText,
+        AutomationActionTypes.Scroll,
+        AutomationActionTypes.ScrollUntilTarget,
+        AutomationActionTypes.Swipe,
+        AutomationActionTypes.InspectScreen,
+        AutomationActionTypes.PressBack,
+        AutomationActionTypes.PressHome
+    )
+
+    val All = setOf(AutomationActionTypes.Notify) + Message + CrossApp
+}
+
+object AutomationActionMetadata {
+    const val PackageName = "packageName"
+    const val AppQuery = "appQuery"
+    const val Text = "text"
+    const val TargetText = "targetText"
+    const val ContentDescription = "contentDescription"
+    const val ViewId = "viewId"
+    const val ClassName = "className"
+    const val PartialMatch = "partialMatch"
+    const val ClickableOnly = "clickableOnly"
+    const val EditableOnly = "editableOnly"
+    const val EnabledOnly = "enabledOnly"
+    const val Occurrence = "occurrence"
+    const val TimeoutMillis = "timeoutMillis"
+    const val SettleMillis = "settleMillis"
+    const val Direction = "direction"
+    const val BoundsLeft = "boundsLeft"
+    const val BoundsTop = "boundsTop"
+    const val BoundsRight = "boundsRight"
+    const val BoundsBottom = "boundsBottom"
+    const val StartX = "startX"
+    const val StartY = "startY"
+    const val EndX = "endX"
+    const val EndY = "endY"
+    const val DurationMillis = "durationMillis"
+    const val MaxNodes = "maxNodes"
+    const val MaxScrolls = "maxScrolls"
+    const val StableSamples = "stableSamples"
+    const val IncludeDiagnostics = "includeDiagnostics"
+    const val DiagnosticMaxNodes = "diagnosticMaxNodes"
+    const val RiskLevel = "riskLevel"
+}
+
+object AutomationFlowStepTypes {
+    const val Action = "action"
+    const val Condition = "condition"
+    const val Wait = "wait"
+    const val Checkpoint = "checkpoint"
+}
+
+object AutomationConcurrencyPolicies {
+    const val SkipIfRunning = "skip_if_running"
+    const val AllowParallel = "allow_parallel"
 }
 
 object AutomationOperators {
@@ -116,6 +271,8 @@ object AutomationOperators {
 }
 
 object AutomationRunStatus {
+    const val Running = "running"
+    const val Waiting = "waiting"
     const val Success = "success"
     const val Skipped = "skipped"
     const val Failed = "failed"

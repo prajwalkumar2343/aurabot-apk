@@ -1,3 +1,4 @@
 <resources>
   <string name="app_name">Aura</string>
+  <string name="aura_automation_accessibility_description">Allows Aura automations to open apps, tap visible controls, type text, and navigate only when you create or run an automation.</string>
 </resources>

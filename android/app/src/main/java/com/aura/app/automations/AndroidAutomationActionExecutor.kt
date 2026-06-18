@@ -1,6 +1,7 @@
 package com.aura.app.automations
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -21,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class AndroidAutomationActionExecutor(
     private val context: Context,
-    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer()
+    private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer(),
+    private val crossAppController: CrossAppAutomationController = CrossAppAutomationController(context)
 ) : AutomationActionExecutor {
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
         withContext(Dispatchers.IO) {
@@ -30,6 +32,7 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
                 AutomationActionTypes.DirectSms -> sendDirectSms(action, event)
+                in AutomationActionTypeSets.CrossApp -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")
             }
         }
@@ -57,8 +60,11 @@ class AndroidAutomationActionExecutor(
             .setContentIntent(openIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        NotificationManagerCompat.from(context).notify(nextNotificationId(), notification)
-        return AutomationActionResult(action.type, AutomationRunStatus.Success, "Notification posted")
+        return if (postNotification(notification)) {
+            AutomationActionResult(action.type, AutomationRunStatus.Success, "Notification posted")
+        } else {
+            AutomationActionResult(action.type, AutomationRunStatus.Failed, "Notification permission is missing")
+        }
     }
 
     private fun draftMessage(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
@@ -89,8 +95,11 @@ class AndroidAutomationActionExecutor(
             .addAction(R.drawable.notification_icon, "Review", pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        NotificationManagerCompat.from(context).notify(nextNotificationId(), notification)
-        return AutomationActionResult(action.type, AutomationRunStatus.Success, "Draft message notification posted")
+        return if (postNotification(notification)) {
+            AutomationActionResult(action.type, AutomationRunStatus.Success, "Draft message notification posted")
+        } else {
+            AutomationActionResult(action.type, AutomationRunStatus.Failed, "Notification permission is missing")
+        }
     }
 
     private fun sendDirectSms(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
@@ -122,6 +131,14 @@ class AndroidAutomationActionExecutor(
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
                 PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("MissingPermission")
+    private fun postNotification(notification: android.app.Notification): Boolean {
+        if (!canPostNotifications()) return false
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(nextNotificationId(), notification)
+        }.isSuccess
+    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

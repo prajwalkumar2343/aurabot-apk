@@ -65,6 +65,76 @@ class MiniAppValidatorTest {
     }
 
     @Test
+    fun rejectsDuplicateIdentifiers() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(dataSchema = base.dataSchema.copy(fields = base.dataSchema.fields + base.dataSchema.fields.first()))
+            )
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(actions = base.actions + base.actions.first()))
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(screens = base.screens + base.screens.first()))
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(assistantIntents = base.assistantIntents + base.assistantIntents.first()))
+        }
+    }
+
+    @Test
+    fun rejectsAssistantIntentWithUnknownScreen() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    assistantIntents = base.assistantIntents + MiniAppAssistantIntent(
+                        name = "open_missing",
+                        utterances = listOf("open missing"),
+                        screenId = "missing_screen"
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun rejectsCreateActionWithUnknownRecordTypeOrField() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    actions = listOf(
+                        MiniAppAction("bad_type", "create_record", recordType = "expense", values = mapOf("habit" to "Water"))
+                    )
+                )
+            )
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    actions = listOf(
+                        MiniAppAction("bad_field", "create_record", values = mapOf("habit" to "Water", "mood" to "Bright"))
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun rejectsBlankRecordType() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(dataSchema = base.dataSchema.copy(recordType = " ")))
+        }
+    }
+
+    @Test
     fun validatesReactMiniAppBundle() {
         val bundle = MiniAppBundle(
             id = "generated.react.notes",

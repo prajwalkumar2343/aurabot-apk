@@ -16,6 +16,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.view.WindowManager
+import com.aura.app.automations.AuraAutomationAccessibilityService
+import com.aura.app.automations.CrossAppAutomationController
 import com.aura.app.ui.AuraLauncherApp
 import com.aura.app.ui.LauncherViewModel
 import com.aura.app.ui.theme.AuraTheme
@@ -37,6 +40,11 @@ class LauncherActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+        }
 
         setContent {
             AuraTheme {
@@ -126,6 +134,10 @@ class LauncherActivity : ComponentActivity() {
                     Uri.parse("package:$packageName")
                 )
             )
+            return
+        }
+        if (!AuraAutomationAccessibilityService.isEnabled()) {
+            startActivity(CrossAppAutomationController.openAccessibilitySettingsIntent())
         }
     }
 

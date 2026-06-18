@@ -1,6 +1,7 @@
 package com.aura.app.automations
 
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.util.UUID
 
 class AutomationRepository(
@@ -8,6 +9,8 @@ class AutomationRepository(
     private val gson: Gson = Gson(),
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
+    private val stringMapType = object : TypeToken<Map<String, String>>() {}.type
+
     suspend fun list(): List<AutomationSpec> =
         dao.listAutomations().mapNotNull { it.spec() }
 
@@ -75,6 +78,92 @@ class AutomationRepository(
             )
         }
 
+    suspend fun createRun(
+        automationId: String,
+        eventType: String,
+        values: Map<String, String>,
+        status: String = AutomationRunStatus.Running,
+        message: String = "Automation flow started"
+    ): AutomationRunRecord {
+        val now = clock()
+        val entity = AutomationRunEntity(
+            id = UUID.randomUUID().toString(),
+            automationId = automationId,
+            eventType = eventType,
+            status = status,
+            message = message,
+            valuesJson = gson.toJson(values),
+            startedAt = now,
+            updatedAt = now,
+            completedAt = null
+        )
+        dao.upsertRun(entity)
+        return entity.record()
+    }
+
+    suspend fun updateRun(
+        runId: String,
+        status: String,
+        message: String,
+        values: Map<String, String>? = null,
+        completed: Boolean = status in terminalStatuses
+    ) {
+        val existing = dao.run(runId) ?: return
+        val now = clock()
+        dao.upsertRun(
+            existing.copy(
+                status = status,
+                message = message,
+                valuesJson = values?.let { gson.toJson(it) } ?: existing.valuesJson,
+                updatedAt = now,
+                completedAt = if (completed) now else existing.completedAt
+            )
+        )
+    }
+
+    suspend fun getRun(id: String): AutomationRunRecord? =
+        dao.run(id)?.record()
+
+    suspend fun activeRun(automationId: String): AutomationRunRecord? =
+        dao.activeRun(automationId)?.record()
+
+    suspend fun activeRuns(): List<AutomationRunRecord> =
+        dao.activeRuns().map { it.record() }
+
+    suspend fun runs(automationId: String, limit: Int = 20): List<AutomationRunRecord> =
+        dao.runs(automationId, limit).map { it.record() }
+
+    suspend fun recordStep(
+        runId: String,
+        automationId: String,
+        step: AutomationFlowStep,
+        stepIndex: Int,
+        status: String,
+        attempt: Int,
+        message: String
+    ): AutomationStepRunRecord {
+        val now = clock()
+        val entity = AutomationStepRunEntity(
+            id = UUID.randomUUID().toString(),
+            runId = runId,
+            automationId = automationId,
+            stepId = step.id,
+            stepIndex = stepIndex,
+            stepType = step.type,
+            actionType = step.action?.type,
+            status = status,
+            attempt = attempt,
+            message = message,
+            startedAt = now,
+            completedAt = now
+        )
+        dao.insertStepRun(entity)
+        return entity.record()
+    }
+
+    suspend fun stepRuns(runId: String): List<AutomationStepRunRecord> =
+        dao.stepRuns(runId).map { it.record() }
+
     private fun AutomationSpec.entity(lastTriggeredAt: Long?) = AutomationEntity(
         id = id,
         name = name,
@@ -97,4 +186,41 @@ class AutomationRepository(
                 createdAt = createdAt,
                 updatedAt = updatedAt
             )
+
+    private fun AutomationRunEntity.record() = AutomationRunRecord(
+        id = id,
+        automationId = automationId,
+        eventType = eventType,
+        status = status,
+        message = message,
+        values = runCatching {
+            gson.fromJson<Map<String, String>>(valuesJson, stringMapType)
+        }.getOrNull().orEmpty(),
+        startedAt = startedAt,
+        updatedAt = updatedAt,
+        completedAt = completedAt
+    )
+
+    private fun AutomationStepRunEntity.record() = AutomationStepRunRecord(
+        id = id,
+        runId = runId,
+        automationId = automationId,
+        stepId = stepId,
+        stepIndex = stepIndex,
+        stepType = stepType,
+        actionType = actionType,
+        status = status,
+        attempt = attempt,
+        message = message,
+        startedAt = startedAt,
+        completedAt = completedAt
+    )
+
+    private companion object {
+        val terminalStatuses = setOf(
+            AutomationRunStatus.Success,
+            AutomationRunStatus.Skipped,
+            AutomationRunStatus.Failed
+        )
+    }
 }

@@ -5,7 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.mini_apps import compile_mini_app_bundle, fallback_bundle, mini_app_builder_system_prompt, mini_app_revision_system_prompt, react_fallback_bundle
+from app.services.mini_apps import (
+    compile_mini_app_bundle,
+    fallback_bundle,
+    mini_app_builder_system_prompt,
+    mini_app_revision_system_prompt,
+    react_fallback_bundle,
+    validate_mini_app_bundle,
+)
 
 
 @pytest.fixture
@@ -45,7 +52,7 @@ def valid_react_bundle():
         "dataSchema": {"recordType": "note", "fields": [{"name": "title", "type": "text", "required": True}]},
         "screens": [],
         "actions": [],
-        "assistantIntents": [{"name": "open_notes", "utterances": ["open notes"], "screenId": "react"}],
+        "assistantIntents": [{"name": "open_notes", "utterances": ["open notes"]}],
         "capabilities": ["local_storage", "assistant_actions", "react_runtime", "scoped_storage"],
         "codeBundle": {
             "entry": "App.jsx",
@@ -202,6 +209,58 @@ def test_build_mini_app_rejects_forbidden_capability(client):
 
     assert response.status_code == 422
     assert "Unsupported capability" in response.json()["detail"]
+
+
+def test_validate_mini_app_rejects_duplicate_identifiers_and_unknown_screen():
+    bundle = valid_bundle()
+    bundle["dataSchema"]["fields"].append({"name": "habit", "type": "text"})
+    with pytest.raises(Exception) as field_error:
+        validate_mini_app_bundle(bundle)
+    assert "Field names must be unique" in str(field_error.value)
+
+    bundle = valid_bundle()
+    bundle["actions"].append(bundle["actions"][0])
+    with pytest.raises(Exception) as action_error:
+        validate_mini_app_bundle(bundle)
+    assert "Action ids must be unique" in str(action_error.value)
+
+    bundle = valid_bundle()
+    bundle["screens"].append(bundle["screens"][0])
+    with pytest.raises(Exception) as screen_error:
+        validate_mini_app_bundle(bundle)
+    assert "Screen ids must be unique" in str(screen_error.value)
+
+    bundle = valid_bundle()
+    bundle["assistantIntents"].append(bundle["assistantIntents"][0])
+    with pytest.raises(Exception) as intent_error:
+        validate_mini_app_bundle(bundle)
+    assert "Intent names must be unique" in str(intent_error.value)
+
+    bundle = valid_bundle()
+    bundle["assistantIntents"].append({"name": "open_missing", "utterances": ["open missing"], "screenId": "missing"})
+    with pytest.raises(Exception) as missing_screen_error:
+        validate_mini_app_bundle(bundle)
+    assert "Unknown intent screen" in str(missing_screen_error.value)
+
+
+def test_validate_mini_app_rejects_invalid_create_record_action_contract():
+    bundle = valid_bundle()
+    bundle["dataSchema"]["recordType"] = " "
+    with pytest.raises(Exception) as record_type_error:
+        validate_mini_app_bundle(bundle)
+    assert "dataSchema.recordType is required" in str(record_type_error.value)
+
+    bundle = valid_bundle()
+    bundle["actions"][0]["recordType"] = "expense"
+    with pytest.raises(Exception) as action_type_error:
+        validate_mini_app_bundle(bundle)
+    assert "Unsupported action record type" in str(action_type_error.value)
+
+    bundle = valid_bundle()
+    bundle["actions"][0]["values"]["surprise"] = "nope"
+    with pytest.raises(Exception) as action_field_error:
+        validate_mini_app_bundle(bundle)
+    assert "Unknown action field" in str(action_field_error.value)
 
 
 def test_build_mini_app_compiles_requested_react_bundle(client):

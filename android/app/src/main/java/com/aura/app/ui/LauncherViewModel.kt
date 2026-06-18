@@ -14,6 +14,8 @@ import com.aura.app.assistant.AssistantMessage
 import com.aura.app.assistant.ChatAction
 import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.LlmSettingsState
+import com.aura.app.assistant.MemoryAppProposal
+import com.aura.app.assistant.MemoryAppProposalEngine
 import com.aura.app.assistant.MemoryResponse
 import com.aura.app.assistant.MessageRole
 import com.aura.app.assistant.OpenRouterModelInfo
@@ -47,6 +49,8 @@ data class LauncherUiState(
         AssistantMessage(MessageRole.Assistant, "Aura is running locally. Ask about apps, tasks, or memories.")
     ),
     val memories: List<MemoryResponse> = emptyList(),
+    val memoryAppProposals: List<MemoryAppProposal> = emptyList(),
+    val buildingMemoryAppProposalId: String? = null,
     val todos: List<TodoResponse> = emptyList(),
     val appBlocks: List<AppBlockRule> = emptyList(),
     val automations: List<AutomationSpec> = emptyList(),
@@ -88,6 +92,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val localState = MutableStateFlow(LauncherUiState())
     private val automationPermissionPlanner = AutomationPermissionPlanner()
     private val dismissedMiniAppEvolutions = mutableSetOf<String>()
+    private val dismissedMemoryAppProposalTopics = mutableSetOf<String>()
     private var transcribingAudioBase64: String? = null
 
     val uiState: StateFlow<LauncherUiState> =
@@ -266,6 +271,8 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             localState.update {
                 it.copy(
                     memories = emptyList(),
+                    memoryAppProposals = emptyList(),
+                    buildingMemoryAppProposalId = null,
                     todos = emptyList(),
                     assistantSessionId = null,
                     messages = listOf(AssistantMessage(MessageRole.Assistant, "Aura is back in local mode."))
@@ -297,7 +304,14 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val memories = container.assistantRepository.memories()
                 val todos = container.assistantRepository.todos()
-                localState.update { it.copy(memories = memories, todos = todos, error = null) }
+                localState.update {
+                    it.copy(
+                        memories = memories,
+                        memoryAppProposals = suggestMemoryApps(memories),
+                        todos = todos,
+                        error = null
+                    )
+                }
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message) }
             }
@@ -325,6 +339,61 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 refreshCloud()
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not add memory") }
+            }
+        }
+    }
+
+    fun dismissMemoryAppProposal(proposalId: String) {
+        val proposal = uiState.value.memoryAppProposals.firstOrNull { it.id == proposalId }
+        dismissedMemoryAppProposalTopics += proposal?.topicKey ?: proposalId
+        localState.update { state ->
+            state.copy(memoryAppProposals = state.memoryAppProposals.filterNot { it.id == proposalId })
+        }
+    }
+
+    fun createMiniAppFromMemoryProposal(proposalId: String, onCreated: (String) -> Unit = {}) {
+        if (uiState.value.buildingMemoryAppProposalId != null) return
+        val proposal = uiState.value.memoryAppProposals.firstOrNull { it.id == proposalId } ?: return
+        viewModelScope.launch {
+            localState.update { it.copy(buildingMemoryAppProposalId = proposalId, error = null) }
+            try {
+                val installed = buildInstallAndMaybeOpenMiniApp(
+                    prompt = proposal.buildPrompt,
+                    openAfterCreate = true,
+                    fallbackPrompt = proposal.appName
+                )
+                dismissedMemoryAppProposalTopics += proposal.topicKey
+                localState.update { state ->
+                    state.copy(
+                        memoryAppProposals = suggestMemoryApps(state.memories),
+                        buildingMemoryAppProposalId = null,
+                        error = null
+                    )
+                }
+                onCreated(installed.id)
+            } catch (error: Exception) {
+                try {
+                    val fallback = localStarterMiniApp(proposal.appName)
+                    container.miniAppRepository.install(fallback)
+                    openMiniApp(fallback.id)
+                    dismissedMemoryAppProposalTopics += proposal.topicKey
+                    localState.update { state ->
+                        state.copy(
+                            miniApps = container.miniAppRepository.listInstalled(),
+                            memoryAppProposals = suggestMemoryApps(state.memories),
+                            buildingMemoryAppProposalId = null,
+                            error = null
+                        )
+                    }
+                    onCreated(fallback.id)
+                } catch (fallbackError: Exception) {
+                    localState.update {
+                        it.copy(
+                            buildingMemoryAppProposalId = null,
+                            error = fallbackError.message ?: error.message ?: "Could not create mini app from memories"
+                        )
+                    }
+                }
             }
         }
     }
@@ -432,8 +501,12 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 val permissionLabels = automations.associate { automation ->
                     automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
-                        permission.substringAfterLast('.').replace('_', ' ').lowercase()
-                            .replaceFirstChar { it.uppercase() }
+                        if (permission == AutomationPermissionPlanner.AccessibilityService) {
+                            "Accessibility service"
+                        } else {
+                            permission.substringAfterLast('.').replace('_', ' ').lowercase()
+                                .replaceFirstChar { it.uppercase() }
+                        }
                     }
                 }
                 localState.update {
@@ -491,12 +564,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun buildInstallAndMaybeOpenMiniApp(
         prompt: String,
-        openAfterCreate: Boolean
+        openAfterCreate: Boolean,
+        fallbackPrompt: String = prompt
     ): MiniAppInstall {
         val bundle = try {
             container.assistantRepository.buildMiniApp(prompt)
         } catch (_: Exception) {
-            localStarterMiniApp(prompt)
+            localStarterMiniApp(fallbackPrompt)
         }
         val installed = container.miniAppRepository.install(bundle)
         val installedApps = container.miniAppRepository.listInstalled()
@@ -849,6 +923,10 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private fun suggestMiniAppEvolution(bundle: MiniAppBundle, records: List<MiniAppRecord>): MiniAppEvolutionSuggestion? =
         MiniAppEvolutionEngine.suggest(bundle, records)
             ?.takeUnless { it.id in dismissedMiniAppEvolutions }
+
+    private fun suggestMemoryApps(memories: List<MemoryResponse>): List<MemoryAppProposal> =
+        MemoryAppProposalEngine.propose(memories)
+            .filterNot { it.topicKey in dismissedMemoryAppProposalTopics }
 
     private fun resolveMiniApp(id: String?, query: String?): MiniAppInstall? {
         id?.takeIf { it.isNotBlank() }?.let { miniAppId ->

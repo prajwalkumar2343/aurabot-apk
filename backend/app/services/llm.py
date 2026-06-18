@@ -26,6 +26,37 @@ ASSISTANT_TOOL_NAMES = {
     "query_mini_app_records",
 }
 
+AUTOMATION_ACTION_TYPES = [
+    "notify",
+    "draft_message",
+    "eta_message",
+    "direct_sms",
+    "open_app",
+    "wait_for_app",
+    "tap_text",
+    "tap_bounds",
+    "type_text",
+    "wait_for_text",
+    "wait_for_target",
+    "wait_until_gone",
+    "wait_for_idle",
+    "tap_target",
+    "long_press_target",
+    "clear_text",
+    "scroll",
+    "scroll_until_target",
+    "swipe",
+    "inspect_screen",
+    "press_back",
+    "press_home",
+]
+
+AUTOMATION_FLOW_STEP_TYPES = ["action", "condition", "wait", "checkpoint"]
+AUTOMATION_CONCURRENCY_POLICIES = ["skip_if_running", "allow_parallel"]
+AUTOMATION_MAX_RETRY_ATTEMPTS = 5
+AUTOMATION_MAX_RETRY_BACKOFF_MILLIS = 30_000
+AUTOMATION_MAX_FLOW_WAIT_MILLIS = 604_800_000
+
 
 def _context_list(items: Iterable[str]) -> str:
     return "\n".join(items) or "- none"
@@ -63,6 +94,8 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
         "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. "
+        "For multi-step automations, prefer automation_spec.flow.steps with clear step ids and names. Use action steps for device actions, condition steps for event/context checks, checkpoint steps when the flow should pause for a later resume/confirmation, and wait steps only when a real delay is required. Keep each step shape exclusive: action steps include action only, condition steps include condition only, wait steps include waitMillis only, and checkpoint steps include only checkpoint metadata. Use at most 5 retry attempts with backoffMillis no greater than 30000 for transient cross-app UI steps. Keep waitMillis at or below 604800000 (7 days); use a schedule trigger for longer delays. Keep the legacy actions array as a simple summary/fallback when possible. "
+        "For cross-app automations, use open_app, wait_for_app, inspect_screen, wait_for_idle, wait_for_target, wait_for_text, wait_until_gone, scroll_until_target, tap_target, tap_text, tap_bounds, type_text, clear_text, scroll, swipe, press_back, and press_home steps. Prefer open_app with packageName from the installed apps list; open_app waits for the package when accessibility is enabled, and wait_for_app can explicitly guard later transitions. Then use inspect_screen for unknown screens, wait_for_idle after broad app/screen transitions, wait_for_target for stable viewId/contentDescription/className selectors, wait_for_text for simple visible text, and wait_until_gone for loading indicators or transient dialogs before tap/type steps. Use scroll_until_target with maxScrolls when the target may be lower in a list or settings screen. Prefer stable selectors from screen inspection in this order: viewId, contentDescription, exact text, className plus occurrence. Add timeoutMillis for slow screens, maxNodes for bounded inspections, stableSamples for idle detection, diagnosticMaxNodes for failure snapshots, and settleMillis after app transitions. Cross-app UI control requires the user to enable Aura's Accessibility Service. Direct sends, purchases, deletes, posts, payments, or irreversible actions must be in flow.steps with a checkpoint before the high-impact action; set metadata.riskLevel=high when a selector is risky even if the label is ambiguous. "
         "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
         "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
@@ -73,7 +106,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"flow":{"concurrencyPolicy":"skip_if_running","steps":[{"id":"send-eta","name":"Draft ETA","type":"action","action":{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}},"retryPolicy":{"maxAttempts":1,"backoffMillis":0},"continueOnFailure":false,"metadata":{}}]},"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
@@ -151,7 +184,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                            "type": {"type": "string", "enum": ["notify", "draft_message", "eta_message", "direct_sms"]},
+                                        "type": {"type": "string", "enum": AUTOMATION_ACTION_TYPES},
                                         "title": {"type": "string"},
                                         "messageTemplate": {"type": "string"},
                                         "recipientName": {"type": "string"},
@@ -159,12 +192,89 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                         "requireConfirmation": {"type": "boolean"},
                                         "metadata": {
                                             "type": "object",
-                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true.",
+                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
                                             "additionalProperties": {"type": "string"},
                                         },
                                     },
                                     "required": ["type", "requireConfirmation"],
                                 },
+                            },
+                            "flow": {
+                                "type": "object",
+                                "description": "Optional durable multi-step flow. Use this for ordered or resumable automations; legacy actions remain a simple fallback.",
+                                "properties": {
+                                    "concurrencyPolicy": {
+                                        "type": "string",
+                                        "enum": AUTOMATION_CONCURRENCY_POLICIES,
+                                        "description": "Use skip_if_running unless the user clearly wants overlapping runs.",
+                                    },
+                                    "steps": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "Exclusive step shape: action steps use action only, condition steps use condition only, wait steps use waitMillis only, and checkpoint steps use checkpoint metadata only.",
+                                            "properties": {
+                                                "id": {"type": "string", "description": "Stable kebab-case step id, such as check-context or send-message."},
+                                                "name": {"type": "string"},
+                                                "type": {"type": "string", "enum": AUTOMATION_FLOW_STEP_TYPES},
+                                                "action": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "type": {"type": "string", "enum": AUTOMATION_ACTION_TYPES},
+                                                        "title": {"type": "string"},
+                                                        "messageTemplate": {"type": "string"},
+                                                        "recipientName": {"type": "string"},
+                                                        "recipientAddress": {"type": "string"},
+                                                        "requireConfirmation": {"type": "boolean"},
+                                                        "metadata": {
+                                                            "type": "object",
+                                                            "description": "String metadata. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
+                                                            "additionalProperties": {"type": "string"},
+                                                        },
+                                                    },
+                                                    "required": ["type", "requireConfirmation"],
+                                                },
+                                                "condition": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "type": {"type": "string"},
+                                                        "key": {"type": "string"},
+                                                        "operator": {"type": "string", "enum": ["exists", "equals", "not_equals", "contains"]},
+                                                        "value": {"type": "string"},
+                                                    },
+                                                    "required": ["type", "key", "operator"],
+                                                },
+                                                "waitMillis": {
+                                                    "type": "integer",
+                                                    "minimum": 1,
+                                                    "maximum": AUTOMATION_MAX_FLOW_WAIT_MILLIS,
+                                                },
+                                                "retryPolicy": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "maxAttempts": {
+                                                            "type": "integer",
+                                                            "minimum": 1,
+                                                            "maximum": AUTOMATION_MAX_RETRY_ATTEMPTS,
+                                                        },
+                                                        "backoffMillis": {
+                                                            "type": "integer",
+                                                            "minimum": 0,
+                                                            "maximum": AUTOMATION_MAX_RETRY_BACKOFF_MILLIS,
+                                                        },
+                                                    },
+                                                },
+                                                "continueOnFailure": {"type": "boolean"},
+                                                "metadata": {
+                                                    "type": "object",
+                                                    "additionalProperties": {"type": "string"},
+                                                },
+                                            },
+                                            "required": ["id", "type"],
+                                        },
+                                    },
+                                },
+                                "required": ["steps"],
                             },
                             "cooldownMillis": {"type": "integer"},
                             "createdBy": {"type": "string"},
@@ -471,25 +581,28 @@ def call_gemini(data: ChatIn, system_message: str, use_assistant_tools: bool = F
         raise HTTPException(status_code=400, detail="Gemini API Key is required")
     model = normalize_model_id("gemini", data.model)
     try:
-        payload = {
+        parts: list[dict[str, Any]] = [
+            {
+                "text": data.message if use_assistant_tools else f"{system_message}\n\nUser request:\n{data.message}"
+            }
+        ]
+        payload: dict[str, Any] = {
             "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {
-                            "text": data.message if use_assistant_tools else f"{system_message}\n\nUser request:\n{data.message}"
-                        }
-                    ],
+                    "parts": parts,
                 }
             ],
         }
-        if getattr(data, "image_base64", None) and getattr(data, "image_mime_type", None):
-            b64 = data.image_base64.strip()
+        image_base64 = data.image_base64
+        image_mime_type = data.image_mime_type
+        if image_base64 and image_mime_type:
+            b64 = image_base64.strip()
             if "," in b64:
                 b64 = b64.split(",", 1)[1]
-            payload["contents"][0]["parts"].append({
+            parts.append({
                 "inlineData": {
-                    "mimeType": data.image_mime_type,
+                    "mimeType": image_mime_type,
                     "data": b64
                 }
             })

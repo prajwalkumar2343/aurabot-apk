@@ -10,6 +10,7 @@ class BootReceiverTest {
 
         BootRestoreCoordinator.handle(
             shouldRestoreListening = false,
+            canStartListeningFromBoot = true,
             startListening = { events += "listening" },
             restoreAutomations = { events += "automations" }
         )
@@ -23,10 +24,25 @@ class BootReceiverTest {
 
         BootRestoreCoordinator.handle(
             shouldRestoreListening = true,
+            canStartListeningFromBoot = true,
             startListening = { events += "listening" },
             restoreAutomations = { events += "automations" }
         )
 
         assertEquals(listOf("listening", "automations"), events)
+    }
+
+    @Test
+    fun bootRestoreSkipsListeningWhenForegroundMicrophoneStartIsRestricted() {
+        val events = mutableListOf<String>()
+
+        BootRestoreCoordinator.handle(
+            shouldRestoreListening = true,
+            canStartListeningFromBoot = false,
+            startListening = { events += "listening" },
+            restoreAutomations = { events += "automations" }
+        )
+
+        assertEquals(listOf("automations"), events)
     }
 }

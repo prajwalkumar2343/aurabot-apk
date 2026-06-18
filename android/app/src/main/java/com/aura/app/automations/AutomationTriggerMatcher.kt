@@ -12,7 +12,11 @@ class AutomationTriggerMatcher {
 
     private fun matchesManual(spec: AutomationSpec, event: AutomationEvent): Boolean {
         val expected = spec.trigger.manual?.eventName ?: AutomationEvents.Manual
-        return event.type == expected || event.automationId == spec.id
+        return if (event.automationId != null) {
+            event.automationId == spec.id && event.type == expected
+        } else {
+            event.type == expected
+        }
     }
 
     private fun matchesGeofence(spec: AutomationSpec, event: AutomationEvent): Boolean {

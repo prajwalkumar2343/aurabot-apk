@@ -1,0 +1,61 @@
+package com.aura.app.automations
+
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+
+interface AutomationFlowContinuationScheduler {
+    fun schedule(runId: String, delayMillis: Long)
+    fun scheduleRetry(runId: String, delayMillis: Long, retryAttempt: Int) = schedule(runId, delayMillis)
+    fun cancel(runId: String)
+}
+
+object NoOpAutomationFlowContinuationScheduler : AutomationFlowContinuationScheduler {
+    override fun schedule(runId: String, delayMillis: Long) = Unit
+    override fun cancel(runId: String) = Unit
+}
+
+class AlarmAutomationFlowContinuationScheduler(private val context: Context) : AutomationFlowContinuationScheduler {
+    private val alarmManager = context.getSystemService(AlarmManager::class.java)
+
+    override fun schedule(runId: String, delayMillis: Long) {
+        schedule(runId, delayMillis, retryAttempt = 0)
+    }
+
+    override fun scheduleRetry(runId: String, delayMillis: Long, retryAttempt: Int) {
+        schedule(runId, delayMillis, retryAttempt.coerceAtLeast(1))
+    }
+
+    private fun schedule(runId: String, delayMillis: Long, retryAttempt: Int) {
+        val triggerAt = System.currentTimeMillis() + delayMillis.coerceAtLeast(0L)
+        val pendingIntent = pendingIntent(runId, retryAttempt)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+        } else {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+        }
+    }
+
+    override fun cancel(runId: String) {
+        alarmManager.cancel(pendingIntent(runId, retryAttempt = 0))
+    }
+
+    private fun pendingIntent(runId: String, retryAttempt: Int): PendingIntent {
+        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        return PendingIntent.getBroadcast(
+            context,
+            runId.hashCode(),
+            Intent(context, AutomationFlowContinuationReceiver::class.java)
+                .putExtra(EXTRA_RUN_ID, runId)
+                .putExtra(EXTRA_RETRY_ATTEMPT, retryAttempt),
+            flags
+        )
+    }
+
+    companion object {
+        const val EXTRA_RUN_ID = "automation_run_id"
+        const val EXTRA_RETRY_ATTEMPT = "automation_retry_attempt"
+    }
+}

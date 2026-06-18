@@ -6,6 +6,7 @@ import android.content.Intent
 import com.aura.app.AuraApplication
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,23 +26,46 @@ class GeofenceTransitionReceiver : BroadcastReceiver() {
                 }
                 val location = geofencingEvent.triggeringLocation
                 val container = (context.applicationContext as AuraApplication).container
-                geofencingEvent.triggeringGeofences.orEmpty().forEach { geofence ->
-                    container.automationEngine.handle(
-                        AutomationEvent(
-                            type = eventType,
-                            automationId = geofence.requestId,
-                            values = mapOf(
-                                "latitude" to (location?.latitude?.toString() ?: ""),
-                                "longitude" to (location?.longitude?.toString() ?: ""),
-                                "etaMinutes" to "",
-                                "transition" to eventType
+                GeofenceTransitionCoordinator.handle(
+                    automationIds = geofencingEvent.triggeringGeofences.orEmpty().map { it.requestId },
+                    execute = { automationId ->
+                        container.automationEngine.handle(
+                            AutomationEvent(
+                                type = eventType,
+                                automationId = automationId,
+                                values = mapOf(
+                                    "latitude" to (location?.latitude?.toString() ?: ""),
+                                    "longitude" to (location?.longitude?.toString() ?: ""),
+                                    "etaMinutes" to "",
+                                    "transition" to eventType
+                                )
                             )
                         )
-                    )
-                }
+                    }
+                )
             } finally {
                 pending.finish()
             }
         }
+    }
+}
+
+internal object GeofenceTransitionCoordinator {
+    suspend fun handle(automationIds: List<String>, execute: suspend (String) -> Unit) {
+        var firstFailure: Exception? = null
+        automationIds.forEach { automationId ->
+            try {
+                execute(automationId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (firstFailure == null) {
+                    firstFailure = error
+                } else {
+                    firstFailure?.addSuppressed(error)
+                }
+            }
+        }
+        firstFailure?.let { throw it }
     }
 }

@@ -33,4 +33,25 @@ interface AutomationDao {
 
     @Query("SELECT * FROM automation_run_logs WHERE automationId = :automationId ORDER BY createdAt DESC LIMIT :limit")
     suspend fun runLogs(automationId: String, limit: Int = 50): List<AutomationRunLogEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRun(entity: AutomationRunEntity)
+
+    @Query("SELECT * FROM automation_runs WHERE id = :id LIMIT 1")
+    suspend fun run(id: String): AutomationRunEntity?
+
+    @Query("SELECT * FROM automation_runs WHERE automationId = :automationId AND status IN ('running', 'waiting') ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun activeRun(automationId: String): AutomationRunEntity?
+
+    @Query("SELECT * FROM automation_runs WHERE status IN ('running', 'waiting') ORDER BY updatedAt DESC")
+    suspend fun activeRuns(): List<AutomationRunEntity>
+
+    @Query("SELECT * FROM automation_runs WHERE automationId = :automationId ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun runs(automationId: String, limit: Int = 20): List<AutomationRunEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStepRun(entity: AutomationStepRunEntity)
+
+    @Query("SELECT * FROM automation_step_runs WHERE runId = :runId ORDER BY stepIndex ASC, attempt ASC")
+    suspend fun stepRuns(runId: String): List<AutomationStepRunEntity>
 }

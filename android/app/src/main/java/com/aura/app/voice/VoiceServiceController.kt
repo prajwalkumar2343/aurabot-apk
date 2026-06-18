@@ -31,9 +31,9 @@ class VoiceServiceController(
 
     fun start(): Boolean {
         if (!hasRequiredPermissions()) return false
-        AuraListeningService.start(context)
-        _status.value = AuraListeningService.status().copy(running = true)
-        return true
+        val started = AuraListeningService.start(context)
+        _status.value = AuraListeningService.status().copy(running = started)
+        return started
     }
 
     fun stop() {

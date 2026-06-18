@@ -157,7 +157,10 @@ class AssistantRepository(
                         name = automation.name,
                         enabled = automation.enabled,
                         trigger_type = automation.trigger.type,
-                        action_types = automation.actions.map { it.type }
+                        action_types = (
+                            automation.actions.map { it.type } +
+                                automation.flow?.steps.orEmpty().mapNotNull { it.action?.type }
+                            ).distinct()
                     )
                 },
                 image_base64 = image_base64,

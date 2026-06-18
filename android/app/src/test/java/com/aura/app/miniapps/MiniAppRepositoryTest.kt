@@ -3,6 +3,7 @@ package com.aura.app.miniapps
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class MiniAppRepositoryTest {
@@ -109,6 +110,77 @@ class MiniAppRepositoryTest {
         assertEquals(1, repository.bundle(original.id)?.version)
         assertEquals(record.id, repository.records(original.id).first().id)
         assertEquals(true, repository.versions(original.id).first { it.version == 1 }.active)
+    }
+
+    @Test
+    fun createRecordNormalizesDefaultRecordTypeAndSchemaDefaults() = runTest {
+        val dao = FakeMiniAppDao()
+        val repository = MiniAppRepository(dao, clock = { 6000L })
+
+        repository.install(BuiltInMiniApps.habitTracker)
+
+        val record = repository.createRecord(
+            miniAppId = "builtin.habit_tracker",
+            recordType = "record",
+            values = mapOf("habit" to "Water")
+        )
+
+        assertEquals("habit_checkin", record.recordType)
+        assertEquals("true", record.values["done"])
+    }
+
+    @Test
+    fun createRecordRejectsUnknownRecordTypesAndFields() = runTest {
+        val dao = FakeMiniAppDao()
+        val repository = MiniAppRepository(dao, clock = { 7000L })
+
+        repository.install(BuiltInMiniApps.habitTracker)
+
+        assertValidationFails {
+            repository.createRecord(
+                miniAppId = "builtin.habit_tracker",
+                recordType = "expense",
+                values = mapOf("habit" to "Water")
+            )
+        }
+        assertValidationFails {
+            repository.createRecord(
+                miniAppId = "builtin.habit_tracker",
+                recordType = "habit_checkin",
+                values = mapOf("habit" to "Water", "surprise" to "nope")
+            )
+        }
+    }
+
+    @Test
+    fun updateRecordMergesWithExistingValuesBeforeValidation() = runTest {
+        val dao = FakeMiniAppDao()
+        val repository = MiniAppRepository(dao, clock = { 8000L })
+
+        repository.install(BuiltInMiniApps.habitTracker)
+        val record = repository.createRecord(
+            miniAppId = "builtin.habit_tracker",
+            recordType = "habit_checkin",
+            values = mapOf("habit" to "Reading", "done" to "true")
+        )
+
+        val updated = repository.updateRecord(
+            miniAppId = "builtin.habit_tracker",
+            recordId = record.id,
+            values = mapOf("note" to "Chapter two")
+        )
+
+        assertEquals("Reading", updated?.values?.get("habit"))
+        assertEquals("Chapter two", updated?.values?.get("note"))
+    }
+}
+
+private suspend fun assertValidationFails(block: suspend () -> Unit) {
+    try {
+        block()
+        fail("Expected MiniAppValidationException")
+    } catch (_: MiniAppValidationException) {
+        // Expected.
     }
 }
 

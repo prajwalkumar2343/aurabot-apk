@@ -177,15 +177,34 @@ def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
     for capability in bundle.capabilities:
         if capability not in SUPPORTED_CAPABILITIES:
             raise HTTPException(status_code=422, detail=f"Unsupported capability: {capability}")
+    if not bundle.dataSchema.recordType.strip():
+        raise HTTPException(status_code=422, detail="dataSchema.recordType is required")
     for field in bundle.dataSchema.fields:
+        if not field.name.strip():
+            raise HTTPException(status_code=422, detail="Field names are required")
         if field.type not in SUPPORTED_FIELDS:
             raise HTTPException(status_code=422, detail=f"Unsupported field type: {field.type}")
+    field_names = [field.name for field in bundle.dataSchema.fields]
+    if len(set(field_names)) != len(field_names):
+        raise HTTPException(status_code=422, detail="Field names must be unique")
+    schema_field_names = set(field_names)
     action_ids = {action.id for action in bundle.actions}
+    if len(action_ids) != len(bundle.actions):
+        raise HTTPException(status_code=422, detail="Action ids must be unique")
     for action in bundle.actions:
         if not action.id.strip():
             raise HTTPException(status_code=422, detail="Action id is required")
         if action.type not in SUPPORTED_ACTIONS:
             raise HTTPException(status_code=422, detail=f"Unsupported action: {action.type}")
+        if action.type == "create_record":
+            if action.recordType not in {"record", bundle.dataSchema.recordType}:
+                raise HTTPException(status_code=422, detail=f"Unsupported action record type: {action.recordType}")
+            for field_name in action.values:
+                if field_name not in schema_field_names:
+                    raise HTTPException(status_code=422, detail=f"Unknown action field: {field_name}")
+    screen_ids = {screen.id for screen in bundle.screens}
+    if len(screen_ids) != len(bundle.screens):
+        raise HTTPException(status_code=422, detail="Screen ids must be unique")
     for screen in bundle.screens:
         if not screen.id.strip():
             raise HTTPException(status_code=422, detail="Screen id is required")
@@ -197,9 +216,16 @@ def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
             for item in component.items:
                 if item.actionId and item.actionId not in action_ids:
                     raise HTTPException(status_code=422, detail=f"Unknown action: {item.actionId}")
+    intent_names = {intent.name for intent in bundle.assistantIntents}
+    if len(intent_names) != len(bundle.assistantIntents):
+        raise HTTPException(status_code=422, detail="Intent names must be unique")
     for intent in bundle.assistantIntents:
+        if not intent.name.strip():
+            raise HTTPException(status_code=422, detail="Intent names are required")
         if intent.actionId and intent.actionId not in action_ids:
             raise HTTPException(status_code=422, detail=f"Unknown intent action: {intent.actionId}")
+        if intent.screenId and intent.screenId not in screen_ids:
+            raise HTTPException(status_code=422, detail=f"Unknown intent screen: {intent.screenId}")
     return bundle
 
 
@@ -377,7 +403,7 @@ article button { border: 1px solid #fecaca; border-radius: 12px; padding: 9px 11
             "screens": [],
             "actions": [],
             "assistantIntents": [
-                {"name": "open_app", "utterances": [f"open {name}", f"show {name}"], "screenId": "react"},
+                {"name": "open_app", "utterances": [f"open {name}", f"show {name}"]},
             ],
             "capabilities": ["local_storage", "assistant_actions", "react_runtime", "scoped_storage"],
             "codeBundle": {"entry": "App.jsx", "appJsx": app_jsx, "css": css, "allowedApis": ["records"]},

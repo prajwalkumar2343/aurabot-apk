@@ -1,6 +1,7 @@
 package com.aura.app.voice
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -97,7 +98,7 @@ class AuraListeningService : Service() {
 
     private fun startAsForeground() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
@@ -143,8 +144,10 @@ class AuraListeningService : Service() {
             .build()
     }
 
+    @SuppressLint("MissingPermission")
     private fun startListening(): Boolean {
         if (recorderThread?.isAlive == true) return true
+        if (!hasRecordPermission()) return false
 
         val sampleRate = VoiceAudio.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
@@ -153,13 +156,17 @@ class AuraListeningService : Service() {
         if (minBufferSize <= 0) return false
 
         val bufferSize = maxOf(minBufferSize * 4, 4096)
-        val audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            sampleRate,
-            channelConfig,
-            audioFormat,
-            bufferSize
-        )
+        val audioRecord = runCatching {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+        }.getOrElse {
+            return false
+        }
 
         if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
             audioRecord.release()
@@ -372,11 +379,13 @@ class AuraListeningService : Service() {
         @Volatile
         private var eventSink: (() -> Unit)? = null
 
-        fun start(context: Context) {
+        fun start(context: Context): Boolean {
             val intent = Intent(context, AuraListeningService::class.java).apply {
                 action = ACTION_START
             }
-            ContextCompat.startForegroundService(context, intent)
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }.isSuccess
         }
 
         fun stop(context: Context) {

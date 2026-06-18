@@ -133,12 +133,15 @@ class MiniAppRepository(
         recordType: String,
         values: Map<String, String>
     ): MiniAppRecord {
+        val bundle = bundle(miniAppId) ?: throw MiniAppValidationException("Unknown mini app: $miniAppId")
+        val normalizedRecordType = normalizeRecordType(bundle, recordType)
+        val normalizedValues = normalizeRecordValues(bundle, values)
         val now = clock()
         val record = MiniAppRecord(
             id = UUID.randomUUID().toString(),
             miniAppId = miniAppId,
-            recordType = recordType,
-            values = values,
+            recordType = normalizedRecordType,
+            values = normalizedValues,
             createdAt = now,
             updatedAt = now
         )
@@ -146,13 +149,15 @@ class MiniAppRepository(
             MiniAppRecordEntity(
                 id = record.id,
                 miniAppId = miniAppId,
-                recordType = recordType,
-                valuesJson = gson.toJson(values),
+                recordType = normalizedRecordType,
+                valuesJson = gson.toJson(normalizedValues),
                 createdAt = now,
                 updatedAt = now
             )
         )
-        dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_created", gson.toJson(values), now))
+        dao.insertEvent(
+            MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_created", gson.toJson(normalizedValues), now)
+        )
         return record
     }
 
@@ -164,9 +169,14 @@ class MiniAppRepository(
 
     suspend fun updateRecord(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? {
         val existing = dao.record(miniAppId, recordId) ?: return null
+        val bundle = bundle(miniAppId) ?: return null
+        normalizeRecordType(bundle, existing.recordType)
+        val normalizedValues = normalizeRecordValues(bundle, existing.record().values + values)
         val now = clock()
-        dao.upsertRecord(existing.copy(valuesJson = gson.toJson(values), updatedAt = now))
-        dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_updated", gson.toJson(values), now))
+        dao.upsertRecord(existing.copy(recordType = bundle.dataSchema.recordType, valuesJson = gson.toJson(normalizedValues), updatedAt = now))
+        dao.insertEvent(
+            MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_updated", gson.toJson(normalizedValues), now)
+        )
         return dao.record(miniAppId, recordId)?.record()
     }
 
@@ -238,6 +248,32 @@ class MiniAppRepository(
                 )
             }
         }
+    }
+
+    private fun normalizeRecordType(bundle: MiniAppBundle, recordType: String): String {
+        val schemaRecordType = bundle.dataSchema.recordType
+        val requested = recordType.trim()
+        return when {
+            requested.isEmpty() || requested == "record" -> schemaRecordType
+            requested == schemaRecordType -> schemaRecordType
+            else -> throw MiniAppValidationException("Unsupported record type: $recordType")
+        }
+    }
+
+    private fun normalizeRecordValues(bundle: MiniAppBundle, values: Map<String, String>): Map<String, String> {
+        val fields = bundle.dataSchema.fields
+        val fieldNames = fields.map { it.name }.toSet()
+        val unknownFields = values.keys.filter { it !in fieldNames }
+        if (unknownFields.isNotEmpty()) {
+            throw MiniAppValidationException("Unknown record field: ${unknownFields.first()}")
+        }
+        return fields.mapNotNull { field ->
+            val value = values[field.name]
+                ?: field.defaultValue
+                ?: if (field.required) throw MiniAppValidationException("${field.name} is required") else return@mapNotNull null
+            if (field.required && value.isBlank()) throw MiniAppValidationException("${field.name} is required")
+            field.name to value
+        }.toMap()
     }
 
     private fun MiniAppVersionEntity.version(activeVersion: Int?): MiniAppVersion {

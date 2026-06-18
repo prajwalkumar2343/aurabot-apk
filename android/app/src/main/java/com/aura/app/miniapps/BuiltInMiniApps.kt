@@ -267,7 +267,7 @@ object BuiltInMiniApps {
             MiniAppAction("show_notes", "query_records")
         ),
         assistantIntents = listOf(
-            MiniAppAssistantIntent("open_field_notes", listOf("open field notes", "show field notes"), screenId = "dashboard"),
+            MiniAppAssistantIntent("open_field_notes", listOf("open field notes", "show field notes")),
             MiniAppAssistantIntent("seed_field_note", listOf("add field note", "create field note"), actionId = "seed_note")
         ),
         capabilities = listOf("local_storage", "assistant_actions", "react_runtime", "scoped_storage"),

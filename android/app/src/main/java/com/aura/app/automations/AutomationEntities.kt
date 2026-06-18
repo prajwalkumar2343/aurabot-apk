@@ -31,3 +31,44 @@ data class AutomationRunLogEntity(
     val message: String,
     val createdAt: Long
 )
+
+@Entity(
+    tableName = "automation_runs",
+    indices = [
+        Index(value = ["automationId", "updatedAt"]),
+        Index(value = ["automationId", "status"])
+    ]
+)
+data class AutomationRunEntity(
+    @PrimaryKey val id: String,
+    val automationId: String,
+    val eventType: String,
+    val status: String,
+    val message: String,
+    val valuesJson: String,
+    val startedAt: Long,
+    val updatedAt: Long,
+    val completedAt: Long? = null
+)
+
+@Entity(
+    tableName = "automation_step_runs",
+    indices = [
+        Index(value = ["runId", "stepIndex"]),
+        Index(value = ["automationId", "stepId"])
+    ]
+)
+data class AutomationStepRunEntity(
+    @PrimaryKey val id: String,
+    val runId: String,
+    val automationId: String,
+    val stepId: String,
+    val stepIndex: Int,
+    val stepType: String,
+    val actionType: String?,
+    val status: String,
+    val attempt: Int,
+    val message: String,
+    val startedAt: Long,
+    val completedAt: Long? = null
+)

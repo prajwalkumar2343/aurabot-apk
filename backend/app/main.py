@@ -1,5 +1,6 @@
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
@@ -25,43 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# FastAPI app
-app = FastAPI(title="Aura Assistant API")
-
-# Mount standard API sub-router under "/api" prefix
-api_router = APIRouter(prefix="/api")
-api_router.include_router(auth_router)
-api_router.include_router(memories_router)
-api_router.include_router(todos_router)
-api_router.include_router(assistant_router)
-api_router.include_router(transcribe_router)
-api_router.include_router(gateway_router)
-api_router.include_router(health_router)
-api_router.include_router(mini_apps_router)
-
-app.include_router(api_router)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-from fastapi.responses import JSONResponse
-from fastapi import Request
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception occurred: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An internal server error occurred. Please try again later."},
-    )
-
-@app.on_event("startup")
 async def startup():
     # Connect database
     db_manager.connect()
@@ -109,7 +73,50 @@ async def startup():
     except Exception as e:
         logger.error(f"Failed to initialize memory backend: {e}")
 
-@app.on_event("shutdown")
 async def shutdown():
     await close_memory_backend()
     db_manager.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+# FastAPI app
+app = FastAPI(title="Aura Assistant API", lifespan=lifespan)
+
+# Mount standard API sub-router under "/api" prefix
+api_router = APIRouter(prefix="/api")
+api_router.include_router(auth_router)
+api_router.include_router(memories_router)
+api_router.include_router(todos_router)
+api_router.include_router(assistant_router)
+api_router.include_router(transcribe_router)
+api_router.include_router(gateway_router)
+api_router.include_router(health_router)
+api_router.include_router(mini_apps_router)
+
+app.include_router(api_router)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"Unhandled exception occurred: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please try again later."},
+    )

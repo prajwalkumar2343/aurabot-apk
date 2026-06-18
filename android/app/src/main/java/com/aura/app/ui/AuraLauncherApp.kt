@@ -19,6 +19,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,11 +30,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -73,6 +76,7 @@ import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import android.os.Build
@@ -142,6 +146,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -150,6 +155,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
+import com.aura.app.automations.AutomationActionTypeSets
 import com.aura.app.automations.AutomationActionTypes
 import com.aura.app.automations.AutomationEvents
 import com.aura.app.automations.AutomationRunLog
@@ -158,6 +164,7 @@ import com.aura.app.automations.AutomationTriggerTypes
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
 import com.aura.app.assistant.LlmProvider
+import com.aura.app.assistant.MemoryAppProposal
 import com.aura.app.assistant.MessageRole
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
@@ -225,6 +232,48 @@ private enum class AuraPresenceMode {
     Listening,
     Hearing,
     Thinking
+}
+
+internal data class PhoneLayoutProfile(
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp,
+    val bottomBarHorizontalPadding: Dp,
+    val bottomBarVerticalPadding: Dp,
+    val bottomNavItemSize: Dp,
+    val appGridColumns: Int,
+    val storeGridColumns: Int,
+    val actionGridColumns: Int,
+    val dense: Boolean,
+    val short: Boolean
+)
+
+internal fun phoneLayoutProfile(width: Dp, height: Dp): PhoneLayoutProfile {
+    val dense = width < 360.dp
+    val short = height < 680.dp
+    return PhoneLayoutProfile(
+        horizontalPadding = when {
+            width < 340.dp -> 12.dp
+            width < 390.dp -> 16.dp
+            else -> 20.dp
+        },
+        verticalPadding = if (short) 10.dp else 16.dp,
+        bottomBarHorizontalPadding = when {
+            width < 340.dp -> 16.dp
+            width < 390.dp -> 28.dp
+            else -> 60.dp
+        },
+        bottomBarVerticalPadding = if (short) 10.dp else 20.dp,
+        bottomNavItemSize = if (dense) 46.dp else 52.dp,
+        appGridColumns = when {
+            width < 340.dp -> 2
+            width < 520.dp -> 3
+            else -> 4
+        },
+        storeGridColumns = if (width < 360.dp) 1 else 2,
+        actionGridColumns = if (width < 360.dp) 2 else 3,
+        dense = dense,
+        short = short
+    )
 }
 
 @Composable
@@ -377,85 +426,93 @@ fun AuraLauncherApp(
             }
         )
     } else {
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            bottomBar = {
-                if (!state.isDefaultLauncher) {
-                    val current = navController.currentBackStackEntryAsState().value?.destination?.route
-                    val isDark = isSystemInDarkTheme()
-                    val routes = listOf(Route.Home, Route.Settings)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 60.dp, vertical = 20.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val layout = phoneLayoutProfile(maxWidth, maxHeight)
+            Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                bottomBar = {
+                    if (!state.isDefaultLauncher) {
+                        val current = navController.currentBackStackEntryAsState().value?.destination?.route
+                        val isDark = isSystemInDarkTheme()
+                        val routes = listOf(Route.Home, Route.Settings)
+                        Box(
                             modifier = Modifier
-                                .glassCard(shape = RoundedCornerShape(28.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(
+                                    horizontal = layout.bottomBarHorizontalPadding,
+                                    vertical = layout.bottomBarVerticalPadding
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
-                            routes.forEach { route ->
-                                val selected = current == route.name
-                                val iconScale by animateFloatAsState(
-                                    targetValue = if (selected) 1.1f else 0.95f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    ),
-                                    label = "nav_icon_scale_${route.name}"
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .size(52.dp)
-                                        .scale(iconScale)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(
-                                            if (selected) {
-                                                if (isDark) Color.White.copy(alpha = 0.12f)
-                                                else Color.Black.copy(alpha = 0.08f)
-                                            } else {
-                                                Color.Transparent
-                                            }
-                                        )
-                                        .clickable {
-                                            navController.navigate(route.name) {
-                                                popUpTo(navController.graph.findStartDestination().id) {
-                                                    saveState = true
+                            Row(
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp)
+                                    .glassCard(shape = RoundedCornerShape(28.dp))
+                                    .padding(horizontal = if (layout.dense) 8.dp else 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(if (layout.dense) 4.dp else 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                routes.forEach { route ->
+                                    val selected = current == route.name
+                                    val iconScale by animateFloatAsState(
+                                        targetValue = if (selected) 1.1f else 0.95f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        ),
+                                        label = "nav_icon_scale_${route.name}"
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(layout.bottomNavItemSize)
+                                            .scale(iconScale)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                if (selected) {
+                                                    if (isDark) Color.White.copy(alpha = 0.12f)
+                                                    else Color.Black.copy(alpha = 0.08f)
+                                                } else {
+                                                    Color.Transparent
                                                 }
-                                                launchSingleTop = true
-                                                restoreState = true
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Icon(
-                                            routeIcon(route),
-                                            contentDescription = route.title,
-                                            modifier = Modifier.size(22.dp),
-                                            tint = if (selected) {
-                                                MaterialTheme.colorScheme.onBackground
-                                            } else {
-                                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f)
-                                            }
-                                        )
-                                        if (selected) {
-                                            Spacer(Modifier.height(4.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(4.dp)
-                                                    .clip(CircleShape)
-                                                    .background(
-                                                        if (isDark) Color(0xFF8B5CF6)
-                                                        else Color(0xFF6366F1)
-                                                    )
                                             )
+                                            .clickable {
+                                                navController.navigate(route.name) {
+                                                    popUpTo(navController.graph.findStartDestination().id) {
+                                                        saveState = true
+                                                    }
+                                                    launchSingleTop = true
+                                                    restoreState = true
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                routeIcon(route),
+                                                contentDescription = route.title,
+                                                modifier = Modifier.size(if (layout.dense) 20.dp else 22.dp),
+                                                tint = if (selected) {
+                                                    MaterialTheme.colorScheme.onBackground
+                                                } else {
+                                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f)
+                                                }
+                                            )
+                                            if (selected) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(4.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (isDark) Color(0xFF8B5CF6)
+                                                            else Color(0xFF6366F1)
+                                                        )
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -463,8 +520,7 @@ fun AuraLauncherApp(
                         }
                     }
                 }
-            }
-        ) { padding ->
+            ) { padding ->
             NavHost(
                 navController = navController,
                 startDestination = Route.Home.name,
@@ -592,7 +648,17 @@ fun AuraLauncherApp(
                     TasksScreen(state = state, onAddTodo = viewModel::addTodo, onBack = { navController.popBackStack() })
                 }
                 composable(Route.Memory.name) {
-                    MemoryScreen(state = state, onAddMemory = viewModel::addMemory, onBack = { navController.popBackStack() })
+                    MemoryScreen(
+                        state = state,
+                        onAddMemory = viewModel::addMemory,
+                        onCreateMiniApp = { proposalId ->
+                            viewModel.createMiniAppFromMemoryProposal(proposalId) {
+                                navController.navigate(Route.MiniApp.name)
+                            }
+                        },
+                        onDismissProposal = viewModel::dismissMemoryAppProposal,
+                        onBack = { navController.popBackStack() }
+                    )
                 }
                 composable(Route.Settings.name) {
                     SettingsScreen(
@@ -639,6 +705,7 @@ fun AuraLauncherApp(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -1486,14 +1553,18 @@ private fun AppsScreen(
                 }
 
                 if (isGridView) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(state.filteredApps, key = { it.componentName.flattenToString() }) { app ->
-                            AppGridItem(app, onLaunchApp)
+                    BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                        val layout = phoneLayoutProfile(maxWidth, maxHeight)
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(layout.appGridColumns),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 80.dp)
+                        ) {
+                            items(state.filteredApps, key = { it.componentName.flattenToString() }) { app ->
+                                AppGridItem(app, onLaunchApp)
+                            }
                         }
                     }
                 } else {
@@ -1624,19 +1695,22 @@ private fun AuraStoreSection(
             MiniAppEmptyStoreCard()
         } else {
             val visibleApps = installed.take(4)
-            val storeRows = ((visibleApps.size + 1) / 2).coerceAtLeast(1)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.height((storeRows * 146).dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                userScrollEnabled = false
-            ) {
-                items(visibleApps, key = { it.id }) { miniApp ->
-                    MiniAppIconCard(
-                        miniApp = miniApp,
-                        onOpen = onOpen
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val columns = phoneLayoutProfile(maxWidth, 720.dp).storeGridColumns
+                val storeRows = ((visibleApps.size + columns - 1) / columns).coerceAtLeast(1)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.height((storeRows * 146).dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    userScrollEnabled = false
+                ) {
+                    items(visibleApps, key = { it.id }) { miniApp ->
+                        MiniAppIconCard(
+                            miniApp = miniApp,
+                            onOpen = onOpen
+                        )
+                    }
                 }
             }
         }
@@ -2582,38 +2656,42 @@ private fun MiniAppActionPanel(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MiniAppSectionTitle(component.title.ifBlank { "Actions" }, "Tap to update")
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier.height(104.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            userScrollEnabled = false
-        ) {
-            itemsIndexed(
-                component.items,
-                key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
-            ) { index, item ->
-                val color = if (index % 2 == 0) primary else secondary
-                Column(
-                    modifier = Modifier
-                        .height(92.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(color.copy(alpha = 0.12f))
-                        .border(BorderStroke(1.dp, color.copy(alpha = 0.18f)), RoundedCornerShape(22.dp))
-                        .clickable { item.actionId?.let { onRunAction(bundle.id, it) } }
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Box(
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val columns = phoneLayoutProfile(maxWidth, 720.dp).actionGridColumns
+            val rows = ((component.items.size + columns - 1) / columns).coerceAtLeast(1)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.height((rows * 104).dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                userScrollEnabled = false
+            ) {
+                itemsIndexed(
+                    component.items,
+                    key = { index, item -> "$index:${item.label}:${item.actionId.orEmpty()}" }
+                ) { index, item ->
+                    val color = if (index % 2 == 0) primary else secondary
+                    Column(
                         modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(color.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
+                            .height(92.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(color.copy(alpha = 0.12f))
+                            .border(BorderStroke(1.dp, color.copy(alpha = 0.18f)), RoundedCornerShape(22.dp))
+                            .clickable { item.actionId?.let { onRunAction(bundle.id, it) } }
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Rounded.Check, null, tint = color, modifier = Modifier.size(17.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(color.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.Check, null, tint = color, modifier = Modifier.size(17.dp))
+                        }
+                        Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Black)
                     }
-                    Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Black)
                 }
             }
         }
@@ -3379,7 +3457,13 @@ private fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onB
 }
 
 @Composable
-private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -> Unit, onBack: () -> Unit) {
+private fun MemoryScreen(
+    state: LauncherUiState,
+    onAddMemory: (String, String) -> Unit,
+    onCreateMiniApp: (String) -> Unit,
+    onDismissProposal: (String) -> Unit,
+    onBack: () -> Unit
+) {
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
@@ -3439,7 +3523,22 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
         Spacer(Modifier.height(16.dp))
         val isDark = isSystemInDarkTheme()
         val separatorColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
-        LazyColumn {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (state.memoryAppProposals.isNotEmpty()) {
+                item(key = "memory-app-proposals") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        state.memoryAppProposals.forEach { proposal ->
+                            MemoryAppProposalCard(
+                                proposal = proposal,
+                                building = state.buildingMemoryAppProposalId == proposal.id,
+                                busy = state.buildingMemoryAppProposalId != null,
+                                onCreateMiniApp = onCreateMiniApp,
+                                onDismissProposal = onDismissProposal
+                            )
+                        }
+                    }
+                }
+            }
             itemsIndexed(
                 state.memories,
                 key = { index, memory -> "$index:${memory.id}" }
@@ -3467,6 +3566,124 @@ private fun MemoryScreen(state: LauncherUiState, onAddMemory: (String, String) -
                         text = memory.content,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryAppProposalCard(
+    proposal: MemoryAppProposal,
+    building: Boolean,
+    busy: Boolean,
+    onCreateMiniApp: (String) -> Unit,
+    onDismissProposal: (String) -> Unit
+) {
+    val primary = MaterialTheme.colorScheme.onBackground
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .border(BorderStroke(1.dp, primary.copy(alpha = 0.16f)), RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = primary)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("PATTERN FOUND", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(proposal.appName, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                "${(proposal.confidence * 100).toInt()}%",
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(primary.copy(alpha = 0.1f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black),
+                color = primary
+            )
+        }
+        Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        MemoryProposalChipRow("FIELDS", proposal.suggestedFields.take(6))
+        MemoryProposalChipRow("ACTIONS", proposal.suggestedActions.take(4))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            proposal.evidence.take(3).forEach { evidence ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.35f))
+                        .padding(10.dp)
+                ) {
+                    Text(evidence.title.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                    Text(evidence.excerpt, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { onCreateMiniApp(proposal.id) },
+                enabled = !busy,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = primary,
+                    contentColor = MaterialTheme.colorScheme.background
+                )
+            ) {
+                Icon(Icons.Rounded.Store, null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (building) "BUILDING" else "CREATE")
+            }
+            OutlinedButton(
+                onClick = { onDismissProposal(proposal.id) },
+                enabled = !busy,
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Rounded.Clear, null)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryProposalChipRow(label: String, values: List<String>) {
+    if (values.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            values.take(3).forEach { value ->
+                Text(
+                    formatMiniAppFieldLabel(value),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.45f))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+        if (values.size > 3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                values.drop(3).take(3).forEach { value ->
+                    Text(
+                        formatMiniAppFieldLabel(value),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.32f))
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelSmall
                     )
                 }
             }
@@ -3606,6 +3823,9 @@ private fun AutomationCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 AutomationChip(text = automation.trigger.type.uppercase(), icon = automationIcon(automation))
+                automation.flow?.steps?.takeIf { it.isNotEmpty() }?.let { steps ->
+                    AutomationChip(text = "FLOW ${steps.size}", icon = Icons.Rounded.AutoAwesome)
+                }
                 automation.actions.take(2).forEach { action ->
                     AutomationChip(text = action.type.replace('_', ' ').uppercase(), icon = actionIcon(action.type))
                 }
@@ -3688,8 +3908,10 @@ private fun automationIcon(automation: AutomationSpec): ImageVector =
 
 private fun actionIcon(actionType: String): ImageVector =
     when (actionType) {
-        AutomationActionTypes.EtaMessage, AutomationActionTypes.DraftMessage, AutomationActionTypes.DirectSms -> Icons.Rounded.Mail
+        in AutomationActionTypeSets.Message -> Icons.Rounded.Mail
         AutomationActionTypes.Notify -> Icons.Rounded.Refresh
+        AutomationActionTypes.OpenApp -> Icons.Rounded.Apps
+        in AutomationActionTypeSets.CrossApp -> Icons.Rounded.TouchApp
         else -> Icons.Rounded.AutoAwesome
     }
 
@@ -3705,6 +3927,9 @@ private fun automationSummary(automation: AutomationSpec): String =
             if (schedule?.mode == "interval") "Every ${schedule.intervalMinutes} minutes" else "Daily at ${schedule?.localTime ?: "09:00"}"
         }
         else -> "Manual automation"
+    }.let { summary ->
+        val stepCount = automation.flow?.steps.orEmpty().size
+        if (stepCount > 0) "$summary · $stepCount-step flow" else summary
     }
 
 @Composable
@@ -3987,14 +4212,19 @@ private fun OnboardingScreen(
     }
 
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .padding(horizontal = 24.dp, vertical = 12.dp)
         ) {
+            val layout = phoneLayoutProfile(maxWidth, maxHeight)
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = if (layout.dense) 8.dp else 16.dp,
+                        vertical = if (layout.short) 6.dp else 12.dp
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Header (always visible)
@@ -4003,7 +4233,7 @@ private fun OnboardingScreen(
                     title = stepTitle
                 )
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(if (layout.short) 8.dp else 16.dp))
 
                 // Step content Column
                 Column(
@@ -4011,7 +4241,7 @@ private fun OnboardingScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = if (step >= 6) Arrangement.Center else Arrangement.spacedBy(16.dp),
+                    verticalArrangement = if (step >= 6) Arrangement.Center else Arrangement.spacedBy(if (layout.short) 10.dp else 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     if (step < 6) {
@@ -4473,14 +4703,14 @@ private fun OnboardingScreen(
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(if (layout.short) 8.dp else 16.dp))
 
                 // Bottom Navigation Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(vertical = if (layout.short) 4.dp else 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (layout.dense) 8.dp else 12.dp)
                 ) {
                     if (step > 1) {
                         Button(
@@ -5437,14 +5667,18 @@ private fun ScreenShell(
             }
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            content = content
-        )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val layout = phoneLayoutProfile(maxWidth, maxHeight)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = layout.horizontalPadding, vertical = layout.verticalPadding),
+                content = content
+            )
+        }
     }
 }
 
@@ -5455,7 +5689,7 @@ private fun Header(title: String, subtitle: String) {
             title.uppercase(),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
-            letterSpacing = (-0.5).sp
+            letterSpacing = 0.sp
         )
         Spacer(Modifier.height(6.dp))
         Text(
