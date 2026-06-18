@@ -47,6 +47,10 @@ class AutomationRuntime(
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was interrupted before completion")
                 return@forEach
             }
+            if (run.automationRevision != repository.revision(spec)) {
+                terminalizeRun(run, AutomationRunStatus.Failed, "Automation changed while run was waiting")
+                return@forEach
+            }
             val waitingStep = repository.stepRuns(run.id)
                 .lastOrNull { it.status == AutomationRunStatus.Waiting }
                 ?: return@forEach terminalizeRun(

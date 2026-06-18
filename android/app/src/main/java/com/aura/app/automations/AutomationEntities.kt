@@ -1,5 +1,6 @@
 package com.aura.app.automations
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -46,6 +47,8 @@ data class AutomationRunEntity(
     val status: String,
     val message: String,
     val valuesJson: String,
+    @ColumnInfo(defaultValue = "''")
+    val automationRevision: String = "",
     val startedAt: Long,
     val updatedAt: Long,
     val completedAt: Long? = null

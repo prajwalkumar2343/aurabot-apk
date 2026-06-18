@@ -127,6 +127,7 @@ data class AutomationRunRecord(
     val status: String,
     val message: String,
     val values: Map<String, String>,
+    val automationRevision: String,
     val startedAt: Long,
     val updatedAt: Long,
     val completedAt: Long? = null

@@ -491,6 +491,79 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun resumeRunFailsClosedWhenAutomationChangedAfterCheckpoint() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Original")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        repository.upsert(
+            saved.copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Changed")
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation changed while run was waiting", result.message)
+        assertEquals(0, executor.events.size)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun resumeRunAllowsUnchangedAutomationSavedAtNewTimestamp() = runTest {
+        var now = 1_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Confirmed")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        now = 2_000L
+        repository.upsert(saved)
+
+        val result = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
     fun manualRunSkipsWhenFlowAlreadyWaiting() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val executor = RecordingActionExecutor()

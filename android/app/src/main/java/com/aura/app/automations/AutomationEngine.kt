@@ -50,6 +50,12 @@ class AutomationEngine(
         }
         val spec = repository.get(run.automationId)
             ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
+        if (!spec.enabled) {
+            return terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
+        }
+        if (run.automationRevision != repository.revision(spec)) {
+            return terminalizeRun(run, AutomationRunStatus.Failed, "Automation changed while run was waiting")
+        }
         val waitingStep = repository.stepRuns(runId)
             .lastOrNull { it.status == AutomationRunStatus.Waiting }
             ?: return terminalizeRun(run, AutomationRunStatus.Failed, "Automation run is waiting without a resumable step")

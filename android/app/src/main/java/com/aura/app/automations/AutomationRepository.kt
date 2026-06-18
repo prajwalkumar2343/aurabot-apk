@@ -2,6 +2,7 @@ package com.aura.app.automations
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.security.MessageDigest
 import java.util.UUID
 
 class AutomationRepository(
@@ -86,6 +87,10 @@ class AutomationRepository(
         message: String = "Automation flow started"
     ): AutomationRunRecord {
         val now = clock()
+        val automationRevision = dao.automation(automationId)
+            ?.spec()
+            ?.let(::revision)
+            .orEmpty()
         val entity = AutomationRunEntity(
             id = UUID.randomUUID().toString(),
             automationId = automationId,
@@ -93,6 +98,7 @@ class AutomationRepository(
             status = status,
             message = message,
             valuesJson = gson.toJson(values),
+            automationRevision = automationRevision,
             startedAt = now,
             updatedAt = now,
             completedAt = null
@@ -164,6 +170,13 @@ class AutomationRepository(
     suspend fun stepRuns(runId: String): List<AutomationStepRunRecord> =
         dao.stepRuns(runId).map { it.record() }
 
+    internal fun revision(spec: AutomationSpec): String {
+        val revisionSource = gson.toJson(spec.copy(createdAt = 0L, updatedAt = 0L))
+        return MessageDigest.getInstance("SHA-256")
+            .digest(revisionSource.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+    }
+
     private fun AutomationSpec.entity(lastTriggeredAt: Long?) = AutomationEntity(
         id = id,
         name = name,
@@ -196,6 +209,7 @@ class AutomationRepository(
         values = runCatching {
             gson.fromJson<Map<String, String>>(valuesJson, stringMapType)
         }.getOrNull().orEmpty(),
+        automationRevision = automationRevision,
         startedAt = startedAt,
         updatedAt = updatedAt,
         completedAt = completedAt

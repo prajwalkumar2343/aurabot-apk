@@ -136,6 +136,38 @@ class AutomationRuntimeTest {
     }
 
     @Test
+    fun restoreTriggersTerminalizesWaitingRunWhenAutomationChanged() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            continuations,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+        repository.upsert(
+            saved.copy(
+                flow = saved.flow?.copy(
+                    steps = saved.flow.steps.map { step ->
+                        if (step.id == "wait") step.copy(waitMillis = 10_000L) else step
+                    }
+                )
+            )
+        )
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
+        assertEquals("Automation changed while run was waiting", repository.getRun(run.id)?.message)
+        assertTrue(run.id in continuations.cancelled)
+        assertFalse(run.id in continuations.scheduled)
+    }
+
+    @Test
     fun restoreTriggersTerminalizesMissingWaitingFlowContinuations() = runTest {
         val dao = RuntimeFakeAutomationDao()
         val repository = AutomationRepository(dao, clock = { 1_000L })
