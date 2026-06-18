@@ -1,6 +1,7 @@
 package com.aura.app.automations
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
@@ -36,6 +37,79 @@ class AutomationRuntimeTest {
         second.await()
         assertEquals(1, dao.maxConcurrentListCalls)
         assertEquals(2, dao.totalListCalls)
+    }
+
+    @Test
+    fun restoreTriggersAttemptsEveryFamilyAndAggregatesFailures() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            restoreFailure = IllegalStateException("geofences unavailable")
+        }
+        val schedules = RecordingScheduleScheduler().apply {
+            restoreFailure = IllegalArgumentException("alarms unavailable")
+        }
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+
+        val failure = runCatching { runtime.restoreTriggers() }.exceptionOrNull()
+
+        assertEquals(
+            "Automation trigger restoration failed: geofences unavailable; alarms unavailable",
+            failure?.message
+        )
+        assertTrue(saved.id in geofences.removedByRestore)
+        assertTrue(saved.id in schedules.cancelledByRestore)
+        assertEquals("alarms unavailable", schedules.restoreFailure?.message)
+        assertEquals(5_000L, continuations.scheduled[run.id])
+    }
+
+    @Test
+    fun restoreTriggersPropagatesCancellationWithoutStartingLaterFamilies() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            restoreFailure = CancellationException("cancelled")
+        }
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules, continuations)
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        waitingRun(repository, saved, waitStep)
+
+        val failure = runCatching { runtime.restoreTriggers() }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+        assertTrue(schedules.cancelledByRestore.isEmpty())
+        assertTrue(continuations.scheduleAttempts.isEmpty())
+    }
+
+    @Test
+    fun restoreTriggersFailsOneUnschedulableRunAndRearmsTheOthers() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            continuations,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val failedRun = waitingRun(repository, saved, waitStep)
+        val healthyRun = waitingRun(repository, saved, waitStep)
+        continuations.failOnSchedule = failedRun.id
+
+        runtime.restoreTriggers()
+
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(failedRun.id)?.status)
+        assertEquals(AutomationRunStatus.Waiting, repository.getRun(healthyRun.id)?.status)
+        assertTrue(failedRun.id in continuations.scheduleAttempts)
+        assertEquals(5_000L, continuations.scheduled[healthyRun.id])
+        assertTrue(repository.logs(saved.id).any { it.message.contains("alarm service unavailable") })
     }
 
     @Test
@@ -444,6 +518,7 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
     val activeIds = linkedSetOf<String>()
     val removedByRestore = mutableListOf<String>()
     val removedExplicitly = mutableListOf<String>()
+    var restoreFailure: Exception? = null
 
     override suspend fun restore(automations: List<AutomationSpec>) {
         automations.map { it.id }.forEach { id ->
@@ -453,6 +528,7 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
         automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Geofence }
             .mapTo(activeIds) { it.id }
+        restoreFailure?.let { throw it }
     }
 
     override suspend fun remove(automationId: String) {
@@ -465,6 +541,7 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
     val activeIds = linkedSetOf<String>()
     val cancelledByRestore = mutableListOf<String>()
     val cancelledExplicitly = mutableListOf<String>()
+    var restoreFailure: Exception? = null
 
     override fun restore(automations: List<AutomationSpec>) {
         automations.map { it.id }.forEach { id ->
@@ -474,6 +551,7 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
         automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Schedule }
             .mapTo(activeIds) { it.id }
+        restoreFailure?.let { throw it }
     }
 
     override fun cancel(automationId: String) {
@@ -484,10 +562,14 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
 
 private class RecordingRuntimeFlowContinuationScheduler : AutomationFlowContinuationScheduler {
     val scheduled = linkedMapOf<String, Long>()
+    val scheduleAttempts = linkedSetOf<String>()
     val cancelled = linkedSetOf<String>()
+    var failOnSchedule: String? = null
     var failOnCancel: String? = null
 
     override fun schedule(runId: String, delayMillis: Long) {
+        scheduleAttempts += runId
+        if (runId == failOnSchedule) error("alarm service unavailable")
         scheduled[runId] = delayMillis
     }
 
