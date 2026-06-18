@@ -87,8 +87,12 @@ object AutomationValidator {
                     AutomationFlowStepTypes.Checkpoint
                 )
             ) { "Unsupported flow step type: ${step.type}" }
-            require(step.retryPolicy.maxAttempts >= 1) { "Flow step maxAttempts must be at least 1" }
-            require(step.retryPolicy.backoffMillis >= 0L) { "Flow step backoff cannot be negative" }
+            require(step.retryPolicy.maxAttempts in 1..MAX_RETRY_ATTEMPTS) {
+                "Flow step maxAttempts must be between 1 and $MAX_RETRY_ATTEMPTS"
+            }
+            require(step.retryPolicy.backoffMillis in 0L..MAX_RETRY_BACKOFF_MILLIS) {
+                "Flow step backoff must be between 0 and ${MAX_RETRY_BACKOFF_MILLIS}ms"
+            }
             require(step.waitMillis >= 0L) { "Flow step waitMillis cannot be negative" }
             when (step.type) {
                 AutomationFlowStepTypes.Action -> {
@@ -110,7 +114,9 @@ object AutomationValidator {
                 AutomationFlowStepTypes.Wait -> {
                     require(step.action == null) { "Wait flow steps cannot include an action" }
                     require(step.condition == null) { "Wait flow steps cannot include a condition" }
-                    require(step.waitMillis > 0L) { "Wait flow steps need positive waitMillis" }
+                    require(step.waitMillis in 1L..MAX_FLOW_WAIT_MILLIS) {
+                        "Wait flow steps need waitMillis between 1 and $MAX_FLOW_WAIT_MILLIS"
+                    }
                 }
                 AutomationFlowStepTypes.Checkpoint -> {
                     require(step.action == null) { "Checkpoint flow steps cannot include an action" }
@@ -356,4 +362,8 @@ object AutomationValidator {
         "unsubscribe",
         "withdraw"
     )
+
+    private const val MAX_RETRY_ATTEMPTS = 5
+    private const val MAX_RETRY_BACKOFF_MILLIS = 30_000L
+    private const val MAX_FLOW_WAIT_MILLIS = 604_800_000L
 }

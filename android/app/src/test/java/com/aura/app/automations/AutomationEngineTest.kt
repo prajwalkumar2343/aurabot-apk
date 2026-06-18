@@ -299,6 +299,67 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorBoundsFlowRetriesAndWaitDurations() {
+        fun invalid(step: AutomationFlowStep) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(
+                    manualSpec().copy(
+                        actions = emptyList(),
+                        flow = AutomationFlow(steps = listOf(step))
+                    )
+                )
+            }
+        }
+
+        invalid(
+            AutomationFlowStep(
+                id = "too-many-attempts",
+                type = AutomationFlowStepTypes.Action,
+                action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Retry"),
+                retryPolicy = AutomationRetryPolicy(maxAttempts = 6)
+            )
+        )
+        invalid(
+            AutomationFlowStep(
+                id = "too-much-backoff",
+                type = AutomationFlowStepTypes.Action,
+                action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Retry"),
+                retryPolicy = AutomationRetryPolicy(maxAttempts = 2, backoffMillis = 30_001L)
+            )
+        )
+        invalid(
+            AutomationFlowStep(
+                id = "too-long-wait",
+                type = AutomationFlowStepTypes.Wait,
+                waitMillis = 604_800_001L
+            )
+        )
+
+        val valid = AutomationValidator.validate(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "bounded-retry",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Retry"),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 5, backoffMillis = 30_000L)
+                        ),
+                        AutomationFlowStep(
+                            id = "bounded-wait",
+                            type = AutomationFlowStepTypes.Wait,
+                            waitMillis = 604_800_000L
+                        )
+                    )
+                )
+            )
+        )
+
+        assertEquals(listOf("bounded-retry", "bounded-wait"), valid.flow?.steps?.map { it.id })
+    }
+
+    @Test
     fun dailyScheduleHonorsDaysOfWeek() {
         val zone = ZoneId.of("UTC")
         val mondayAfterRunTime = ZonedDateTime.of(2026, 6, 8, 10, 0, 0, 0, zone)
