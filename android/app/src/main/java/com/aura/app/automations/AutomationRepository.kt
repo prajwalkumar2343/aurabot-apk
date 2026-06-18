@@ -44,8 +44,9 @@ class AutomationRepository(
         dao.deleteAutomationData(id)
     }
 
-    suspend fun markTriggered(id: String, triggeredAt: Long) {
-        dao.markTriggered(id, triggeredAt, clock())
+    suspend fun markTriggered(id: String) {
+        val now = clock()
+        dao.markTriggered(id, now, now)
     }
 
     suspend fun lastTriggeredAt(id: String): Long? =

@@ -82,6 +82,87 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun cooldownUsesLocalAcceptanceTimeForStaleEvents() = runTest {
+        var now = 100_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+
+        engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = 1L
+            )
+        )
+        now += 1_000L
+        val repeated = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = 2L
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Skipped, repeated.single().status)
+        assertEquals(1, executor.events.size)
+        assertEquals(100_000L, repository.lastTriggeredAt(saved.id))
+    }
+
+    @Test
+    fun futureEventTimestampDoesNotPoisonCooldown() = runTest {
+        var now = 1_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+
+        engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = Long.MAX_VALUE
+            )
+        )
+        now += 60_001L
+        val afterCooldown = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = Long.MAX_VALUE
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Success, afterCooldown.single().status)
+        assertEquals(2, executor.events.size)
+        assertEquals(now, repository.lastTriggeredAt(saved.id))
+    }
+
+    @Test
+    fun futurePersistedCooldownTimestampSelfHeals() = runTest {
+        val now = 1_000L
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+        dao.markTriggered(saved.id, Long.MAX_VALUE, Long.MAX_VALUE)
+
+        val recovered = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+        val repeated = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+
+        assertEquals(AutomationRunStatus.Success, recovered.single().status)
+        assertEquals(AutomationRunStatus.Skipped, repeated.single().status)
+        assertEquals(now, repository.lastTriggeredAt(saved.id))
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
     fun validatorForcesMessageConfirmation() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val saved = repository.upsert(

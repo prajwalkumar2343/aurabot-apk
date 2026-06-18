@@ -312,18 +312,14 @@ class AutomationEngine(
             }
         }
         val lastTriggeredAt = repository.lastTriggeredAt(spec.id)
-        if (
-            lastTriggeredAt != null &&
-            spec.cooldownMillis > 0L &&
-            clock() - lastTriggeredAt < spec.cooldownMillis
-        ) {
+        if (lastTriggeredAt != null && isCoolingDown(lastTriggeredAt, clock(), spec.cooldownMillis)) {
             return@withLock StartPreparation.Rejected(
                 result(spec.id, event.type, AutomationRunStatus.Skipped, "Automation is cooling down")
             )
         }
         val run = repository.createRun(spec.id, enrichedEvent.type, enrichedEvent.values)
         try {
-            repository.markTriggered(spec.id, event.occurredAt)
+            repository.markTriggered(spec.id)
         } catch (error: CancellationException) {
             withContext(NonCancellable) {
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
@@ -343,6 +339,12 @@ class AutomationEngine(
 
     private fun stateMutex(key: String): Mutex =
         stateMutexes[Math.floorMod(key.hashCode(), stateMutexes.size)]
+
+    private fun isCoolingDown(lastTriggeredAt: Long, now: Long, cooldownMillis: Long): Boolean =
+        cooldownMillis > 0L &&
+            lastTriggeredAt >= 0L &&
+            now >= lastTriggeredAt &&
+            now - lastTriggeredAt < cooldownMillis
 
     private fun successMessage(executedSteps: Int, skippedSteps: Int, failedSteps: Int): String {
         val base = "Automation ran $executedSteps step(s)"
