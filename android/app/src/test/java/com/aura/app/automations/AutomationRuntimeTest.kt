@@ -1,5 +1,9 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -7,6 +11,33 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutomationRuntimeTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun restoreTriggersSerializesConcurrentRestores() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val firstListStarted = CompletableDeferred<Unit>()
+        val releaseFirstList = CompletableDeferred<Unit>()
+        dao.listStarted = firstListStarted
+        dao.listGate = releaseFirstList
+        val runtime = AutomationRuntime(
+            AutomationRepository(dao, clock = { 1_000L }),
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler()
+        )
+
+        val first = async { runtime.restoreTriggers() }
+        firstListStarted.await()
+        val second = async { runtime.restoreTriggers() }
+        runCurrent()
+
+        assertEquals(1, dao.maxConcurrentListCalls)
+        releaseFirstList.complete(Unit)
+        first.await()
+        second.await()
+        assertEquals(1, dao.maxConcurrentListCalls)
+        assertEquals(2, dao.totalListCalls)
+    }
+
     @Test
     fun restoreTriggersImmediatelyDisarmsDisabledRules() = runTest {
         val dao = RuntimeFakeAutomationDao()
@@ -469,9 +500,26 @@ private class RecordingRuntimeFlowContinuationScheduler : AutomationFlowContinua
 private class RuntimeFakeAutomationDao : AutomationDao {
     private val automations = linkedMapOf<String, AutomationEntity>()
     private val logs = mutableListOf<AutomationRunLogEntity>()
+    var listStarted: CompletableDeferred<Unit>? = null
+    var listGate: CompletableDeferred<Unit>? = null
+    var maxConcurrentListCalls = 0
+        private set
+    var totalListCalls = 0
+        private set
+    private var concurrentListCalls = 0
 
-    override suspend fun listAutomations(): List<AutomationEntity> =
-        automations.values.sortedByDescending { it.updatedAt }
+    override suspend fun listAutomations(): List<AutomationEntity> {
+        totalListCalls += 1
+        concurrentListCalls += 1
+        maxConcurrentListCalls = maxOf(maxConcurrentListCalls, concurrentListCalls)
+        listStarted?.complete(Unit)
+        return try {
+            listGate?.await()
+            automations.values.sortedByDescending { it.updatedAt }
+        } finally {
+            concurrentListCalls -= 1
+        }
+    }
 
     override suspend fun listEnabledAutomations(): List<AutomationEntity> =
         listAutomations().filter { it.enabled }

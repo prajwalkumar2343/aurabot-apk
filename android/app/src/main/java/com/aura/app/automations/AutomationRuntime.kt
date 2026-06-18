@@ -1,6 +1,8 @@
 package com.aura.app.automations
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class AutomationRuntime(
@@ -10,11 +12,15 @@ class AutomationRuntime(
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
+    private val restoreMutex = Mutex()
+
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
-        val automations = repository.list()
-        geofenceRegistrar.restore(automations)
-        scheduleScheduler.restore(automations)
-        restoreFlowContinuations(automations)
+        restoreMutex.withLock {
+            val automations = repository.list()
+            geofenceRegistrar.restore(automations)
+            scheduleScheduler.restore(automations)
+            restoreFlowContinuations(automations)
+        }
     }
 
     suspend fun upsertAndRestore(spec: AutomationSpec): AutomationSpec = withContext(Dispatchers.IO) {
