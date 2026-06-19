@@ -1,11 +1,13 @@
 import json
 
+from app.models.chat import ChatIn
 from app.services.llm import (
     AUTOMATION_ACTION_TYPES,
     AUTOMATION_MAX_FLOW_WAIT_MILLIS,
     AUTOMATION_MAX_RETRY_ATTEMPTS,
     AUTOMATION_MAX_RETRY_BACKOFF_MILLIS,
     assistant_tool_definitions,
+    build_system_message,
     parse_tool_response,
 )
 
@@ -120,6 +122,12 @@ def test_create_automation_tool_schema_bounds_flow_retries_and_waits():
         "minimum": 0,
         "maximum": AUTOMATION_MAX_RETRY_BACKOFF_MILLIS,
     }
+
+
+def test_system_prompt_forbids_retries_for_irreversible_automation_actions():
+    prompt = build_system_message(ChatIn(message="", api_key="", model="gemini-test"))
+
+    assert "Always use maxAttempts=1 for unconfirmed direct_sms and high-impact gestures" in prompt
 
 
 def test_create_automation_tool_schema_supports_cross_app_actions():

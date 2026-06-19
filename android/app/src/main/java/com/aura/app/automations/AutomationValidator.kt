@@ -103,6 +103,9 @@ object AutomationValidator {
                     require(!action.isHighImpactCrossAppAction() || hasPriorCheckpoint) {
                         "High-impact cross-app action '${action.type}' needs a prior checkpoint step"
                     }
+                    require(!action.hasAtMostOnceSideEffect() || step.retryPolicy.maxAttempts == 1) {
+                        "Irreversible action '${action.type}' cannot be retried"
+                    }
                 }
                 AutomationFlowStepTypes.Condition -> {
                     require(step.action == null) { "Condition flow steps cannot include an action" }
@@ -336,6 +339,9 @@ object AutomationValidator {
         ).joinToString(" ").lowercase()
         return highImpactTerms.any { term -> Regex("\\b${Regex.escape(term)}\\b").containsMatchIn(targetText) }
     }
+
+    private fun AutomationAction.hasAtMostOnceSideEffect(): Boolean =
+        sendsDirectSms() || isHighImpactCrossAppAction()
 
     private val highImpactGestureActionTypes = setOf(
         AutomationActionTypes.TapText,

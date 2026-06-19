@@ -382,6 +382,79 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRejectsRetriesForIrreversibleActions() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = emptyList(),
+                    flow = AutomationFlow(
+                        steps = listOf(
+                            AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                            AutomationFlowStep(
+                                id = "send",
+                                type = AutomationFlowStepTypes.Action,
+                                action = AutomationAction(
+                                    type = AutomationActionTypes.TapTarget,
+                                    metadata = mapOf(AutomationActionMetadata.Text to "Send")
+                                ),
+                                retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                            )
+                        )
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = emptyList(),
+                    flow = AutomationFlow(
+                        steps = listOf(
+                            AutomationFlowStep(
+                                id = "sms",
+                                type = AutomationFlowStepTypes.Action,
+                                action = AutomationAction(
+                                    type = AutomationActionTypes.DirectSms,
+                                    messageTemplate = "On my way",
+                                    recipientAddress = "+15555550123",
+                                    requireConfirmation = false
+                                ),
+                                retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                            )
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun validatorAllowsRetriesForConfirmedSmsReviewNotifications() {
+        val validated = AutomationValidator.validate(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "review-sms",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(
+                                type = AutomationActionTypes.DirectSms,
+                                messageTemplate = "On my way",
+                                recipientAddress = "+15555550123",
+                                requireConfirmation = true
+                            ),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        assertEquals(2, validated.flow?.steps?.single()?.retryPolicy?.maxAttempts)
+    }
+
+    @Test
     fun validatorRejectsAmbiguousFlowStepShapes() {
         fun invalid(step: AutomationFlowStep) {
             assertThrows(IllegalArgumentException::class.java) {
