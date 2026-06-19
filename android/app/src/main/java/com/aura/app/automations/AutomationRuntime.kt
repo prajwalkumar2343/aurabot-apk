@@ -2,6 +2,7 @@ package com.aura.app.automations
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -18,18 +19,31 @@ class AutomationRuntime(
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
         restoreMutex.withLock {
             val automations = repository.list()
-            val failures = mutableListOf<Exception>()
-            captureFailure { geofenceRegistrar.restore(automations) }?.let(failures::add)
-            captureFailure { scheduleScheduler.restore(automations) }?.let(failures::add)
+            val failures = restoreConfiguredTriggerFailures(automations)
             captureFailure { restoreFlowContinuations(automations) }?.let(failures::add)
             failures.throwIfNotEmpty()
         }
     }
 
     suspend fun upsertAndRestore(spec: AutomationSpec): AutomationSpec = withContext(Dispatchers.IO) {
-        val saved = repository.upsert(spec)
-        restoreTriggers()
-        saved
+        restoreMutex.withLock {
+            val previous = spec.id.takeIf { it.isNotBlank() }?.let { repository.get(it) }
+            val saved = repository.upsert(spec)
+            restoreConfigurationOrRollback(saved, previous)
+            saved
+        }
+    }
+
+    suspend fun setEnabledAndRestore(id: String, enabled: Boolean): AutomationSpec = withContext(Dispatchers.IO) {
+        restoreMutex.withLock {
+            val previous = repository.get(id)
+                ?: throw IllegalArgumentException("Automation not found")
+            repository.setEnabled(id, enabled)
+            val saved = repository.get(id)
+                ?: throw IllegalStateException("Automation disappeared after update")
+            restoreConfigurationOrRollback(saved, previous)
+            saved
+        }
     }
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
@@ -40,6 +54,58 @@ class AutomationRuntime(
         runCatching { geofenceRegistrar.remove(id) }
         runCatching { scheduleScheduler.cancel(id) }
         restoreTriggers()
+    }
+
+    private suspend fun restoreConfigurationOrRollback(
+        saved: AutomationSpec,
+        previous: AutomationSpec?
+    ) {
+        val registrationFailures = try {
+            restoreConfiguredTriggerFailures(repository.list())
+        } catch (error: CancellationException) {
+            val rollbackFailures = withContext(NonCancellable) {
+                rollbackConfiguration(saved.id, previous)
+            }
+            rollbackFailures.forEach(error::addSuppressed)
+            throw error
+        }
+        if (registrationFailures.isNotEmpty()) {
+            val rollbackFailures = withContext(NonCancellable) {
+                rollbackConfiguration(saved.id, previous)
+            }
+            throw AutomationConfigurationException(registrationFailures, rollbackFailures)
+        }
+        restoreFlowContinuations(repository.list())
+    }
+
+    private suspend fun rollbackConfiguration(
+        savedId: String,
+        previous: AutomationSpec?
+    ): List<Exception> {
+        val failures = mutableListOf<Exception>()
+        captureCleanupFailure {
+            if (previous == null) repository.delete(savedId) else repository.upsert(previous)
+        }?.let(failures::add)
+        if (previous == null) {
+            captureCleanupFailure { geofenceRegistrar.remove(savedId) }?.let(failures::add)
+            captureCleanupFailure { scheduleScheduler.cancel(savedId) }?.let(failures::add)
+        }
+        val automations = try {
+            repository.list()
+        } catch (error: Exception) {
+            failures += error
+            return failures
+        }
+        captureCleanupFailure { geofenceRegistrar.restore(automations) }?.let(failures::add)
+        captureCleanupFailure { scheduleScheduler.restore(automations) }?.let(failures::add)
+        return failures
+    }
+
+    private suspend fun restoreConfiguredTriggerFailures(
+        automations: List<AutomationSpec>
+    ): MutableList<Exception> = mutableListOf<Exception>().apply {
+        captureFailure { geofenceRegistrar.restore(automations) }?.let(::add)
+        captureFailure { scheduleScheduler.restore(automations) }?.let(::add)
     }
 
     private suspend fun restoreFlowContinuations(automations: List<AutomationSpec>) {
@@ -131,6 +197,14 @@ class AutomationRuntime(
         } catch (error: Exception) {
             error
         }
+
+    private suspend fun captureCleanupFailure(block: suspend () -> Unit): Exception? =
+        try {
+            block()
+            null
+        } catch (error: Exception) {
+            error
+        }
 }
 
 internal class AutomationRestoreException(failures: List<Exception>) : Exception(
@@ -144,3 +218,27 @@ internal class AutomationRestoreException(failures: List<Exception>) : Exception
         failures.drop(1).forEach(::addSuppressed)
     }
 }
+
+internal class AutomationConfigurationException(
+    registrationFailures: List<Exception>,
+    rollbackFailures: List<Exception>
+) : Exception(
+    buildString {
+        append("Automation trigger registration failed: ")
+        append(registrationFailures.failureMessages())
+        if (rollbackFailures.isEmpty()) {
+            append(". The previous configuration was restored")
+        } else {
+            append(". Configuration rollback also failed: ")
+            append(rollbackFailures.failureMessages())
+        }
+    },
+    registrationFailures.firstOrNull()
+) {
+    init {
+        (registrationFailures.drop(1) + rollbackFailures).forEach(::addSuppressed)
+    }
+}
+
+private fun List<Exception>.failureMessages(): String =
+    joinToString("; ") { it.message ?: it::class.simpleName ?: "Unknown error" }

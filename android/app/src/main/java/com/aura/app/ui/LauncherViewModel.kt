@@ -526,12 +526,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun setAutomationEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
             try {
-                container.automationRepository.setEnabled(id, enabled)
-                if (!enabled) {
-                    runCatching { container.geofenceAutomationRegistrar.remove(id) }
-                    container.scheduleAutomationScheduler.cancel(id)
-                }
-                container.automationRuntime.restoreTriggers()
+                container.automationRuntime.setEnabledAndRestore(id, enabled)
                 refreshAutomations()
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not update automation") }

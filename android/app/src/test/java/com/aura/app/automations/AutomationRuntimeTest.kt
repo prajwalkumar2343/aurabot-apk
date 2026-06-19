@@ -40,6 +40,129 @@ class AutomationRuntimeTest {
     }
 
     @Test
+    fun upsertAndRestoreRemovesNewAutomationWhenRegistrationFails() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            restoreFailure = IllegalStateException("location unavailable")
+            restoreFailuresRemaining = 1
+        }
+        val schedules = RecordingScheduleScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules)
+        val spec = geofenceSpec()
+
+        val failure = runCatching { runtime.upsertAndRestore(spec) }.exceptionOrNull()
+
+        assertTrue(failure is AutomationConfigurationException)
+        assertTrue(failure?.message.orEmpty().contains("location unavailable"))
+        assertTrue(failure?.message.orEmpty().contains("previous configuration was restored"))
+        assertEquals(null, repository.get(spec.id))
+        assertTrue(spec.id in geofences.removedExplicitly)
+        assertTrue(spec.id in schedules.cancelledExplicitly)
+    }
+
+    @Test
+    fun upsertAndRestoreRestoresPreviousAutomationAfterRegistrationFailure() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val schedules = RecordingScheduleScheduler()
+        val runtime = AutomationRuntime(repository, RecordingGeofenceRegistrar(), schedules)
+        val original = repository.upsert(scheduleSpec())
+        schedules.restoreFailure = IllegalStateException("alarm unavailable")
+        schedules.restoreFailuresRemaining = 1
+
+        val failure = runCatching {
+            runtime.upsertAndRestore(original.copy(name = "Changed schedule"))
+        }.exceptionOrNull()
+
+        assertTrue(failure is AutomationConfigurationException)
+        assertEquals(original.name, repository.get(original.id)?.name)
+        assertTrue(original.id in schedules.activeIds)
+    }
+
+    @Test
+    fun setEnabledAndRestoreRollsBackFailedEnable() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val schedules = RecordingScheduleScheduler()
+        val runtime = AutomationRuntime(repository, RecordingGeofenceRegistrar(), schedules)
+        val saved = repository.upsert(scheduleSpec().copy(enabled = false))
+        schedules.restoreFailure = IllegalStateException("alarm unavailable")
+        schedules.restoreFailuresRemaining = 1
+
+        val failure = runCatching {
+            runtime.setEnabledAndRestore(saved.id, enabled = true)
+        }.exceptionOrNull()
+
+        assertTrue(failure is AutomationConfigurationException)
+        assertEquals(false, repository.get(saved.id)?.enabled)
+        assertFalse(saved.id in schedules.activeIds)
+    }
+
+    @Test
+    fun upsertAndRestoreRollsBackOnCancellation() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            restoreFailure = CancellationException("cancelled")
+            restoreFailuresRemaining = 1
+        }
+        val runtime = AutomationRuntime(repository, geofences, RecordingScheduleScheduler())
+        val spec = geofenceSpec()
+
+        val failure = runCatching { runtime.upsertAndRestore(spec) }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+        assertEquals(null, repository.get(spec.id))
+        assertTrue(spec.id in geofences.removedExplicitly)
+    }
+
+    @Test
+    fun successfulUpdateReconcilesWaitingRunsAgainstNewRevision() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            RecordingRuntimeFlowContinuationScheduler(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+
+        runtime.upsertAndRestore(
+            saved.copy(
+                flow = saved.flow?.copy(
+                    steps = saved.flow.steps.map { step ->
+                        if (step.id == waitStep.id) step.copy(waitMillis = 9_000L) else step
+                    }
+                )
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
+        assertEquals("Automation changed while run was waiting", repository.getRun(run.id)?.message)
+    }
+
+    @Test
+    fun successfulDisableTerminalizesWaitingRuns() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            RecordingRuntimeFlowContinuationScheduler(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+
+        val disabled = runtime.setEnabledAndRestore(saved.id, enabled = false)
+
+        assertFalse(disabled.enabled)
+        assertEquals(AutomationRunStatus.Skipped, repository.getRun(run.id)?.status)
+        assertEquals("Automation is disabled", repository.getRun(run.id)?.message)
+    }
+
+    @Test
     fun restoreTriggersAttemptsEveryFamilyAndAggregatesFailures() = runTest {
         val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
         val geofences = RecordingGeofenceRegistrar().apply {
@@ -519,6 +642,7 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
     val removedByRestore = mutableListOf<String>()
     val removedExplicitly = mutableListOf<String>()
     var restoreFailure: Exception? = null
+    var restoreFailuresRemaining: Int = Int.MAX_VALUE
 
     override suspend fun restore(automations: List<AutomationSpec>) {
         automations.map { it.id }.forEach { id ->
@@ -528,7 +652,10 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
         automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Geofence }
             .mapTo(activeIds) { it.id }
-        restoreFailure?.let { throw it }
+        restoreFailure?.takeIf { restoreFailuresRemaining > 0 }?.let {
+            restoreFailuresRemaining -= 1
+            throw it
+        }
     }
 
     override suspend fun remove(automationId: String) {
@@ -542,6 +669,7 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
     val cancelledByRestore = mutableListOf<String>()
     val cancelledExplicitly = mutableListOf<String>()
     var restoreFailure: Exception? = null
+    var restoreFailuresRemaining: Int = Int.MAX_VALUE
 
     override fun restore(automations: List<AutomationSpec>) {
         automations.map { it.id }.forEach { id ->
@@ -551,7 +679,10 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
         automations
             .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Schedule }
             .mapTo(activeIds) { it.id }
-        restoreFailure?.let { throw it }
+        restoreFailure?.takeIf { restoreFailuresRemaining > 0 }?.let {
+            restoreFailuresRemaining -= 1
+            throw it
+        }
     }
 
     override fun cancel(automationId: String) {
