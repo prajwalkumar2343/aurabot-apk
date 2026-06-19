@@ -11,6 +11,7 @@ class BootReceiverTest {
     @Test
     fun systemRestoreActionsHandleBootAndWallClockChangesOnly() {
         assertTrue(SystemRestoreActions.handles(Intent.ACTION_BOOT_COMPLETED))
+        assertTrue(SystemRestoreActions.handles(Intent.ACTION_MY_PACKAGE_REPLACED))
         assertTrue(SystemRestoreActions.handles(Intent.ACTION_TIME_CHANGED))
         assertTrue(SystemRestoreActions.handles(Intent.ACTION_TIMEZONE_CHANGED))
         assertTrue(!SystemRestoreActions.handles(Intent.ACTION_SCREEN_ON))

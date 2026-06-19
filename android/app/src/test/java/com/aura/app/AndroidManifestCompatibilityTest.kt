@@ -66,6 +66,7 @@ class AndroidManifestCompatibilityTest {
 
         assertEquals("false", bootReceiver.attributes.getNamedItem("android:exported")?.nodeValue)
         assertTrue("Boot restore action is required", "android.intent.action.BOOT_COMPLETED" in actions)
+        assertTrue("App updates must restore triggers", "android.intent.action.MY_PACKAGE_REPLACED" in actions)
         assertTrue("Time changes must recalculate alarms", "android.intent.action.TIME_SET" in actions)
         assertTrue("Timezone changes must recalculate alarms", "android.intent.action.TIMEZONE_CHANGED" in actions)
     }
