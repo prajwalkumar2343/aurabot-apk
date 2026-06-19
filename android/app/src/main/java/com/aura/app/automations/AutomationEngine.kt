@@ -282,6 +282,23 @@ class AutomationEngine(
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
             }
             throw error
+        } catch (error: Exception) {
+            recoverRunFailure(run, error)
+        }
+    }
+
+    private suspend fun recoverRunFailure(
+        run: AutomationRunRecord,
+        error: Exception
+    ): AutomationRunResult {
+        val message = failureMessage("Automation execution failed", error)
+        return try {
+            withContext(NonCancellable) {
+                terminalizeRun(run, AutomationRunStatus.Failed, message)
+            }
+        } catch (cleanupError: Exception) {
+            error.addSuppressed(cleanupError)
+            throw error
         }
     }
 

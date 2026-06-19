@@ -1351,6 +1351,86 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun flowAutomationTerminalizesRunWhenStepPersistenceFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.failNextStepInsert = true
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation execution failed: step storage unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun resumedFlowTerminalizesClaimedRunWhenStepPersistenceFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 1L),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+        dao.failNextStepInsert = true
+
+        val result = engine.resumeRun(runId)
+
+        assertEquals(AutomationRunStatus.Waiting, waiting.status)
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation execution failed: step storage unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun flowAutomationPreservesExecutionFailureWhenTerminalizationAlsoFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.failTerminalizationAfterStepInsertFailure = true
+
+        val failure = runCatching { engine.runNow(saved.id) }.exceptionOrNull()
+
+        assertEquals("step storage unavailable", failure?.message)
+        assertEquals(listOf("run storage unavailable"), failure?.suppressed?.map { it.message })
+        assertEquals(AutomationRunStatus.Running, repository.activeRun(saved.id)?.status)
+    }
+
+    @Test
     fun waitStepTerminalizesRunWhenContinuationSchedulingFails() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val engine = AutomationEngine(
@@ -1664,6 +1744,9 @@ private class FailingEngineFlowContinuationScheduler : AutomationFlowContinuatio
 private class FakeAutomationDao : AutomationDao {
     private val automations = linkedMapOf<String, AutomationEntity>()
     private val logs = mutableListOf<AutomationRunLogEntity>()
+    var failNextStepInsert = false
+    var failTerminalizationAfterStepInsertFailure = false
+    private var failNextRunUpsert = false
 
     override suspend fun listAutomations(): List<AutomationEntity> =
         automations.values.sortedByDescending { it.updatedAt }
@@ -1721,6 +1804,10 @@ private class FakeAutomationDao : AutomationDao {
     private val stepRuns = mutableListOf<AutomationStepRunEntity>()
 
     override suspend fun upsertRun(entity: AutomationRunEntity) {
+        if (failNextRunUpsert) {
+            failNextRunUpsert = false
+            error("run storage unavailable")
+        }
         runs[entity.id] = entity
     }
 
@@ -1746,6 +1833,12 @@ private class FakeAutomationDao : AutomationDao {
         runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
 
     override suspend fun insertStepRun(entity: AutomationStepRunEntity) {
+        if (failNextStepInsert || failTerminalizationAfterStepInsertFailure) {
+            failNextStepInsert = false
+            failNextRunUpsert = failTerminalizationAfterStepInsertFailure
+            failTerminalizationAfterStepInsertFailure = false
+            error("step storage unavailable")
+        }
         stepRuns += entity
     }
 
