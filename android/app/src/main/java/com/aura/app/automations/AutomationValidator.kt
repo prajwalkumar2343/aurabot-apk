@@ -68,6 +68,15 @@ object AutomationValidator {
                 AutomationOperators.Contains
             )
         ) { "Unsupported condition operator: ${condition.operator}" }
+        when (condition.operator) {
+            AutomationOperators.Equals,
+            AutomationOperators.NotEquals -> require(condition.value != null) {
+                "${condition.operator} conditions require a value"
+            }
+            AutomationOperators.Contains -> require(!condition.value.isNullOrEmpty()) {
+                "contains conditions require a non-empty value"
+            }
+        }
     }
 
     private fun validateFlow(flow: AutomationFlow) {
