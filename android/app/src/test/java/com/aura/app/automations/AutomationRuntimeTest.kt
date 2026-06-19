@@ -2,11 +2,14 @@ package com.aura.app.automations
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -170,6 +173,34 @@ class AutomationRuntimeTest {
 
         assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
         assertEquals("Automation changed while run was waiting", repository.getRun(run.id)?.message)
+    }
+
+    @Test
+    fun updateTerminalizesOrphanedRunningRunWithoutReenteringMutationBarrier() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler()
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val run = repository.createRun(
+            automationId = saved.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Running,
+            message = "running"
+        )
+
+        val updated = withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(1_000L) {
+                runtime.upsertAndRestore(saved.copy(name = "Updated schedule"))
+            }
+        }
+
+        assertEquals("Updated schedule", updated.name)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
+        assertEquals("Automation run was interrupted before completion", repository.getRun(run.id)?.message)
     }
 
     @Test
@@ -481,6 +512,37 @@ class AutomationRuntimeTest {
             assertEquals(null, repository.getRun(run.id))
             assertTrue(repository.stepRuns(run.id).isEmpty())
         }
+    }
+
+    @Test
+    fun deleteReleasesCollidingMutationStripeBeforeGlobalRestore() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler()
+        )
+        val deleted = repository.upsert(scheduleSpec().copy(id = "Aa", name = "Delete me"))
+        val retained = repository.upsert(scheduleSpec().copy(id = "BB", name = "Keep me"))
+        assertEquals(deleted.id.hashCode(), retained.id.hashCode())
+        val retainedRun = repository.createRun(
+            automationId = retained.id,
+            eventType = AutomationEvents.Manual,
+            values = emptyMap(),
+            status = AutomationRunStatus.Running,
+            message = "running"
+        )
+
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(1_000L) {
+                runtime.deleteAndRestore(deleted.id)
+            }
+        }
+
+        assertEquals(null, repository.get(deleted.id))
+        assertEquals(retained.id, repository.get(retained.id)?.id)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(retainedRun.id)?.status)
+        assertEquals("Automation run was interrupted before completion", repository.getRun(retainedRun.id)?.message)
     }
 
     @Test

@@ -27,14 +27,14 @@ class AutomationRuntime(
         restoreMutex.withLock {
             val previous = spec.id.takeIf { it.isNotBlank() }?.let { repository.get(it) }
             if (previous == null) {
-                saveAndRestore(spec, previous)
+                saveAndRestore(spec, previous, mutationBarrierHeld = false)
             } else {
                 executionRegistry.mutate(
                     previous.id,
                     AutomationRunStatus.Failed,
                     "Automation changed while run was active"
                 ) {
-                    saveAndRestore(spec, previous)
+                    saveAndRestore(spec, previous, mutationBarrierHeld = true)
                 }
             }
         }
@@ -53,7 +53,7 @@ class AutomationRuntime(
                 repository.setEnabled(id, enabled)
                 val saved = repository.get(id)
                     ?: throw IllegalStateException("Automation disappeared after update")
-                restoreConfigurationOrRollback(saved, previous)
+                restoreConfigurationOrRollback(saved, previous, mutationBarrierHeld = true)
                 saved
             }
         }
@@ -72,14 +72,18 @@ class AutomationRuntime(
                 repository.delete(id)
                 runCatching { geofenceRegistrar.remove(id) }
                 runCatching { scheduleScheduler.cancel(id) }
-                restoreTriggersLocked()
             }
+            restoreTriggersLocked()
         }
     }
 
-    private suspend fun saveAndRestore(spec: AutomationSpec, previous: AutomationSpec?): AutomationSpec {
+    private suspend fun saveAndRestore(
+        spec: AutomationSpec,
+        previous: AutomationSpec?,
+        mutationBarrierHeld: Boolean
+    ): AutomationSpec {
         val saved = repository.upsert(spec)
-        restoreConfigurationOrRollback(saved, previous)
+        restoreConfigurationOrRollback(saved, previous, mutationBarrierHeld)
         return saved
     }
 
@@ -92,7 +96,8 @@ class AutomationRuntime(
 
     private suspend fun restoreConfigurationOrRollback(
         saved: AutomationSpec,
-        previous: AutomationSpec?
+        previous: AutomationSpec?,
+        mutationBarrierHeld: Boolean
     ) {
         val registrationFailures = try {
             restoreConfiguredTriggerFailures(repository.list())
@@ -109,7 +114,11 @@ class AutomationRuntime(
             }
             throw AutomationConfigurationException(registrationFailures, rollbackFailures)
         }
-        restoreFlowContinuations(repository.list())
+        restoreFlowContinuations(
+            automations = repository.list(),
+            onlyAutomationId = saved.id,
+            mutationBarrierHeldFor = saved.id.takeIf { mutationBarrierHeld }
+        )
     }
 
     private suspend fun rollbackConfiguration(
@@ -142,18 +151,27 @@ class AutomationRuntime(
         captureFailure { scheduleScheduler.restore(automations) }?.let(::add)
     }
 
-    private suspend fun restoreFlowContinuations(automations: List<AutomationSpec>) {
+    private suspend fun restoreFlowContinuations(
+        automations: List<AutomationSpec>,
+        onlyAutomationId: String? = null,
+        mutationBarrierHeldFor: String? = null
+    ) {
         val automationById = automations.associateBy { it.id }
         val failures = mutableListOf<Exception>()
-        repository.activeRuns().forEach { run ->
-            captureFailure { restoreFlowContinuation(run, automationById) }?.let(failures::add)
-        }
+        repository.activeRuns()
+            .filter { onlyAutomationId == null || it.automationId == onlyAutomationId }
+            .forEach { run ->
+                captureFailure {
+                    restoreFlowContinuation(run, automationById, mutationBarrierHeldFor)
+                }?.let(failures::add)
+            }
         failures.throwIfNotEmpty()
     }
 
     private suspend fun restoreFlowContinuation(
         run: AutomationRunRecord,
-        automationById: Map<String, AutomationSpec>
+        automationById: Map<String, AutomationSpec>,
+        mutationBarrierHeldFor: String?
     ) {
         val spec = automationById[run.automationId]
         if (spec == null) {
@@ -165,7 +183,7 @@ class AutomationRuntime(
             return
         }
         if (run.status == AutomationRunStatus.Running) {
-            terminalizeInterruptedRun(run)
+            terminalizeInterruptedRun(run, mutationBarrierHeldFor == run.automationId)
             return
         }
         if (run.automationRevision != repository.revision(spec)) {
@@ -206,12 +224,19 @@ class AutomationRuntime(
         }
     }
 
-    private suspend fun terminalizeInterruptedRun(run: AutomationRunRecord) {
+    private suspend fun terminalizeInterruptedRun(run: AutomationRunRecord, mutationBarrierHeld: Boolean) {
         val message = "Automation run was interrupted before completion"
-        executionRegistry.mutate(run.automationId, AutomationRunStatus.Failed, message) {
+        val terminalizeIfStillRunning: suspend () -> Unit = {
             repository.getRun(run.id)
                 ?.takeIf { it.status == AutomationRunStatus.Running }
                 ?.let { current -> terminalizeRun(current, AutomationRunStatus.Failed, message) }
+        }
+        if (mutationBarrierHeld) {
+            terminalizeIfStillRunning()
+        } else {
+            executionRegistry.mutate(run.automationId, AutomationRunStatus.Failed, message) {
+                terminalizeIfStillRunning()
+            }
         }
     }
 
