@@ -19,12 +19,14 @@ import kotlinx.coroutines.launch
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val action = intent.action
+        if (!SystemRestoreActions.handles(action)) return
         val applicationContext = context.applicationContext
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 BootRestoreCoordinator.handle(
+                    restoreListening = action == Intent.ACTION_BOOT_COMPLETED,
                     canRecord = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
                         PackageManager.PERMISSION_GRANTED,
                     canStartListeningFromBoot = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
@@ -40,7 +42,7 @@ class BootReceiver : BroadcastReceiver() {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                Log.e(TAG, "Boot recovery did not complete cleanly", error)
+                Log.e(TAG, "System recovery did not complete cleanly", error)
             } finally {
                 pending.finish()
             }
@@ -52,8 +54,17 @@ class BootReceiver : BroadcastReceiver() {
     }
 }
 
+internal object SystemRestoreActions {
+    fun handles(action: String?): Boolean = action in setOf(
+        Intent.ACTION_BOOT_COMPLETED,
+        Intent.ACTION_TIME_CHANGED,
+        Intent.ACTION_TIMEZONE_CHANGED
+    )
+}
+
 internal object BootRestoreCoordinator {
     suspend fun handle(
+        restoreListening: Boolean = true,
         canRecord: Boolean,
         canStartListeningFromBoot: Boolean,
         readListeningEnabled: suspend () -> Boolean,
@@ -61,7 +72,7 @@ internal object BootRestoreCoordinator {
         restoreAutomations: suspend () -> Unit
     ) {
         var firstFailure: Exception? = null
-        val shouldRestoreListening = if (canRecord) {
+        val shouldRestoreListening = if (restoreListening && canRecord) {
             try {
                 readListeningEnabled()
             } catch (error: CancellationException) {
