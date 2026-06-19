@@ -1,11 +1,23 @@
 import json
 
+from app.models.chat import ChatIn
 from app.services.llm import (
     AUTOMATION_ACTION_TYPES,
+    AUTOMATION_MAX_ACTIONS,
+    AUTOMATION_MAX_CONDITIONS,
+    AUTOMATION_MAX_DESCRIPTION_LENGTH,
     AUTOMATION_MAX_FLOW_WAIT_MILLIS,
+    AUTOMATION_MAX_FLOW_STEPS,
+    AUTOMATION_MAX_ID_LENGTH,
+    AUTOMATION_MAX_INTERVAL_MINUTES,
+    AUTOMATION_MAX_METADATA_ENTRIES,
+    AUTOMATION_MAX_NAME_LENGTH,
+    AUTOMATION_MAX_RECIPIENT_ADDRESS_LENGTH,
     AUTOMATION_MAX_RETRY_ATTEMPTS,
     AUTOMATION_MAX_RETRY_BACKOFF_MILLIS,
+    AUTOMATION_MAX_TEXT_LENGTH,
     assistant_tool_definitions,
+    build_system_message,
     parse_tool_response,
 )
 
@@ -120,6 +132,37 @@ def test_create_automation_tool_schema_bounds_flow_retries_and_waits():
         "minimum": 0,
         "maximum": AUTOMATION_MAX_RETRY_BACKOFF_MILLIS,
     }
+
+
+def test_create_automation_tool_schema_bounds_spec_resources():
+    create_automation = next(tool for tool in assistant_tool_definitions() if tool["name"] == "create_automation")
+    spec = create_automation["parameters"]["properties"]["automation_spec"]["properties"]
+    schedule = spec["trigger"]["properties"]["schedule"]["properties"]
+    action = spec["actions"]["items"]["properties"]
+    step = spec["flow"]["properties"]["steps"]["items"]["properties"]
+    flow_action = step["action"]["properties"]
+
+    assert spec["id"]["maxLength"] == AUTOMATION_MAX_ID_LENGTH
+    assert spec["name"]["maxLength"] == AUTOMATION_MAX_NAME_LENGTH
+    assert spec["description"]["maxLength"] == AUTOMATION_MAX_DESCRIPTION_LENGTH
+    assert spec["conditions"]["maxItems"] == AUTOMATION_MAX_CONDITIONS
+    assert spec["actions"]["maxItems"] == AUTOMATION_MAX_ACTIONS
+    assert spec["flow"]["properties"]["steps"]["maxItems"] == AUTOMATION_MAX_FLOW_STEPS
+    assert schedule["intervalMinutes"]["maximum"] == AUTOMATION_MAX_INTERVAL_MINUTES
+    assert schedule["daysOfWeek"]["maxItems"] == 7
+    assert schedule["daysOfWeek"]["items"] == {"type": "integer", "minimum": 1, "maximum": 7}
+    assert action["messageTemplate"]["maxLength"] == AUTOMATION_MAX_TEXT_LENGTH
+    assert action["recipientAddress"]["maxLength"] == AUTOMATION_MAX_RECIPIENT_ADDRESS_LENGTH
+    assert action["metadata"]["maxProperties"] == AUTOMATION_MAX_METADATA_ENTRIES
+    assert action["metadata"]["additionalProperties"]["maxLength"] == AUTOMATION_MAX_TEXT_LENGTH
+    assert flow_action["metadata"]["maxProperties"] == AUTOMATION_MAX_METADATA_ENTRIES
+    assert step["metadata"]["maxProperties"] == AUTOMATION_MAX_METADATA_ENTRIES
+
+
+def test_system_prompt_forbids_retries_for_irreversible_automation_actions():
+    prompt = build_system_message(ChatIn(message="", api_key="", model="gemini-test"))
+
+    assert "Always use maxAttempts=1 for unconfirmed direct_sms and high-impact gestures" in prompt
 
 
 def test_create_automation_tool_schema_supports_cross_app_actions():

@@ -40,10 +40,26 @@ class ScheduleAutomationReceiver : BroadcastReceiver() {
 
 internal object ScheduleAutomationCoordinator {
     suspend fun handle(execute: suspend () -> Unit, reschedule: suspend () -> Unit) {
+        var executionFailure: Throwable? = null
         try {
             execute()
-        } finally {
-            reschedule()
+        } catch (error: Throwable) {
+            executionFailure = error
         }
+        var rescheduleFailure: Throwable? = null
+        try {
+            reschedule()
+        } catch (error: Throwable) {
+            rescheduleFailure = error
+        }
+        val primaryFailure = executionFailure ?: rescheduleFailure
+        if (
+            primaryFailure != null &&
+            rescheduleFailure != null &&
+            primaryFailure !== rescheduleFailure
+        ) {
+            primaryFailure.addSuppressed(rescheduleFailure)
+        }
+        primaryFailure?.let { throw it }
     }
 }

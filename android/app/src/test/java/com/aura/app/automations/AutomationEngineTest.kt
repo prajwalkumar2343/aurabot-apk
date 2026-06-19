@@ -1,8 +1,13 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +68,78 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun topLevelConditionsUseEnrichedEtaContext() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = DefaultAutomationContextEnricher(FixedEtaProvider()),
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            leaveWorkSpec().copy(
+                conditions = listOf(
+                    AutomationCondition(
+                        key = "etaProvider",
+                        operator = AutomationOperators.Equals,
+                        value = "fake_routes"
+                    ),
+                    AutomationCondition(
+                        key = "placeName",
+                        operator = AutomationOperators.Equals,
+                        value = "Work"
+                    )
+                )
+            )
+        )
+
+        val result = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                values = mapOf("latitude" to "12.9716", "longitude" to "77.5946")
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.single().status)
+        assertEquals(1, executor.events.size)
+        assertEquals("fake_routes", executor.events.single().values["etaProvider"])
+    }
+
+    @Test
+    fun failedEnrichedConditionDoesNotCreateRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = DefaultAutomationContextEnricher(FixedEtaProvider()),
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            leaveWorkSpec().copy(
+                conditions = listOf(
+                    AutomationCondition(
+                        key = "etaProvider",
+                        operator = AutomationOperators.Equals,
+                        value = "different_provider"
+                    )
+                )
+            )
+        )
+
+        val result = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+
+        assertEquals(AutomationRunStatus.Skipped, result.single().status)
+        assertEquals("Conditions did not pass", result.single().message)
+        assertTrue(repository.runs(saved.id).isEmpty())
+        assertTrue(executor.events.isEmpty())
+    }
+
+    @Test
     fun cooldownSkipsRepeatedRuns() = runTest {
         var now = 1_000L
         val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
@@ -75,6 +152,87 @@ class AutomationEngineTest {
         val results = engine.handle(AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id, occurredAt = now))
 
         assertEquals(AutomationRunStatus.Skipped, results.first().status)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun cooldownUsesLocalAcceptanceTimeForStaleEvents() = runTest {
+        var now = 100_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+
+        engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = 1L
+            )
+        )
+        now += 1_000L
+        val repeated = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = 2L
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Skipped, repeated.single().status)
+        assertEquals(1, executor.events.size)
+        assertEquals(100_000L, repository.lastTriggeredAt(saved.id))
+    }
+
+    @Test
+    fun futureEventTimestampDoesNotPoisonCooldown() = runTest {
+        var now = 1_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+
+        engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = Long.MAX_VALUE
+            )
+        )
+        now += 60_001L
+        val afterCooldown = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                occurredAt = Long.MAX_VALUE
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Success, afterCooldown.single().status)
+        assertEquals(2, executor.events.size)
+        assertEquals(now, repository.lastTriggeredAt(saved.id))
+    }
+
+    @Test
+    fun futurePersistedCooldownTimestampSelfHeals() = runTest {
+        val now = 1_000L
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(leaveWorkSpec().copy(cooldownMillis = 60_000L))
+        dao.markTriggered(saved.id, Long.MAX_VALUE, Long.MAX_VALUE)
+
+        val recovered = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+        val repeated = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+
+        assertEquals(AutomationRunStatus.Success, recovered.single().status)
+        assertEquals(AutomationRunStatus.Skipped, repeated.single().status)
+        assertEquals(now, repository.lastTriggeredAt(saved.id))
         assertEquals(1, executor.events.size)
     }
 
@@ -109,6 +267,42 @@ class AutomationEngineTest {
 
         assertEquals(false, saved.actions.first().requireConfirmation)
         assertTrue(permissions.any { it.endsWith("SEND_SMS") })
+    }
+
+    @Test
+    fun confirmedDirectSmsUsesReviewPathWithoutSmsPermission() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val confirmedSms = leaveWorkSpec().copy(
+            actions = listOf(
+                AutomationAction(
+                    type = AutomationActionTypes.DirectSms,
+                    messageTemplate = "I left {{placeName}}.",
+                    recipientAddress = "+15555550123",
+                    requireConfirmation = true
+                )
+            )
+        )
+
+        val saved = repository.upsert(confirmedSms)
+        val action = saved.actions.single()
+        val permissions = AutomationPermissionPlanner().requiredPermissions(saved)
+
+        assertTrue(action.requireConfirmation)
+        assertFalse(action.sendsDirectSms())
+        assertFalse(permissions.any { it.endsWith("SEND_SMS") })
+    }
+
+    @Test
+    fun onlyExplicitUnconfirmedDirectSmsUsesDirectDeliveryPolicy() {
+        val confirmed = AutomationAction(
+            type = AutomationActionTypes.DirectSms,
+            requireConfirmation = true
+        )
+        val unconfirmed = confirmed.copy(requireConfirmation = false)
+
+        assertFalse(confirmed.sendsDirectSms())
+        assertTrue(unconfirmed.sendsDirectSms())
+        assertFalse(confirmed.copy(type = AutomationActionTypes.DraftMessage).sendsDirectSms())
     }
 
     @Test
@@ -261,6 +455,79 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRejectsRetriesForIrreversibleActions() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = emptyList(),
+                    flow = AutomationFlow(
+                        steps = listOf(
+                            AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                            AutomationFlowStep(
+                                id = "send",
+                                type = AutomationFlowStepTypes.Action,
+                                action = AutomationAction(
+                                    type = AutomationActionTypes.TapTarget,
+                                    metadata = mapOf(AutomationActionMetadata.Text to "Send")
+                                ),
+                                retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                            )
+                        )
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                manualSpec().copy(
+                    actions = emptyList(),
+                    flow = AutomationFlow(
+                        steps = listOf(
+                            AutomationFlowStep(
+                                id = "sms",
+                                type = AutomationFlowStepTypes.Action,
+                                action = AutomationAction(
+                                    type = AutomationActionTypes.DirectSms,
+                                    messageTemplate = "On my way",
+                                    recipientAddress = "+15555550123",
+                                    requireConfirmation = false
+                                ),
+                                retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                            )
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun validatorAllowsRetriesForConfirmedSmsReviewNotifications() {
+        val validated = AutomationValidator.validate(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "review-sms",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(
+                                type = AutomationActionTypes.DirectSms,
+                                messageTemplate = "On my way",
+                                recipientAddress = "+15555550123",
+                                requireConfirmation = true
+                            ),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        assertEquals(2, validated.flow?.steps?.single()?.retryPolicy?.maxAttempts)
+    }
+
+    @Test
     fun validatorRejectsAmbiguousFlowStepShapes() {
         fun invalid(step: AutomationFlowStep) {
             assertThrows(IllegalArgumentException::class.java) {
@@ -357,6 +624,103 @@ class AutomationEngineTest {
         )
 
         assertEquals(listOf("bounded-retry", "bounded-wait"), valid.flow?.steps?.map { it.id })
+    }
+
+    @Test
+    fun validatorRejectsOversizedAutomationCollections() {
+        fun invalid(spec: AutomationSpec) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(spec)
+            }
+        }
+
+        invalid(
+            manualSpec().copy(
+                conditions = List(21) { index -> AutomationCondition(key = "condition-$index") }
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = List(21) { AutomationAction(type = AutomationActionTypes.Notify) }
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = List(41) { index ->
+                        AutomationFlowStep(id = "checkpoint-$index", type = AutomationFlowStepTypes.Checkpoint)
+                    }
+                )
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        metadata = (1..33).associate { index -> "key-$index" to "value" }
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun validatorRejectsOversizedAutomationText() {
+        fun invalid(spec: AutomationSpec) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(spec)
+            }
+        }
+
+        invalid(manualSpec().copy(id = "i".repeat(129)))
+        invalid(manualSpec().copy(name = "n".repeat(121)))
+        invalid(manualSpec().copy(description = "d".repeat(2_001)))
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        messageTemplate = "m".repeat(4_097)
+                    )
+                )
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        metadata = mapOf("payload" to "v".repeat(4_097))
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun validatorBoundsScheduleCardinalityAndInterval() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "daily", localTime = "09:00", daysOfWeek = listOf(1, 1))
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "interval", intervalMinutes = 525_601)
+                    )
+                )
+            )
+        }
     }
 
     @Test
@@ -490,6 +854,79 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun resumeRunFailsClosedWhenAutomationChangedAfterCheckpoint() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Original")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        repository.upsert(
+            saved.copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Changed")
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation changed while run was waiting", result.message)
+        assertEquals(0, executor.events.size)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun resumeRunAllowsUnchangedAutomationSavedAtNewTimestamp() = runTest {
+        var now = 1_000L
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { now })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Confirmed")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        now = 2_000L
+        repository.upsert(saved)
+
+        val result = engine.resumeRun(waiting.runId ?: error("runId missing"))
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
     fun manualRunSkipsWhenFlowAlreadyWaiting() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val executor = RecordingActionExecutor()
@@ -517,6 +954,182 @@ class AutomationEngineTest {
         assertEquals("Automation already has an active run", duplicate.message)
         assertEquals(waiting.runId, duplicate.runId)
         assertEquals(0, executor.events.size)
+    }
+
+    @Test
+    fun concurrentManualRunSkipsWhileDefaultPolicyRunIsExecuting() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-check"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(manualSpec())
+
+        val first = async { engine.runNow(saved.id) }
+        executor.firstStarted.await()
+        val overlapping = engine.runNow(saved.id)
+        executor.release.complete(Unit)
+        val completed = first.await()
+
+        assertEquals(AutomationRunStatus.Success, completed.status)
+        assertEquals(AutomationRunStatus.Skipped, overlapping.status)
+        assertEquals("Automation already has an active run", overlapping.message)
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun automationDisabledDuringEnrichmentDoesNotStart() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val saved = repository.upsert(manualSpec())
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = object : AutomationContextEnricher {
+                override suspend fun enrich(spec: AutomationSpec, event: AutomationEvent): AutomationEvent {
+                    repository.setEnabled(spec.id, false)
+                    return event.copy(automationId = spec.id)
+                }
+            },
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+
+        val result = engine.runNow(saved.id)
+
+        assertEquals(AutomationRunStatus.Skipped, result.status)
+        assertEquals("Automation is disabled", result.message)
+        assertEquals(0, executor.events.size)
+        assertTrue(repository.runs(saved.id).isEmpty())
+    }
+
+    @Test
+    fun allowParallelPolicyRunsActionsConcurrently() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    concurrencyPolicy = AutomationConcurrencyPolicies.AllowParallel,
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Run")
+                        )
+                    )
+                )
+            )
+        )
+
+        val first = async { engine.runNow(saved.id) }
+        val second = async { engine.runNow(saved.id) }
+        executor.twoStarted.await()
+        executor.release.complete(Unit)
+        val results = listOf(first.await(), second.await())
+
+        assertEquals(listOf(AutomationRunStatus.Success, AutomationRunStatus.Success), results.map { it.status })
+        assertEquals(2, executor.events.size)
+        assertEquals(2, repository.runs(saved.id).size)
+    }
+
+    @Test
+    fun executingAutomationDoesNotBlockDifferentAutomation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-a"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(manualSpec().copy(id = "manual-a", name = "Manual A"))
+        val secondSpec = repository.upsert(manualSpec().copy(id = "manual-b", name = "Manual B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = engine.runNow(secondSpec.id)
+        executor.release.complete(Unit)
+
+        assertEquals(AutomationRunStatus.Success, second.status)
+        assertEquals(AutomationRunStatus.Success, first.await().status)
+        assertEquals(listOf("manual-a", "manual-b"), executor.events.map { it.automationId })
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun crossAppAutomationsSerializeExecutionAcrossDifferentRules() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(crossAppSpec("cross-app-a", "Cross app A"))
+        val secondSpec = repository.upsert(crossAppSpec("cross-app-b", "Cross app B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = async { engine.runNow(secondSpec.id) }
+        runCurrent()
+
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Running, repository.activeRun(secondSpec.id)?.status)
+        executor.release.complete(Unit)
+        val results = listOf(first.await(), second.await())
+
+        assertEquals(listOf(AutomationRunStatus.Success, AutomationRunStatus.Success), results.map { it.status })
+        assertEquals(2, executor.events.size)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun cancellingRunWaitingForCrossAppLockTerminalizesClaimedRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(crossAppSpec("cross-app-a", "Cross app A"))
+        val secondSpec = repository.upsert(crossAppSpec("cross-app-b", "Cross app B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = async { engine.runNow(secondSpec.id) }
+        runCurrent()
+        val claimedRun = repository.activeRun(secondSpec.id) ?: error("second run was not claimed")
+
+        second.cancel()
+        val cancellation = runCatching { second.await() }.exceptionOrNull()
+        executor.release.complete(Unit)
+        first.await()
+
+        assertTrue(cancellation is CancellationException)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(claimedRun.id)?.status)
+        assertEquals("Automation run was cancelled", repository.getRun(claimedRun.id)?.message)
+        assertEquals(null, repository.activeRun(secondSpec.id))
+        assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun duplicateResumeSkipsWhileFirstResumeIsExecuting() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockedAutomationIds = setOf("manual-check"))
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Confirmed")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+
+        val firstResume = async { engine.resumeRun(runId) }
+        executor.firstStarted.await()
+        val duplicate = engine.resumeRun(runId)
+        executor.release.complete(Unit)
+
+        assertEquals(AutomationRunStatus.Success, firstResume.await().status)
+        assertEquals(AutomationRunStatus.Skipped, duplicate.status)
+        assertEquals("Automation run is not waiting", duplicate.message)
+        assertEquals(1, executor.events.size)
     }
 
     @Test
@@ -548,6 +1161,55 @@ class AutomationEngineTest {
         assertEquals(AutomationRunStatus.Skipped, duplicate.status)
         assertEquals("Automation run is not waiting", duplicate.message)
         assertEquals(1, executor.events.size)
+    }
+
+    @Test
+    fun failWaitingRunTerminalizesRunAndCancelsContinuation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val continuations = RecordingEngineFlowContinuationScheduler()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = continuations,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L)
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+
+        val failed = engine.failWaitingRun(runId, "Continuation delivery exhausted")
+
+        assertEquals(AutomationRunStatus.Failed, failed.status)
+        assertEquals("Continuation delivery exhausted", repository.getRun(runId)?.message)
+        assertTrue(runId in continuations.cancelled)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun failWaitingRunDoesNotOverwriteCompletedRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        val completed = engine.runNow(saved.id)
+        val runId = completed.runId ?: error("runId missing")
+
+        val abandoned = engine.failWaitingRun(runId, "Late continuation failure")
+
+        assertEquals(AutomationRunStatus.Skipped, abandoned.status)
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(completed.message, repository.getRun(runId)?.message)
     }
 
     @Test
@@ -629,7 +1291,8 @@ class AutomationEngineTest {
 
     @Test
     fun resumeRunTerminalizesWaitingRunWhenAutomationIsMissing() = runTest {
-        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
         val scheduler = RecordingEngineFlowContinuationScheduler()
         val engine = AutomationEngine(
             repository = repository,
@@ -653,7 +1316,7 @@ class AutomationEngineTest {
         )
         val waiting = engine.runNow(saved.id)
         val runId = waiting.runId ?: error("runId missing")
-        repository.delete(saved.id)
+        dao.deleteAutomation(saved.id)
 
         val result = engine.resumeRun(runId)
 
@@ -780,6 +1443,184 @@ class AutomationEngineTest {
         assertEquals(AutomationRunStatus.Success, result.status)
         assertEquals(2, result.stepResults.first().attempts)
         assertEquals(2, executor.calls)
+    }
+
+    @Test
+    fun flowAutomationRetriesThrownActionException() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ThrowingOnceActionExecutor()
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(
+                            id = "flaky-exception",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Try"),
+                            retryPolicy = AutomationRetryPolicy(maxAttempts = 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(2, result.stepResults.first().attempts)
+        assertEquals(
+            listOf(AutomationRunStatus.Failed, AutomationRunStatus.Success),
+            repository.stepRuns(runId).map { it.status }
+        )
+        assertEquals("Action execution failed: temporary executor failure", repository.stepRuns(runId).first().message)
+    }
+
+    @Test
+    fun flowAutomationTerminalizesRunWhenActionExceptionExhaustsRetries() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = AlwaysThrowingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Action execution failed: executor unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun flowAutomationTerminalizesRunWhenStepPersistenceFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.failNextStepInsert = true
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation execution failed: step storage unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun resumedFlowTerminalizesClaimedRunWhenStepPersistenceFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 1L),
+                        AutomationFlowStep(
+                            id = "notify",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Ready")
+                        )
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+        dao.failNextStepInsert = true
+
+        val result = engine.resumeRun(runId)
+
+        assertEquals(AutomationRunStatus.Waiting, waiting.status)
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Automation execution failed: step storage unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun flowAutomationPreservesExecutionFailureWhenTerminalizationAlsoFails() = runTest {
+        val dao = FakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.failTerminalizationAfterStepInsertFailure = true
+
+        val failure = runCatching { engine.runNow(saved.id) }.exceptionOrNull()
+
+        assertEquals("step storage unavailable", failure?.message)
+        assertEquals(listOf("run storage unavailable"), failure?.suppressed?.map { it.message })
+        assertEquals(AutomationRunStatus.Running, repository.activeRun(saved.id)?.status)
+    }
+
+    @Test
+    fun waitStepTerminalizesRunWhenContinuationSchedulingFails() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = FailingEngineFlowContinuationScheduler(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L)
+                    )
+                )
+            )
+        )
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Failed, result.status)
+        assertEquals("Failed to schedule flow continuation: alarm service unavailable", result.message)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(runId)?.status)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun flowAutomationPropagatesActionCancellation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = CancellingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+
+        val failure = runCatching { engine.runNow(saved.id) }.exceptionOrNull()
+        val run = repository.runs(saved.id).single()
+
+        assertTrue(failure is CancellationException)
+        assertEquals(AutomationRunStatus.Failed, run.status)
+        assertEquals("Automation run was cancelled", run.message)
+        assertEquals(null, repository.activeRun(saved.id))
     }
 
     @Test
@@ -925,6 +1766,24 @@ class AutomationEngineTest {
         trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
         actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Check in"))
     )
+
+    private fun crossAppSpec(id: String, name: String) = manualSpec().copy(
+        id = id,
+        name = name,
+        actions = emptyList(),
+        flow = AutomationFlow(
+            steps = listOf(
+                AutomationFlowStep(
+                    id = "open-app",
+                    type = AutomationFlowStepTypes.Action,
+                    action = AutomationAction(
+                        type = AutomationActionTypes.OpenApp,
+                        metadata = mapOf(AutomationActionMetadata.PackageName to "com.example")
+                    )
+                )
+            )
+        )
+    )
 }
 
 private class RecordingActionExecutor : AutomationActionExecutor {
@@ -932,6 +1791,24 @@ private class RecordingActionExecutor : AutomationActionExecutor {
 
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
         events += event
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+    }
+}
+
+private class ControlledConcurrencyExecutor(
+    private val blockedAutomationIds: Set<String> = emptySet(),
+    private val blockAll: Boolean = false
+) : AutomationActionExecutor {
+    val events = mutableListOf<AutomationEvent>()
+    val firstStarted = CompletableDeferred<Unit>()
+    val twoStarted = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        events += event
+        firstStarted.complete(Unit)
+        if (events.size >= 2) twoStarted.complete(Unit)
+        if (blockAll || event.automationId in blockedAutomationIds) release.await()
         return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
     }
 }
@@ -946,6 +1823,28 @@ private class FlakyActionExecutor : AutomationActionExecutor {
         } else {
             AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
         }
+    }
+}
+
+private class ThrowingOnceActionExecutor : AutomationActionExecutor {
+    var calls = 0
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        calls += 1
+        if (calls == 1) error("temporary executor failure")
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
+    }
+}
+
+private class AlwaysThrowingActionExecutor : AutomationActionExecutor {
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        error("executor unavailable")
+    }
+}
+
+private class CancellingActionExecutor : AutomationActionExecutor {
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        throw CancellationException("cancelled")
     }
 }
 
@@ -980,9 +1879,20 @@ private class RecordingEngineFlowContinuationScheduler : AutomationFlowContinuat
     }
 }
 
+private class FailingEngineFlowContinuationScheduler : AutomationFlowContinuationScheduler {
+    override fun schedule(runId: String, delayMillis: Long) {
+        error("alarm service unavailable")
+    }
+
+    override fun cancel(runId: String) = Unit
+}
+
 private class FakeAutomationDao : AutomationDao {
     private val automations = linkedMapOf<String, AutomationEntity>()
     private val logs = mutableListOf<AutomationRunLogEntity>()
+    var failNextStepInsert = false
+    var failTerminalizationAfterStepInsertFailure = false
+    private var failNextRunUpsert = false
 
     override suspend fun listAutomations(): List<AutomationEntity> =
         automations.values.sortedByDescending { it.updatedAt }
@@ -1008,6 +1918,18 @@ private class FakeAutomationDao : AutomationDao {
         automations.remove(id)
     }
 
+    override suspend fun deleteRunLogs(automationId: String) {
+        logs.removeAll { it.automationId == automationId }
+    }
+
+    override suspend fun deleteStepRuns(automationId: String) {
+        stepRuns.removeAll { it.automationId == automationId }
+    }
+
+    override suspend fun deleteRuns(automationId: String) {
+        runs.entries.removeAll { it.value.automationId == automationId }
+    }
+
     override suspend fun insertRunLog(entity: AutomationRunLogEntity) {
         logs += entity
     }
@@ -1015,10 +1937,23 @@ private class FakeAutomationDao : AutomationDao {
     override suspend fun runLogs(automationId: String, limit: Int): List<AutomationRunLogEntity> =
         logs.filter { it.automationId == automationId }.sortedByDescending { it.createdAt }.take(limit)
 
+    override suspend fun pruneRunLogs(automationId: String, retainCount: Int) {
+        val retainedIds = logs
+            .filter { it.automationId == automationId }
+            .sortedWith(compareByDescending<AutomationRunLogEntity> { it.createdAt }.thenByDescending { it.id })
+            .take(retainCount)
+            .mapTo(mutableSetOf()) { it.id }
+        logs.removeAll { it.automationId == automationId && it.id !in retainedIds }
+    }
+
     private val runs = linkedMapOf<String, AutomationRunEntity>()
     private val stepRuns = mutableListOf<AutomationStepRunEntity>()
 
     override suspend fun upsertRun(entity: AutomationRunEntity) {
+        if (failNextRunUpsert) {
+            failNextRunUpsert = false
+            error("run storage unavailable")
+        }
         runs[entity.id] = entity
     }
 
@@ -1037,13 +1972,40 @@ private class FakeAutomationDao : AutomationDao {
             .filter { it.status in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting) }
             .sortedByDescending { it.updatedAt }
 
+    override suspend fun activeRuns(automationId: String): List<AutomationRunEntity> =
+        activeRuns().filter { it.automationId == automationId }
+
     override suspend fun runs(automationId: String, limit: Int): List<AutomationRunEntity> =
         runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
 
     override suspend fun insertStepRun(entity: AutomationStepRunEntity) {
+        if (failNextStepInsert || failTerminalizationAfterStepInsertFailure) {
+            failNextStepInsert = false
+            failNextRunUpsert = failTerminalizationAfterStepInsertFailure
+            failTerminalizationAfterStepInsertFailure = false
+            error("step storage unavailable")
+        }
         stepRuns += entity
     }
 
     override suspend fun stepRuns(runId: String): List<AutomationStepRunEntity> =
         stepRuns.filter { it.runId == runId }.sortedWith(compareBy<AutomationStepRunEntity> { it.stepIndex }.thenBy { it.attempt })
+
+    override suspend fun pruneStepRuns(automationId: String, retainCount: Int) {
+        val prunedRunIds = terminalRunsToPrune(automationId, retainCount).mapTo(mutableSetOf()) { it.id }
+        stepRuns.removeAll { it.runId in prunedRunIds }
+    }
+
+    override suspend fun pruneRuns(automationId: String, retainCount: Int) {
+        terminalRunsToPrune(automationId, retainCount).forEach { runs.remove(it.id) }
+    }
+
+    private fun terminalRunsToPrune(automationId: String, retainCount: Int): List<AutomationRunEntity> =
+        runs.values
+            .filter {
+                it.automationId == automationId &&
+                    it.status !in setOf(AutomationRunStatus.Running, AutomationRunStatus.Waiting)
+            }
+            .sortedWith(compareByDescending<AutomationRunEntity> { it.updatedAt }.thenByDescending { it.id })
+            .drop(retainCount)
 }

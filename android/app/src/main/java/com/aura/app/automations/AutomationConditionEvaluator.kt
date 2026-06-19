@@ -6,9 +6,11 @@ class AutomationConditionEvaluator {
             val actual = event.values[condition.key]
             when (condition.operator) {
                 AutomationOperators.Exists -> !actual.isNullOrBlank()
-                AutomationOperators.Equals -> actual == condition.value
-                AutomationOperators.NotEquals -> actual != condition.value
-                AutomationOperators.Contains -> actual?.contains(condition.value.orEmpty(), ignoreCase = true) == true
+                AutomationOperators.Equals -> actual != null && condition.value != null && actual == condition.value
+                AutomationOperators.NotEquals -> actual != null && condition.value != null && actual != condition.value
+                AutomationOperators.Contains -> actual != null &&
+                    !condition.value.isNullOrEmpty() &&
+                    actual.contains(condition.value, ignoreCase = true)
                 else -> false
             }
         }

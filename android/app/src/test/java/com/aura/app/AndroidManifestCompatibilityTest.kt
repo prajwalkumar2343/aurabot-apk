@@ -44,6 +44,33 @@ class AndroidManifestCompatibilityTest {
         assertTrue("Manifest must declare scoped package visibility queries", queries.length > 0)
     }
 
+    @Test
+    fun automationAlarmsRestoreAfterBootAndWallClockChanges() {
+        val document = readManifest()
+        val receivers = document.getElementsByTagName("receiver")
+        val bootReceiver = (0 until receivers.length)
+            .map { receivers.item(it) }
+            .first { it.attributes.getNamedItem("android:name")?.nodeValue == ".voice.BootReceiver" }
+        val actions = bootReceiver.childNodes
+            .let { children ->
+                (0 until children.length)
+                    .map { children.item(it) }
+                    .flatMap { node ->
+                        val descendants = node.childNodes
+                        (0 until descendants.length).mapNotNull { index ->
+                            descendants.item(index).attributes?.getNamedItem("android:name")?.nodeValue
+                        }
+                    }
+                    .toSet()
+            }
+
+        assertEquals("false", bootReceiver.attributes.getNamedItem("android:exported")?.nodeValue)
+        assertTrue("Boot restore action is required", "android.intent.action.BOOT_COMPLETED" in actions)
+        assertTrue("App updates must restore triggers", "android.intent.action.MY_PACKAGE_REPLACED" in actions)
+        assertTrue("Time changes must recalculate alarms", "android.intent.action.TIME_SET" in actions)
+        assertTrue("Timezone changes must recalculate alarms", "android.intent.action.TIMEZONE_CHANGED" in actions)
+    }
+
     private fun readManifest() =
         DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File("src/main/AndroidManifest.xml"))
 }

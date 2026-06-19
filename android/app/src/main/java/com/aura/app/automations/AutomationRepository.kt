@@ -2,12 +2,15 @@ package com.aura.app.automations
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.security.MessageDigest
 import java.util.UUID
 
 class AutomationRepository(
     private val dao: AutomationDao,
     private val gson: Gson = Gson(),
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val runHistoryLimit: Int = DefaultRunHistoryLimit,
+    private val logHistoryLimit: Int = DefaultLogHistoryLimit
 ) {
     private val stringMapType = object : TypeToken<Map<String, String>>() {}.type
 
@@ -38,11 +41,12 @@ class AutomationRepository(
     }
 
     suspend fun delete(id: String) {
-        dao.deleteAutomation(id)
+        dao.deleteAutomationData(id)
     }
 
-    suspend fun markTriggered(id: String, triggeredAt: Long) {
-        dao.markTriggered(id, triggeredAt, clock())
+    suspend fun markTriggered(id: String) {
+        val now = clock()
+        dao.markTriggered(id, now, now)
     }
 
     suspend fun lastTriggeredAt(id: String): Long? =
@@ -64,6 +68,7 @@ class AutomationRepository(
                 createdAt = clock()
             )
         )
+        pruneHistory(automationId)
     }
 
     suspend fun logs(automationId: String, limit: Int = 50): List<AutomationRunLog> =
@@ -86,6 +91,10 @@ class AutomationRepository(
         message: String = "Automation flow started"
     ): AutomationRunRecord {
         val now = clock()
+        val automationRevision = dao.automation(automationId)
+            ?.spec()
+            ?.let(::revision)
+            .orEmpty()
         val entity = AutomationRunEntity(
             id = UUID.randomUUID().toString(),
             automationId = automationId,
@@ -93,6 +102,7 @@ class AutomationRepository(
             status = status,
             message = message,
             valuesJson = gson.toJson(values),
+            automationRevision = automationRevision,
             startedAt = now,
             updatedAt = now,
             completedAt = null
@@ -119,6 +129,7 @@ class AutomationRepository(
                 completedAt = if (completed) now else existing.completedAt
             )
         )
+        if (completed) pruneHistory(existing.automationId)
     }
 
     suspend fun getRun(id: String): AutomationRunRecord? =
@@ -129,6 +140,9 @@ class AutomationRepository(
 
     suspend fun activeRuns(): List<AutomationRunRecord> =
         dao.activeRuns().map { it.record() }
+
+    suspend fun activeRuns(automationId: String): List<AutomationRunRecord> =
+        dao.activeRuns(automationId).map { it.record() }
 
     suspend fun runs(automationId: String, limit: Int = 20): List<AutomationRunRecord> =
         dao.runs(automationId, limit).map { it.record() }
@@ -164,6 +178,21 @@ class AutomationRepository(
     suspend fun stepRuns(runId: String): List<AutomationStepRunRecord> =
         dao.stepRuns(runId).map { it.record() }
 
+    private suspend fun pruneHistory(automationId: String) {
+        dao.pruneHistory(
+            automationId = automationId,
+            runRetainCount = runHistoryLimit.coerceAtLeast(0),
+            logRetainCount = logHistoryLimit.coerceAtLeast(0)
+        )
+    }
+
+    internal fun revision(spec: AutomationSpec): String {
+        val revisionSource = gson.toJson(spec.copy(createdAt = 0L, updatedAt = 0L))
+        return MessageDigest.getInstance("SHA-256")
+            .digest(revisionSource.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+    }
+
     private fun AutomationSpec.entity(lastTriggeredAt: Long?) = AutomationEntity(
         id = id,
         name = name,
@@ -196,6 +225,7 @@ class AutomationRepository(
         values = runCatching {
             gson.fromJson<Map<String, String>>(valuesJson, stringMapType)
         }.getOrNull().orEmpty(),
+        automationRevision = automationRevision,
         startedAt = startedAt,
         updatedAt = updatedAt,
         completedAt = completedAt
@@ -217,6 +247,9 @@ class AutomationRepository(
     )
 
     private companion object {
+        const val DefaultRunHistoryLimit = 100
+        const val DefaultLogHistoryLimit = 200
+
         val terminalStatuses = setOf(
             AutomationRunStatus.Success,
             AutomationRunStatus.Skipped,

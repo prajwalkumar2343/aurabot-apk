@@ -1,6 +1,10 @@
 package com.aura.app.automations
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class AutomationRuntime(
@@ -8,69 +12,230 @@ class AutomationRuntime(
     private val geofenceRegistrar: AutomationGeofenceRegistrar,
     private val scheduleScheduler: AutomationScheduleScheduler,
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
+    private val executionRegistry: AutomationExecutionRegistry = AutomationExecutionRegistry(),
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
+    private val restoreMutex = Mutex()
+
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
-        val automations = repository.list()
-        geofenceRegistrar.restore(automations)
-        scheduleScheduler.restore(automations)
-        restoreFlowContinuations(automations)
+        restoreMutex.withLock {
+            restoreTriggersLocked()
+        }
     }
 
     suspend fun upsertAndRestore(spec: AutomationSpec): AutomationSpec = withContext(Dispatchers.IO) {
-        val saved = repository.upsert(spec)
-        restoreTriggers()
-        saved
+        restoreMutex.withLock {
+            val previous = spec.id.takeIf { it.isNotBlank() }?.let { repository.get(it) }
+            if (previous == null) {
+                saveAndRestore(spec, previous, mutationBarrierHeld = false)
+            } else {
+                executionRegistry.mutate(
+                    previous.id,
+                    AutomationRunStatus.Failed,
+                    "Automation changed while run was active"
+                ) {
+                    saveAndRestore(spec, previous, mutationBarrierHeld = true)
+                }
+            }
+        }
+    }
+
+    suspend fun setEnabledAndRestore(id: String, enabled: Boolean): AutomationSpec = withContext(Dispatchers.IO) {
+        restoreMutex.withLock {
+            val previous = repository.get(id)
+                ?: throw IllegalArgumentException("Automation not found")
+            if (previous.enabled == enabled) return@withLock previous
+            executionRegistry.mutate(
+                id,
+                if (enabled) AutomationRunStatus.Failed else AutomationRunStatus.Skipped,
+                if (enabled) "Automation changed while run was active" else "Automation was disabled while run was active"
+            ) {
+                repository.setEnabled(id, enabled)
+                val saved = repository.get(id)
+                    ?: throw IllegalStateException("Automation disappeared after update")
+                restoreConfigurationOrRollback(saved, previous, mutationBarrierHeld = true)
+                saved
+            }
+        }
     }
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
-        repository.activeRun(id)?.let { flowContinuationScheduler.cancel(it.id) }
-        repository.delete(id)
-        runCatching { geofenceRegistrar.remove(id) }
-        scheduleScheduler.cancel(id)
-        restoreTriggers()
+        restoreMutex.withLock {
+            executionRegistry.mutate(
+                id,
+                AutomationRunStatus.Failed,
+                "Automation was deleted while run was active"
+            ) {
+                repository.activeRuns(id).forEach { run ->
+                    runCatching { flowContinuationScheduler.cancel(run.id) }
+                }
+                repository.delete(id)
+                runCatching { geofenceRegistrar.remove(id) }
+                runCatching { scheduleScheduler.cancel(id) }
+            }
+            restoreTriggersLocked()
+        }
     }
 
-    private suspend fun restoreFlowContinuations(automations: List<AutomationSpec>) {
+    private suspend fun saveAndRestore(
+        spec: AutomationSpec,
+        previous: AutomationSpec?,
+        mutationBarrierHeld: Boolean
+    ): AutomationSpec {
+        val saved = repository.upsert(spec)
+        restoreConfigurationOrRollback(saved, previous, mutationBarrierHeld)
+        return saved
+    }
+
+    private suspend fun restoreTriggersLocked() {
+        val automations = repository.list()
+        val failures = restoreConfiguredTriggerFailures(automations)
+        captureFailure { restoreFlowContinuations(automations) }?.let(failures::add)
+        failures.throwIfNotEmpty()
+    }
+
+    private suspend fun restoreConfigurationOrRollback(
+        saved: AutomationSpec,
+        previous: AutomationSpec?,
+        mutationBarrierHeld: Boolean
+    ) {
+        val registrationFailures = try {
+            restoreConfiguredTriggerFailures(repository.list())
+        } catch (error: CancellationException) {
+            val rollbackFailures = withContext(NonCancellable) {
+                rollbackConfiguration(saved.id, previous)
+            }
+            rollbackFailures.forEach(error::addSuppressed)
+            throw error
+        }
+        if (registrationFailures.isNotEmpty()) {
+            val rollbackFailures = withContext(NonCancellable) {
+                rollbackConfiguration(saved.id, previous)
+            }
+            throw AutomationConfigurationException(registrationFailures, rollbackFailures)
+        }
+        restoreFlowContinuations(
+            automations = repository.list(),
+            onlyAutomationId = saved.id,
+            mutationBarrierHeldFor = saved.id.takeIf { mutationBarrierHeld }
+        )
+    }
+
+    private suspend fun rollbackConfiguration(
+        savedId: String,
+        previous: AutomationSpec?
+    ): List<Exception> {
+        val failures = mutableListOf<Exception>()
+        captureCleanupFailure {
+            if (previous == null) repository.delete(savedId) else repository.upsert(previous)
+        }?.let(failures::add)
+        if (previous == null) {
+            captureCleanupFailure { geofenceRegistrar.remove(savedId) }?.let(failures::add)
+            captureCleanupFailure { scheduleScheduler.cancel(savedId) }?.let(failures::add)
+        }
+        val automations = try {
+            repository.list()
+        } catch (error: Exception) {
+            failures += error
+            return failures
+        }
+        captureCleanupFailure { geofenceRegistrar.restore(automations) }?.let(failures::add)
+        captureCleanupFailure { scheduleScheduler.restore(automations) }?.let(failures::add)
+        return failures
+    }
+
+    private suspend fun restoreConfiguredTriggerFailures(
+        automations: List<AutomationSpec>
+    ): MutableList<Exception> = mutableListOf<Exception>().apply {
+        captureFailure { geofenceRegistrar.restore(automations) }?.let(::add)
+        captureFailure { scheduleScheduler.restore(automations) }?.let(::add)
+    }
+
+    private suspend fun restoreFlowContinuations(
+        automations: List<AutomationSpec>,
+        onlyAutomationId: String? = null,
+        mutationBarrierHeldFor: String? = null
+    ) {
         val automationById = automations.associateBy { it.id }
-        repository.activeRuns().forEach { run ->
-            val spec = automationById[run.automationId]
-            if (spec == null) {
-                terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
-                return@forEach
+        val failures = mutableListOf<Exception>()
+        repository.activeRuns()
+            .filter { onlyAutomationId == null || it.automationId == onlyAutomationId }
+            .forEach { run ->
+                captureFailure {
+                    restoreFlowContinuation(run, automationById, mutationBarrierHeldFor)
+                }?.let(failures::add)
             }
-            if (!spec.enabled) {
-                terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
-                return@forEach
+        failures.throwIfNotEmpty()
+    }
+
+    private suspend fun restoreFlowContinuation(
+        run: AutomationRunRecord,
+        automationById: Map<String, AutomationSpec>,
+        mutationBarrierHeldFor: String?
+    ) {
+        val spec = automationById[run.automationId]
+        if (spec == null) {
+            terminalizeRun(run, AutomationRunStatus.Failed, "Automation not found")
+            return
+        }
+        if (!spec.enabled) {
+            terminalizeRun(run, AutomationRunStatus.Skipped, "Automation is disabled")
+            return
+        }
+        if (run.status == AutomationRunStatus.Running) {
+            terminalizeInterruptedRun(run, mutationBarrierHeldFor == run.automationId)
+            return
+        }
+        if (run.automationRevision != repository.revision(spec)) {
+            terminalizeRun(run, AutomationRunStatus.Failed, "Automation changed while run was waiting")
+            return
+        }
+        val waitingStep = repository.stepRuns(run.id)
+            .lastOrNull { it.status == AutomationRunStatus.Waiting }
+        if (waitingStep == null) {
+            terminalizeRun(run, AutomationRunStatus.Failed, "Automation run is waiting without a resumable step")
+            return
+        }
+        val flowStep = spec.flow?.steps.orEmpty().firstOrNull { it.id == waitingStep.stepId }
+        if (flowStep == null) {
+            terminalizeRun(run, AutomationRunStatus.Failed, "Automation run waiting step is no longer configured")
+            return
+        }
+        when (flowStep.type) {
+            AutomationFlowStepTypes.Wait -> {
+                try {
+                    flowContinuationScheduler.schedule(run.id, flowStep.remainingWaitMillis(waitingStep))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    terminalizeRun(
+                        run,
+                        AutomationRunStatus.Failed,
+                        "Failed to restore flow continuation: ${error.message ?: error::class.simpleName}"
+                    )
+                }
             }
-            if (run.status == AutomationRunStatus.Running) {
-                terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was interrupted before completion")
-                return@forEach
-            }
-            val waitingStep = repository.stepRuns(run.id)
-                .lastOrNull { it.status == AutomationRunStatus.Waiting }
-                ?: return@forEach terminalizeRun(
-                    run,
-                    AutomationRunStatus.Failed,
-                    "Automation run is waiting without a resumable step"
-                )
-            val flowStep = spec.flow?.steps.orEmpty().firstOrNull { it.id == waitingStep.stepId }
-                ?: return@forEach terminalizeRun(
-                    run,
-                    AutomationRunStatus.Failed,
-                    "Automation run waiting step is no longer configured"
-                )
-            when (flowStep.type) {
-                AutomationFlowStepTypes.Wait -> flowContinuationScheduler.schedule(
-                    run.id,
-                    flowStep.remainingWaitMillis(waitingStep)
-                )
-                AutomationFlowStepTypes.Checkpoint -> flowContinuationScheduler.cancel(run.id)
-                else -> terminalizeRun(
-                    run,
-                    AutomationRunStatus.Failed,
-                    "Automation run waiting step is no longer resumable"
-                )
+            AutomationFlowStepTypes.Checkpoint -> flowContinuationScheduler.cancel(run.id)
+            else -> terminalizeRun(
+                run,
+                AutomationRunStatus.Failed,
+                "Automation run waiting step is no longer resumable"
+            )
+        }
+    }
+
+    private suspend fun terminalizeInterruptedRun(run: AutomationRunRecord, mutationBarrierHeld: Boolean) {
+        val message = "Automation run was interrupted before completion"
+        val terminalizeIfStillRunning: suspend () -> Unit = {
+            repository.getRun(run.id)
+                ?.takeIf { it.status == AutomationRunStatus.Running }
+                ?.let { current -> terminalizeRun(current, AutomationRunStatus.Failed, message) }
+        }
+        if (mutationBarrierHeld) {
+            terminalizeIfStillRunning()
+        } else {
+            executionRegistry.mutate(run.automationId, AutomationRunStatus.Failed, message) {
+                terminalizeIfStillRunning()
             }
         }
     }
@@ -83,7 +248,71 @@ class AutomationRuntime(
 
     private fun AutomationFlowStep.remainingWaitMillis(waitingStep: AutomationStepRunRecord): Long {
         val waitStartedAt = waitingStep.completedAt ?: waitingStep.startedAt
-        val elapsedMillis = clock() - waitStartedAt
-        return (waitMillis - elapsedMillis).coerceAtLeast(0L)
+        val now = clock()
+        val elapsedMillis = if (waitStartedAt >= 0L && now >= waitStartedAt) {
+            now - waitStartedAt
+        } else {
+            0L
+        }
+        val configuredWait = waitMillis.coerceAtLeast(0L)
+        return (configuredWait - elapsedMillis).coerceIn(0L, configuredWait)
+    }
+
+    private fun List<Exception>.throwIfNotEmpty() {
+        if (isNotEmpty()) throw AutomationRestoreException(this)
+    }
+
+    private suspend fun captureFailure(block: suspend () -> Unit): Exception? =
+        try {
+            block()
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error
+        }
+
+    private suspend fun captureCleanupFailure(block: suspend () -> Unit): Exception? =
+        try {
+            block()
+            null
+        } catch (error: Exception) {
+            error
+        }
+}
+
+internal class AutomationRestoreException(failures: List<Exception>) : Exception(
+    failures.joinToString(
+        prefix = "Automation trigger restoration failed: ",
+        separator = "; "
+    ) { it.message ?: it::class.simpleName ?: "Unknown error" },
+    failures.firstOrNull()
+) {
+    init {
+        failures.drop(1).forEach(::addSuppressed)
     }
 }
+
+internal class AutomationConfigurationException(
+    registrationFailures: List<Exception>,
+    rollbackFailures: List<Exception>
+) : Exception(
+    buildString {
+        append("Automation trigger registration failed: ")
+        append(registrationFailures.failureMessages())
+        if (rollbackFailures.isEmpty()) {
+            append(". The previous configuration was restored")
+        } else {
+            append(". Configuration rollback also failed: ")
+            append(rollbackFailures.failureMessages())
+        }
+    },
+    registrationFailures.firstOrNull()
+) {
+    init {
+        (registrationFailures.drop(1) + rollbackFailures).forEach(::addSuppressed)
+    }
+}
+
+private fun List<Exception>.failureMessages(): String =
+    joinToString("; ") { it.message ?: it::class.simpleName ?: "Unknown error" }

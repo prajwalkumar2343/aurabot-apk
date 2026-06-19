@@ -4,7 +4,25 @@ import java.time.LocalTime
 
 object AutomationValidator {
     fun validate(spec: AutomationSpec): AutomationSpec {
-        require(spec.name.isNotBlank()) { "Automation name is required" }
+        val normalizedName = spec.name.trim()
+        val normalizedDescription = spec.description.trim()
+        require(normalizedName.isNotBlank()) { "Automation name is required" }
+        require(normalizedName.length <= MAX_NAME_LENGTH) {
+            "Automation name cannot exceed $MAX_NAME_LENGTH characters"
+        }
+        require(normalizedDescription.length <= MAX_DESCRIPTION_LENGTH) {
+            "Automation description cannot exceed $MAX_DESCRIPTION_LENGTH characters"
+        }
+        require(spec.id.length <= MAX_ID_LENGTH) { "Automation id cannot exceed $MAX_ID_LENGTH characters" }
+        require(spec.createdBy.length <= MAX_CREATED_BY_LENGTH) {
+            "Automation createdBy cannot exceed $MAX_CREATED_BY_LENGTH characters"
+        }
+        require(spec.conditions.size <= MAX_CONDITIONS) {
+            "Automation cannot have more than $MAX_CONDITIONS conditions"
+        }
+        require(spec.actions.size <= MAX_ACTIONS) {
+            "Automation cannot have more than $MAX_ACTIONS actions"
+        }
         val normalizedFlow = normalizeFlow(spec.flow)
         require(spec.actions.isNotEmpty() || normalizedFlow?.steps?.isNotEmpty() == true) {
             "Automation needs at least one action or flow step"
@@ -20,8 +38,8 @@ object AutomationValidator {
         normalizedFlow?.let { validateFlow(it) }
         require(spec.cooldownMillis >= 0L) { "Cooldown cannot be negative" }
         return spec.copy(
-            name = spec.name.trim(),
-            description = spec.description.trim(),
+            name = normalizedName,
+            description = normalizedDescription,
             actions = spec.actions.map { normalizeAction(it) },
             flow = normalizedFlow
         )
@@ -32,6 +50,9 @@ object AutomationValidator {
             AutomationTriggerTypes.Geofence -> {
                 val geofence = requireNotNull(trigger.geofence) { "Geofence trigger config is required" }
                 require(geofence.placeName.isNotBlank()) { "Geofence place name is required" }
+                require(geofence.placeName.length <= MAX_NAME_LENGTH) {
+                    "Geofence place name cannot exceed $MAX_NAME_LENGTH characters"
+                }
                 require(geofence.latitude in -90.0..90.0) { "Geofence latitude is invalid" }
                 require(geofence.longitude in -180.0..180.0) { "Geofence longitude is invalid" }
                 require(geofence.radiusMeters in 50f..10_000f) { "Geofence radius must be between 50m and 10km" }
@@ -48,18 +69,37 @@ object AutomationValidator {
                         "Daily schedule needs a valid HH:mm localTime"
                     }
                     require(schedule.daysOfWeek.all { it in 1..7 }) { "Schedule daysOfWeek values must be 1 through 7" }
+                    require(schedule.daysOfWeek.size <= 7 && schedule.daysOfWeek.distinct().size == schedule.daysOfWeek.size) {
+                        "Schedule daysOfWeek values must be unique"
+                    }
                 }
                 if (schedule.mode == "interval") {
-                    require((schedule.intervalMinutes ?: 0) > 0) { "Interval schedule needs positive intervalMinutes" }
+                    require((schedule.intervalMinutes ?: 0) in 1..MAX_INTERVAL_MINUTES) {
+                        "Interval schedule needs intervalMinutes between 1 and $MAX_INTERVAL_MINUTES"
+                    }
                 }
             }
-            AutomationTriggerTypes.Manual -> Unit
+            AutomationTriggerTypes.Manual -> trigger.manual?.eventName?.let { eventName ->
+                require(eventName.isNotBlank()) { "Manual trigger eventName cannot be blank" }
+                require(eventName.length <= MAX_ID_LENGTH) {
+                    "Manual trigger eventName cannot exceed $MAX_ID_LENGTH characters"
+                }
+            }
             else -> error("Unsupported automation trigger: ${trigger.type}")
         }
     }
 
     private fun validateCondition(condition: AutomationCondition) {
         require(condition.key.isNotBlank()) { "Condition key is required" }
+        require(condition.type.length <= MAX_ID_LENGTH) {
+            "Condition type cannot exceed $MAX_ID_LENGTH characters"
+        }
+        require(condition.key.length <= MAX_METADATA_KEY_LENGTH) {
+            "Condition key cannot exceed $MAX_METADATA_KEY_LENGTH characters"
+        }
+        require((condition.value?.length ?: 0) <= MAX_TEXT_LENGTH) {
+            "Condition value cannot exceed $MAX_TEXT_LENGTH characters"
+        }
         require(
             condition.operator in setOf(
                 AutomationOperators.Exists,
@@ -68,9 +108,21 @@ object AutomationValidator {
                 AutomationOperators.Contains
             )
         ) { "Unsupported condition operator: ${condition.operator}" }
+        when (condition.operator) {
+            AutomationOperators.Equals,
+            AutomationOperators.NotEquals -> require(condition.value != null) {
+                "${condition.operator} conditions require a value"
+            }
+            AutomationOperators.Contains -> require(!condition.value.isNullOrEmpty()) {
+                "contains conditions require a non-empty value"
+            }
+        }
     }
 
     private fun validateFlow(flow: AutomationFlow) {
+        require(flow.steps.size <= MAX_FLOW_STEPS) {
+            "Automation flow cannot have more than $MAX_FLOW_STEPS steps"
+        }
         require(flow.concurrencyPolicy in setOf(AutomationConcurrencyPolicies.SkipIfRunning, AutomationConcurrencyPolicies.AllowParallel)) {
             "Unsupported flow concurrency policy: ${flow.concurrencyPolicy}"
         }
@@ -78,6 +130,11 @@ object AutomationValidator {
         var hasPriorCheckpoint = false
         flow.steps.forEach { step ->
             require(step.id.isNotBlank()) { "Flow step id is required" }
+            require(step.id.length <= MAX_ID_LENGTH) { "Flow step id cannot exceed $MAX_ID_LENGTH characters" }
+            require(step.name.length <= MAX_NAME_LENGTH) {
+                "Flow step name cannot exceed $MAX_NAME_LENGTH characters"
+            }
+            validateMetadata(step.metadata, "Flow step")
             require(ids.add(step.id)) { "Flow step ids must be unique" }
             require(
                 step.type in setOf(
@@ -102,6 +159,9 @@ object AutomationValidator {
                     validateAction(action)
                     require(!action.isHighImpactCrossAppAction() || hasPriorCheckpoint) {
                         "High-impact cross-app action '${action.type}' needs a prior checkpoint step"
+                    }
+                    require(!action.hasAtMostOnceSideEffect() || step.retryPolicy.maxAttempts == 1) {
+                        "Irreversible action '${action.type}' cannot be retried"
                     }
                 }
                 AutomationFlowStepTypes.Condition -> {
@@ -154,6 +214,18 @@ object AutomationValidator {
             "Unsupported automation action: ${action.type}"
         }
         validateCommonMetadata(action)
+        require((action.title?.length ?: 0) <= MAX_NAME_LENGTH) {
+            "Action title cannot exceed $MAX_NAME_LENGTH characters"
+        }
+        require((action.messageTemplate?.length ?: 0) <= MAX_TEXT_LENGTH) {
+            "Action messageTemplate cannot exceed $MAX_TEXT_LENGTH characters"
+        }
+        require((action.recipientName?.length ?: 0) <= MAX_NAME_LENGTH) {
+            "Action recipientName cannot exceed $MAX_NAME_LENGTH characters"
+        }
+        require((action.recipientAddress?.length ?: 0) <= MAX_RECIPIENT_ADDRESS_LENGTH) {
+            "Action recipientAddress cannot exceed $MAX_RECIPIENT_ADDRESS_LENGTH characters"
+        }
         if (action.type in AutomationActionTypeSets.Message) {
             require(action.messageTemplate?.isNotBlank() == true) { "Message actions need a messageTemplate" }
         }
@@ -243,6 +315,7 @@ object AutomationValidator {
     }
 
     private fun validateCommonMetadata(action: AutomationAction) {
+        validateMetadata(action.metadata, "Action")
         action.metadata[AutomationActionMetadata.TimeoutMillis]?.let {
             requireLongMetadata(it, AutomationActionMetadata.TimeoutMillis, 250L, 120_000L)
         }
@@ -295,6 +368,21 @@ object AutomationValidator {
         require(parsed != null && parsed in min..max) { "$key metadata must be between $min and $max" }
     }
 
+    private fun validateMetadata(metadata: Map<String, String>, owner: String) {
+        require(metadata.size <= MAX_METADATA_ENTRIES) {
+            "$owner metadata cannot have more than $MAX_METADATA_ENTRIES entries"
+        }
+        metadata.forEach { (key, value) ->
+            require(key.isNotBlank()) { "$owner metadata keys cannot be blank" }
+            require(key.length <= MAX_METADATA_KEY_LENGTH) {
+                "$owner metadata keys cannot exceed $MAX_METADATA_KEY_LENGTH characters"
+            }
+            require(value.length <= MAX_TEXT_LENGTH) {
+                "$owner metadata values cannot exceed $MAX_TEXT_LENGTH characters"
+            }
+        }
+    }
+
     private fun AutomationAction.hasSelector(): Boolean =
         listOf(
             AutomationActionMetadata.Text,
@@ -337,6 +425,9 @@ object AutomationValidator {
         return highImpactTerms.any { term -> Regex("\\b${Regex.escape(term)}\\b").containsMatchIn(targetText) }
     }
 
+    private fun AutomationAction.hasAtMostOnceSideEffect(): Boolean =
+        sendsDirectSms() || isHighImpactCrossAppAction()
+
     private val highImpactGestureActionTypes = setOf(
         AutomationActionTypes.TapText,
         AutomationActionTypes.TapTarget,
@@ -366,4 +457,16 @@ object AutomationValidator {
     private const val MAX_RETRY_ATTEMPTS = 5
     private const val MAX_RETRY_BACKOFF_MILLIS = 30_000L
     private const val MAX_FLOW_WAIT_MILLIS = 604_800_000L
+    private const val MAX_INTERVAL_MINUTES = 525_600
+    private const val MAX_NAME_LENGTH = 120
+    private const val MAX_DESCRIPTION_LENGTH = 2_000
+    private const val MAX_ID_LENGTH = 128
+    private const val MAX_CREATED_BY_LENGTH = 128
+    private const val MAX_RECIPIENT_ADDRESS_LENGTH = 320
+    private const val MAX_TEXT_LENGTH = 4_096
+    private const val MAX_METADATA_KEY_LENGTH = 64
+    private const val MAX_METADATA_ENTRIES = 32
+    private const val MAX_CONDITIONS = 20
+    private const val MAX_ACTIONS = 20
+    private const val MAX_FLOW_STEPS = 40
 }

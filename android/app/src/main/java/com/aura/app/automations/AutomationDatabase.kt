@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AutomationRunEntity::class,
         AutomationStepRunEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AutomationDatabase : RoomDatabase() {
@@ -29,7 +29,7 @@ abstract class AutomationDatabase : RoomDatabase() {
                     context.applicationContext,
                     AutomationDatabase::class.java,
                     "aura_automations.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -78,6 +78,14 @@ abstract class AutomationDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_automation_step_runs_automationId_stepId ON automation_step_runs(automationId, stepId)"
+                )
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE automation_runs ADD COLUMN automationRevision TEXT NOT NULL DEFAULT ''"
                 )
             }
         }
