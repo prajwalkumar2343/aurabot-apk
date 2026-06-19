@@ -18,10 +18,7 @@ class AutomationRuntime(
 
     suspend fun restoreTriggers() = withContext(Dispatchers.IO) {
         restoreMutex.withLock {
-            val automations = repository.list()
-            val failures = restoreConfiguredTriggerFailures(automations)
-            captureFailure { restoreFlowContinuations(automations) }?.let(failures::add)
-            failures.throwIfNotEmpty()
+            restoreTriggersLocked()
         }
     }
 
@@ -47,13 +44,22 @@ class AutomationRuntime(
     }
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
-        repository.activeRuns(id).forEach { run ->
-            runCatching { flowContinuationScheduler.cancel(run.id) }
+        restoreMutex.withLock {
+            repository.activeRuns(id).forEach { run ->
+                runCatching { flowContinuationScheduler.cancel(run.id) }
+            }
+            repository.delete(id)
+            runCatching { geofenceRegistrar.remove(id) }
+            runCatching { scheduleScheduler.cancel(id) }
+            restoreTriggersLocked()
         }
-        repository.delete(id)
-        runCatching { geofenceRegistrar.remove(id) }
-        runCatching { scheduleScheduler.cancel(id) }
-        restoreTriggers()
+    }
+
+    private suspend fun restoreTriggersLocked() {
+        val automations = repository.list()
+        val failures = restoreConfiguredTriggerFailures(automations)
+        captureFailure { restoreFlowContinuations(automations) }?.let(failures::add)
+        failures.throwIfNotEmpty()
     }
 
     private suspend fun restoreConfigurationOrRollback(

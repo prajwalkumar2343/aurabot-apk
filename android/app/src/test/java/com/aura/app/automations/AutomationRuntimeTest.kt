@@ -39,6 +39,36 @@ class AutomationRuntimeTest {
         assertEquals(2, dao.totalListCalls)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun deleteAndRestoreWaitsForInFlightRestore() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val saved = repository.upsert(scheduleSpec())
+        val firstListStarted = CompletableDeferred<Unit>()
+        val releaseFirstList = CompletableDeferred<Unit>()
+        dao.listStarted = firstListStarted
+        dao.listGate = releaseFirstList
+        val schedules = RecordingScheduleScheduler()
+        val runtime = AutomationRuntime(repository, RecordingGeofenceRegistrar(), schedules)
+
+        val restore = async { runtime.restoreTriggers() }
+        firstListStarted.await()
+        val deletion = async { runtime.deleteAndRestore(saved.id) }
+        runCurrent()
+
+        assertEquals(saved.id, repository.get(saved.id)?.id)
+        assertFalse(deletion.isCompleted)
+
+        releaseFirstList.complete(Unit)
+        restore.await()
+        deletion.await()
+
+        assertEquals(null, repository.get(saved.id))
+        assertFalse(saved.id in schedules.activeIds)
+        assertEquals(2, dao.totalListCalls)
+    }
+
     @Test
     fun upsertAndRestoreRemovesNewAutomationWhenRegistrationFails() = runTest {
         val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
