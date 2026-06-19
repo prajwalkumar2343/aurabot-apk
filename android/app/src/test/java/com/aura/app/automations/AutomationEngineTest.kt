@@ -1067,6 +1067,55 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun failWaitingRunTerminalizesRunAndCancelsContinuation() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val continuations = RecordingEngineFlowContinuationScheduler()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            flowContinuationScheduler = continuations,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "wait", type = AutomationFlowStepTypes.Wait, waitMillis = 5_000L)
+                    )
+                )
+            )
+        )
+        val waiting = engine.runNow(saved.id)
+        val runId = waiting.runId ?: error("runId missing")
+
+        val failed = engine.failWaitingRun(runId, "Continuation delivery exhausted")
+
+        assertEquals(AutomationRunStatus.Failed, failed.status)
+        assertEquals("Continuation delivery exhausted", repository.getRun(runId)?.message)
+        assertTrue(runId in continuations.cancelled)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun failWaitingRunDoesNotOverwriteCompletedRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = RecordingActionExecutor(),
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        val completed = engine.runNow(saved.id)
+        val runId = completed.runId ?: error("runId missing")
+
+        val abandoned = engine.failWaitingRun(runId, "Late continuation failure")
+
+        assertEquals(AutomationRunStatus.Skipped, abandoned.status)
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(completed.message, repository.getRun(runId)?.message)
+    }
+
+    @Test
     fun resumeRunFailsWaitingRunsWithoutAWaitingStep() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
         val scheduler = RecordingEngineFlowContinuationScheduler()

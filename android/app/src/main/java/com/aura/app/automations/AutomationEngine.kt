@@ -64,6 +64,26 @@ class AutomationEngine(
         }
     }
 
+    suspend fun failWaitingRun(runId: String, message: String): AutomationRunResult =
+        stateMutex("run:$runId").withLock {
+            val run = repository.getRun(runId)
+                ?: return@withLock AutomationRunResult(
+                    "",
+                    AutomationRunStatus.Failed,
+                    "Automation run not found",
+                    runId = runId
+                )
+            if (run.status != AutomationRunStatus.Waiting) {
+                return@withLock AutomationRunResult(
+                    run.automationId,
+                    AutomationRunStatus.Skipped,
+                    "Automation run is not waiting",
+                    runId = runId
+                )
+            }
+            terminalizeRun(run, AutomationRunStatus.Failed, message)
+        }
+
     private suspend fun prepareResume(
         runId: String,
         expectedWaitingStepId: String?,
