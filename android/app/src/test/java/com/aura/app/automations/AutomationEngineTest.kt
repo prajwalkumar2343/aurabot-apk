@@ -627,6 +627,103 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun validatorRejectsOversizedAutomationCollections() {
+        fun invalid(spec: AutomationSpec) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(spec)
+            }
+        }
+
+        invalid(
+            manualSpec().copy(
+                conditions = List(21) { index -> AutomationCondition(key = "condition-$index") }
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = List(21) { AutomationAction(type = AutomationActionTypes.Notify) }
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = emptyList(),
+                flow = AutomationFlow(
+                    steps = List(41) { index ->
+                        AutomationFlowStep(id = "checkpoint-$index", type = AutomationFlowStepTypes.Checkpoint)
+                    }
+                )
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        metadata = (1..33).associate { index -> "key-$index" to "value" }
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun validatorRejectsOversizedAutomationText() {
+        fun invalid(spec: AutomationSpec) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AutomationValidator.validate(spec)
+            }
+        }
+
+        invalid(manualSpec().copy(id = "i".repeat(129)))
+        invalid(manualSpec().copy(name = "n".repeat(121)))
+        invalid(manualSpec().copy(description = "d".repeat(2_001)))
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        messageTemplate = "m".repeat(4_097)
+                    )
+                )
+            )
+        )
+        invalid(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.Notify,
+                        metadata = mapOf("payload" to "v".repeat(4_097))
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun validatorBoundsScheduleCardinalityAndInterval() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "daily", localTime = "09:00", daysOfWeek = listOf(1, 1))
+                    )
+                )
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AutomationValidator.validate(
+                scheduleSpec().copy(
+                    trigger = AutomationTrigger(
+                        type = AutomationTriggerTypes.Schedule,
+                        schedule = ScheduleTrigger(mode = "interval", intervalMinutes = 525_601)
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
     fun dailyScheduleHonorsDaysOfWeek() {
         val zone = ZoneId.of("UTC")
         val mondayAfterRunTime = ZonedDateTime.of(2026, 6, 8, 10, 0, 0, 0, zone)
