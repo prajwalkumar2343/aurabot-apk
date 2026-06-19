@@ -38,4 +38,14 @@ class AutomationAlarmIdentityTest {
             AlarmAutomationFlowContinuationScheduler.alarmAction(id)
         )
     }
+
+    @Test
+    fun continuationAlarmDeadlineClampsNegativeDelayAndSaturatesOverflow() {
+        assertEquals(1_000L, AlarmAutomationFlowContinuationScheduler.triggerAt(1_000L, -1L))
+        assertEquals(1_500L, AlarmAutomationFlowContinuationScheduler.triggerAt(1_000L, 500L))
+        assertEquals(
+            Long.MAX_VALUE,
+            AlarmAutomationFlowContinuationScheduler.triggerAt(Long.MAX_VALUE - 5L, 10L)
+        )
+    }
 }

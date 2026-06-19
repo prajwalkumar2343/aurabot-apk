@@ -442,6 +442,28 @@ class AutomationRuntimeTest {
     }
 
     @Test
+    fun restoreTriggersDoesNotExtendWaitAfterWallClockRollback() = runTest {
+        var now = 1_000L
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { now })
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            continuations,
+            clock = { now }
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+        now = 500L
+
+        runtime.restoreTriggers()
+
+        assertEquals(waitStep.waitMillis, continuations.scheduled[run.id])
+    }
+
+    @Test
     fun restoreTriggersTerminalizesDisabledWaitingFlowContinuations() = runTest {
         val dao = RuntimeFakeAutomationDao()
         val repository = AutomationRepository(dao, clock = { 1_000L })

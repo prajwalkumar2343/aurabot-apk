@@ -16,7 +16,10 @@ object NoOpAutomationFlowContinuationScheduler : AutomationFlowContinuationSched
     override fun cancel(runId: String) = Unit
 }
 
-class AlarmAutomationFlowContinuationScheduler(private val context: Context) : AutomationFlowContinuationScheduler {
+class AlarmAutomationFlowContinuationScheduler(
+    private val context: Context,
+    private val clock: () -> Long = { System.currentTimeMillis() }
+) : AutomationFlowContinuationScheduler {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
     override fun schedule(runId: String, delayMillis: Long) {
@@ -28,7 +31,7 @@ class AlarmAutomationFlowContinuationScheduler(private val context: Context) : A
     }
 
     private fun schedule(runId: String, delayMillis: Long, retryAttempt: Int) {
-        val triggerAt = System.currentTimeMillis() + delayMillis.coerceAtLeast(0L)
+        val triggerAt = triggerAt(clock(), delayMillis)
         cancelLegacyPendingIntent(runId)
         val pendingIntent = createPendingIntent(runId, retryAttempt)
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
@@ -86,5 +89,12 @@ class AlarmAutomationFlowContinuationScheduler(private val context: Context) : A
         private const val ACTION_PREFIX = "com.aura.app.automation.continuation."
 
         internal fun alarmAction(runId: String): String = ACTION_PREFIX + runId
+
+        internal fun triggerAt(now: Long, delayMillis: Long): Long =
+            try {
+                Math.addExact(now, delayMillis.coerceAtLeast(0L))
+            } catch (_: ArithmeticException) {
+                Long.MAX_VALUE
+            }
     }
 }

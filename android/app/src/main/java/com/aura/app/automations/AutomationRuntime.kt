@@ -180,8 +180,14 @@ class AutomationRuntime(
 
     private fun AutomationFlowStep.remainingWaitMillis(waitingStep: AutomationStepRunRecord): Long {
         val waitStartedAt = waitingStep.completedAt ?: waitingStep.startedAt
-        val elapsedMillis = clock() - waitStartedAt
-        return (waitMillis - elapsedMillis).coerceAtLeast(0L)
+        val now = clock()
+        val elapsedMillis = if (waitStartedAt >= 0L && now >= waitStartedAt) {
+            now - waitStartedAt
+        } else {
+            0L
+        }
+        val configuredWait = waitMillis.coerceAtLeast(0L)
+        return (configuredWait - elapsedMillis).coerceIn(0L, configuredWait)
     }
 
     private fun List<Exception>.throwIfNotEmpty() {
