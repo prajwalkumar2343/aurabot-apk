@@ -159,15 +159,6 @@ class AutomationEngine(
                 existingRunId = existingRunId
             )
         }
-        if (!conditionEvaluator.passes(spec.conditions, event)) {
-            return result(
-                spec.id,
-                event.type,
-                AutomationRunStatus.Skipped,
-                "Conditions did not pass",
-                existingRunId = existingRunId
-            )
-        }
         val steps = spec.effectiveSteps()
         if (steps.isEmpty()) {
             return result(
@@ -202,6 +193,15 @@ class AutomationEngine(
             val message = failureMessage("Automation context enrichment failed", error)
             return existingRun?.let { terminalizeRun(it, AutomationRunStatus.Failed, message) }
                 ?: result(spec.id, event.type, AutomationRunStatus.Failed, message)
+        }
+        if (!conditionEvaluator.passes(spec.conditions, enrichedEvent)) {
+            return result(
+                spec.id,
+                event.type,
+                AutomationRunStatus.Skipped,
+                "Conditions did not pass",
+                existingRunId = existingRunId
+            )
         }
         val run = if (existingRun != null) {
             existingRun

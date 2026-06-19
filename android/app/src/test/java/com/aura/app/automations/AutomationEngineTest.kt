@@ -67,6 +67,78 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun topLevelConditionsUseEnrichedEtaContext() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = DefaultAutomationContextEnricher(FixedEtaProvider()),
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            leaveWorkSpec().copy(
+                conditions = listOf(
+                    AutomationCondition(
+                        key = "etaProvider",
+                        operator = AutomationOperators.Equals,
+                        value = "fake_routes"
+                    ),
+                    AutomationCondition(
+                        key = "placeName",
+                        operator = AutomationOperators.Equals,
+                        value = "Work"
+                    )
+                )
+            )
+        )
+
+        val result = engine.handle(
+            AutomationEvent(
+                type = AutomationEvents.GeofenceExit,
+                automationId = saved.id,
+                values = mapOf("latitude" to "12.9716", "longitude" to "77.5946")
+            )
+        )
+
+        assertEquals(AutomationRunStatus.Success, result.single().status)
+        assertEquals(1, executor.events.size)
+        assertEquals("fake_routes", executor.events.single().values["etaProvider"])
+    }
+
+    @Test
+    fun failedEnrichedConditionDoesNotCreateRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            contextEnricher = DefaultAutomationContextEnricher(FixedEtaProvider()),
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            leaveWorkSpec().copy(
+                conditions = listOf(
+                    AutomationCondition(
+                        key = "etaProvider",
+                        operator = AutomationOperators.Equals,
+                        value = "different_provider"
+                    )
+                )
+            )
+        )
+
+        val result = engine.handle(
+            AutomationEvent(type = AutomationEvents.GeofenceExit, automationId = saved.id)
+        )
+
+        assertEquals(AutomationRunStatus.Skipped, result.single().status)
+        assertEquals("Conditions did not pass", result.single().message)
+        assertTrue(repository.runs(saved.id).isEmpty())
+        assertTrue(executor.events.isEmpty())
+    }
+
+    @Test
     fun cooldownSkipsRepeatedRuns() = runTest {
         var now = 1_000L
         val repository = AutomationRepository(FakeAutomationDao(), clock = { now })
