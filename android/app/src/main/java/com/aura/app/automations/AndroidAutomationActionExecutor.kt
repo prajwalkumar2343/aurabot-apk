@@ -31,7 +31,9 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.Notify -> notify(action, event)
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
-                AutomationActionTypes.DirectSms -> sendDirectSms(action, event)
+                AutomationActionTypes.DirectSms -> {
+                    if (action.sendsDirectSms()) sendDirectSms(action, event) else draftMessage(action, event)
+                }
                 in AutomationActionTypeSets.CrossApp -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")
             }

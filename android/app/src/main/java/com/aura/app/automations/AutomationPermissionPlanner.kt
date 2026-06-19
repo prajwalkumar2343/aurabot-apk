@@ -18,7 +18,7 @@ class AutomationPermissionPlanner {
                 permissions += Manifest.permission.POST_NOTIFICATIONS
             }
         }
-        if (actions.any { it.type == AutomationActionTypes.DirectSms }) {
+        if (actions.any { it.sendsDirectSms() }) {
             permissions += Manifest.permission.SEND_SMS
         }
         if (actions.any { it.type in AutomationActionTypeSets.CrossApp }) {

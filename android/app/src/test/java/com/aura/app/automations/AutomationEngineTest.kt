@@ -6,6 +6,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -193,6 +194,42 @@ class AutomationEngineTest {
 
         assertEquals(false, saved.actions.first().requireConfirmation)
         assertTrue(permissions.any { it.endsWith("SEND_SMS") })
+    }
+
+    @Test
+    fun confirmedDirectSmsUsesReviewPathWithoutSmsPermission() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val confirmedSms = leaveWorkSpec().copy(
+            actions = listOf(
+                AutomationAction(
+                    type = AutomationActionTypes.DirectSms,
+                    messageTemplate = "I left {{placeName}}.",
+                    recipientAddress = "+15555550123",
+                    requireConfirmation = true
+                )
+            )
+        )
+
+        val saved = repository.upsert(confirmedSms)
+        val action = saved.actions.single()
+        val permissions = AutomationPermissionPlanner().requiredPermissions(saved)
+
+        assertTrue(action.requireConfirmation)
+        assertFalse(action.sendsDirectSms())
+        assertFalse(permissions.any { it.endsWith("SEND_SMS") })
+    }
+
+    @Test
+    fun onlyExplicitUnconfirmedDirectSmsUsesDirectDeliveryPolicy() {
+        val confirmed = AutomationAction(
+            type = AutomationActionTypes.DirectSms,
+            requireConfirmation = true
+        )
+        val unconfirmed = confirmed.copy(requireConfirmation = false)
+
+        assertFalse(confirmed.sendsDirectSms())
+        assertTrue(unconfirmed.sendsDirectSms())
+        assertFalse(confirmed.copy(type = AutomationActionTypes.DraftMessage).sendsDirectSms())
     }
 
     @Test
