@@ -56,6 +56,17 @@ AUTOMATION_CONCURRENCY_POLICIES = ["skip_if_running", "allow_parallel"]
 AUTOMATION_MAX_RETRY_ATTEMPTS = 5
 AUTOMATION_MAX_RETRY_BACKOFF_MILLIS = 30_000
 AUTOMATION_MAX_FLOW_WAIT_MILLIS = 604_800_000
+AUTOMATION_MAX_INTERVAL_MINUTES = 525_600
+AUTOMATION_MAX_NAME_LENGTH = 120
+AUTOMATION_MAX_DESCRIPTION_LENGTH = 2_000
+AUTOMATION_MAX_ID_LENGTH = 128
+AUTOMATION_MAX_RECIPIENT_ADDRESS_LENGTH = 320
+AUTOMATION_MAX_TEXT_LENGTH = 4_096
+AUTOMATION_MAX_METADATA_KEY_LENGTH = 64
+AUTOMATION_MAX_METADATA_ENTRIES = 32
+AUTOMATION_MAX_CONDITIONS = 20
+AUTOMATION_MAX_ACTIONS = 20
+AUTOMATION_MAX_FLOW_STEPS = 40
 
 
 def _context_list(items: Iterable[str]) -> str:
@@ -131,9 +142,13 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                         "type": "object",
                         "description": "Typed automation spec. Use geofence for enter/exit place triggers, schedule for time triggers, manual for testable automations.",
                         "properties": {
-                            "id": {"type": "string", "description": "Leave blank for a new automation."},
-                            "name": {"type": "string"},
-                            "description": {"type": "string"},
+                            "id": {
+                                "type": "string",
+                                "maxLength": AUTOMATION_MAX_ID_LENGTH,
+                                "description": "Leave blank for a new automation.",
+                            },
+                            "name": {"type": "string", "minLength": 1, "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                            "description": {"type": "string", "maxLength": AUTOMATION_MAX_DESCRIPTION_LENGTH},
                             "enabled": {"type": "boolean"},
                             "trigger": {
                                 "type": "object",
@@ -142,10 +157,10 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                     "geofence": {
                                         "type": "object",
                                         "properties": {
-                                            "placeName": {"type": "string"},
-                                            "latitude": {"type": "number"},
-                                            "longitude": {"type": "number"},
-                                            "radiusMeters": {"type": "number"},
+                                            "placeName": {"type": "string", "minLength": 1, "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                                            "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+                                            "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+                                            "radiusMeters": {"type": "number", "minimum": 50, "maximum": 10_000},
                                             "transition": {"type": "string", "enum": ["enter", "exit"]},
                                         },
                                         "required": ["placeName", "latitude", "longitude", "radiusMeters", "transition"],
@@ -154,46 +169,67 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                         "type": "object",
                                         "properties": {
                                             "mode": {"type": "string", "enum": ["daily", "interval"]},
-                                            "localTime": {"type": "string", "description": "HH:mm local time for daily schedules."},
-                                            "intervalMinutes": {"type": "integer"},
-                                            "daysOfWeek": {"type": "array", "items": {"type": "integer"}},
+                                            "localTime": {
+                                                "type": "string",
+                                                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                                                "description": "HH:mm local time for daily schedules.",
+                                            },
+                                            "intervalMinutes": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": AUTOMATION_MAX_INTERVAL_MINUTES,
+                                            },
+                                            "daysOfWeek": {
+                                                "type": "array",
+                                                "maxItems": 7,
+                                                "items": {"type": "integer", "minimum": 1, "maximum": 7},
+                                            },
                                         },
                                     },
                                     "manual": {
                                         "type": "object",
-                                        "properties": {"eventName": {"type": "string"}},
+                                        "properties": {
+                                            "eventName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": AUTOMATION_MAX_ID_LENGTH,
+                                            }
+                                        },
                                     },
                                 },
                                 "required": ["type"],
                             },
                             "conditions": {
                                 "type": "array",
+                                "maxItems": AUTOMATION_MAX_CONDITIONS,
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "type": {"type": "string"},
-                                        "key": {"type": "string"},
+                                        "type": {"type": "string", "maxLength": AUTOMATION_MAX_ID_LENGTH},
+                                        "key": {"type": "string", "minLength": 1, "maxLength": AUTOMATION_MAX_METADATA_KEY_LENGTH},
                                         "operator": {"type": "string", "enum": ["exists", "equals", "not_equals", "contains"]},
-                                        "value": {"type": "string"},
+                                        "value": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                     },
                                     "required": ["type", "key", "operator"],
                                 },
                             },
                             "actions": {
                                 "type": "array",
+                                "maxItems": AUTOMATION_MAX_ACTIONS,
                                 "items": {
                                     "type": "object",
                                     "properties": {
                                         "type": {"type": "string", "enum": AUTOMATION_ACTION_TYPES},
-                                        "title": {"type": "string"},
-                                        "messageTemplate": {"type": "string"},
-                                        "recipientName": {"type": "string"},
-                                        "recipientAddress": {"type": "string"},
+                                        "title": {"type": "string", "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                                        "messageTemplate": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
+                                        "recipientName": {"type": "string", "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                                        "recipientAddress": {"type": "string", "maxLength": AUTOMATION_MAX_RECIPIENT_ADDRESS_LENGTH},
                                         "requireConfirmation": {"type": "boolean"},
                                         "metadata": {
                                             "type": "object",
+                                            "maxProperties": AUTOMATION_MAX_METADATA_ENTRIES,
                                             "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
-                                            "additionalProperties": {"type": "string"},
+                                            "additionalProperties": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                         },
                                     },
                                     "required": ["type", "requireConfirmation"],
@@ -210,26 +246,33 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                     },
                                     "steps": {
                                         "type": "array",
+                                        "maxItems": AUTOMATION_MAX_FLOW_STEPS,
                                         "items": {
                                             "type": "object",
                                             "description": "Exclusive step shape: action steps use action only, condition steps use condition only, wait steps use waitMillis only, and checkpoint steps use checkpoint metadata only.",
                                             "properties": {
-                                                "id": {"type": "string", "description": "Stable kebab-case step id, such as check-context or send-message."},
-                                                "name": {"type": "string"},
+                                                "id": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": AUTOMATION_MAX_ID_LENGTH,
+                                                    "description": "Stable kebab-case step id, such as check-context or send-message.",
+                                                },
+                                                "name": {"type": "string", "maxLength": AUTOMATION_MAX_NAME_LENGTH},
                                                 "type": {"type": "string", "enum": AUTOMATION_FLOW_STEP_TYPES},
                                                 "action": {
                                                     "type": "object",
                                                     "properties": {
                                                         "type": {"type": "string", "enum": AUTOMATION_ACTION_TYPES},
-                                                        "title": {"type": "string"},
-                                                        "messageTemplate": {"type": "string"},
-                                                        "recipientName": {"type": "string"},
-                                                        "recipientAddress": {"type": "string"},
+                                                        "title": {"type": "string", "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                                                        "messageTemplate": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
+                                                        "recipientName": {"type": "string", "maxLength": AUTOMATION_MAX_NAME_LENGTH},
+                                                        "recipientAddress": {"type": "string", "maxLength": AUTOMATION_MAX_RECIPIENT_ADDRESS_LENGTH},
                                                         "requireConfirmation": {"type": "boolean"},
                                                         "metadata": {
                                                             "type": "object",
+                                                            "maxProperties": AUTOMATION_MAX_METADATA_ENTRIES,
                                                             "description": "String metadata. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
-                                                            "additionalProperties": {"type": "string"},
+                                                            "additionalProperties": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                                         },
                                                     },
                                                     "required": ["type", "requireConfirmation"],
@@ -237,10 +280,10 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                                 "condition": {
                                                     "type": "object",
                                                     "properties": {
-                                                        "type": {"type": "string"},
-                                                        "key": {"type": "string"},
+                                                        "type": {"type": "string", "maxLength": AUTOMATION_MAX_ID_LENGTH},
+                                                        "key": {"type": "string", "minLength": 1, "maxLength": AUTOMATION_MAX_METADATA_KEY_LENGTH},
                                                         "operator": {"type": "string", "enum": ["exists", "equals", "not_equals", "contains"]},
-                                                        "value": {"type": "string"},
+                                                        "value": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                                     },
                                                     "required": ["type", "key", "operator"],
                                                 },
@@ -267,7 +310,8 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                                 "continueOnFailure": {"type": "boolean"},
                                                 "metadata": {
                                                     "type": "object",
-                                                    "additionalProperties": {"type": "string"},
+                                                    "maxProperties": AUTOMATION_MAX_METADATA_ENTRIES,
+                                                    "additionalProperties": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                                 },
                                             },
                                             "required": ["id", "type"],
@@ -276,8 +320,8 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                 },
                                 "required": ["steps"],
                             },
-                            "cooldownMillis": {"type": "integer"},
-                            "createdBy": {"type": "string"},
+                            "cooldownMillis": {"type": "integer", "minimum": 0},
+                            "createdBy": {"type": "string", "maxLength": AUTOMATION_MAX_ID_LENGTH},
                         },
                         "required": ["name", "enabled", "trigger", "actions"],
                     }
