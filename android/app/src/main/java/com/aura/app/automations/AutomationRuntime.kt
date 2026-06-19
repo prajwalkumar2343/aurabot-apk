@@ -165,7 +165,7 @@ class AutomationRuntime(
             return
         }
         if (run.status == AutomationRunStatus.Running) {
-            terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was interrupted before completion")
+            terminalizeInterruptedRun(run)
             return
         }
         if (run.automationRevision != repository.revision(spec)) {
@@ -203,6 +203,15 @@ class AutomationRuntime(
                 AutomationRunStatus.Failed,
                 "Automation run waiting step is no longer resumable"
             )
+        }
+    }
+
+    private suspend fun terminalizeInterruptedRun(run: AutomationRunRecord) {
+        val message = "Automation run was interrupted before completion"
+        executionRegistry.mutate(run.automationId, AutomationRunStatus.Failed, message) {
+            repository.getRun(run.id)
+                ?.takeIf { it.status == AutomationRunStatus.Running }
+                ?.let { current -> terminalizeRun(current, AutomationRunStatus.Failed, message) }
         }
     }
 

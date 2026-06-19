@@ -738,6 +738,39 @@ class AutomationRuntimeTest {
         assertEquals(null, repository.activeRun(saved.id))
     }
 
+    @Test
+    fun restoreTriggersCancelsLiveRunningExecutionBeforeTerminalizing() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val registry = AutomationExecutionRegistry()
+        val executor = CancellableRuntimeActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            executionRegistry = registry,
+            clock = { 1_000L }
+        )
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            executionRegistry = registry
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val execution = async { engine.runNow(saved.id) }
+        executor.started.await()
+
+        runtime.restoreTriggers()
+        val failure = runCatching { execution.await() }.exceptionOrNull()
+        val run = repository.runs(saved.id).single()
+
+        assertTrue(executor.cancelled.isCompleted)
+        assertTrue(failure is AutomationConfigurationChangedException)
+        assertEquals(AutomationRunStatus.Failed, run.status)
+        assertEquals("Automation run was interrupted before completion", run.message)
+        assertEquals(1, repository.logs(saved.id).count { it.message == run.message })
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
     private fun geofenceSpec() = AutomationSpec(
         id = "leave-work",
         name = "Leave work",
