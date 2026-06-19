@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -951,6 +952,56 @@ class AutomationEngineTest {
         assertEquals(listOf("manual-a", "manual-b"), executor.events.map { it.automationId })
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun crossAppAutomationsSerializeExecutionAcrossDifferentRules() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(crossAppSpec("cross-app-a", "Cross app A"))
+        val secondSpec = repository.upsert(crossAppSpec("cross-app-b", "Cross app B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = async { engine.runNow(secondSpec.id) }
+        runCurrent()
+
+        assertEquals(1, executor.events.size)
+        assertEquals(AutomationRunStatus.Running, repository.activeRun(secondSpec.id)?.status)
+        executor.release.complete(Unit)
+        val results = listOf(first.await(), second.await())
+
+        assertEquals(listOf(AutomationRunStatus.Success, AutomationRunStatus.Success), results.map { it.status })
+        assertEquals(2, executor.events.size)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun cancellingRunWaitingForCrossAppLockTerminalizesClaimedRun() = runTest {
+        val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
+        val executor = ControlledConcurrencyExecutor(blockAll = true)
+        val engine = AutomationEngine(repository = repository, actionExecutor = executor, clock = { 1_000L })
+        val firstSpec = repository.upsert(crossAppSpec("cross-app-a", "Cross app A"))
+        val secondSpec = repository.upsert(crossAppSpec("cross-app-b", "Cross app B"))
+
+        val first = async { engine.runNow(firstSpec.id) }
+        executor.firstStarted.await()
+        val second = async { engine.runNow(secondSpec.id) }
+        runCurrent()
+        val claimedRun = repository.activeRun(secondSpec.id) ?: error("second run was not claimed")
+
+        second.cancel()
+        val cancellation = runCatching { second.await() }.exceptionOrNull()
+        executor.release.complete(Unit)
+        first.await()
+
+        assertTrue(cancellation is CancellationException)
+        assertEquals(AutomationRunStatus.Failed, repository.getRun(claimedRun.id)?.status)
+        assertEquals("Automation run was cancelled", repository.getRun(claimedRun.id)?.message)
+        assertEquals(null, repository.activeRun(secondSpec.id))
+        assertEquals(1, executor.events.size)
+    }
+
     @Test
     fun duplicateResumeSkipsWhileFirstResumeIsExecuting() = runTest {
         val repository = AutomationRepository(FakeAutomationDao(), clock = { 1_000L })
@@ -1488,6 +1539,24 @@ class AutomationEngineTest {
         name = "Manual check",
         trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
         actions = listOf(AutomationAction(type = AutomationActionTypes.Notify, messageTemplate = "Check in"))
+    )
+
+    private fun crossAppSpec(id: String, name: String) = manualSpec().copy(
+        id = id,
+        name = name,
+        actions = emptyList(),
+        flow = AutomationFlow(
+            steps = listOf(
+                AutomationFlowStep(
+                    id = "open-app",
+                    type = AutomationFlowStepTypes.Action,
+                    action = AutomationAction(
+                        type = AutomationActionTypes.OpenApp,
+                        metadata = mapOf(AutomationActionMetadata.PackageName to "com.example")
+                    )
+                )
+            )
+        )
     )
 }
 

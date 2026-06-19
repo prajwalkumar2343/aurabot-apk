@@ -211,7 +211,7 @@ class AutomationEngine(
                 is StartPreparation.Rejected -> return preparation.result
             }
         }
-        return try {
+        val executeSteps: suspend () -> AutomationRunResult = {
             val stepResults = mutableListOf<AutomationStepResult>()
             val actionResults = mutableListOf<AutomationActionResult>()
             var finalStatus = AutomationRunStatus.Success
@@ -270,6 +270,13 @@ class AutomationEngine(
             }
             repository.log(spec.id, event.type, finalStatus, finalMessage)
             AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
+        }
+        return try {
+            if (steps.drop(startStepIndex).any { it.action?.type in AutomationActionTypeSets.CrossApp }) {
+                CrossAppExecutionMutex.withLock { executeSteps() }
+            } else {
+                executeSteps()
+            }
         } catch (error: CancellationException) {
             withContext(NonCancellable) {
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
@@ -504,5 +511,6 @@ class AutomationEngine(
 
     private companion object {
         const val StateMutexCount = 64
+        val CrossAppExecutionMutex = Mutex()
     }
 }
