@@ -12,6 +12,7 @@ class AutomationRuntime(
     private val geofenceRegistrar: AutomationGeofenceRegistrar,
     private val scheduleScheduler: AutomationScheduleScheduler,
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
+    private val executionRegistry: AutomationExecutionRegistry = AutomationExecutionRegistry(),
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
     private val restoreMutex = Mutex()
@@ -25,9 +26,17 @@ class AutomationRuntime(
     suspend fun upsertAndRestore(spec: AutomationSpec): AutomationSpec = withContext(Dispatchers.IO) {
         restoreMutex.withLock {
             val previous = spec.id.takeIf { it.isNotBlank() }?.let { repository.get(it) }
-            val saved = repository.upsert(spec)
-            restoreConfigurationOrRollback(saved, previous)
-            saved
+            if (previous == null) {
+                saveAndRestore(spec, previous)
+            } else {
+                executionRegistry.mutate(
+                    previous.id,
+                    AutomationRunStatus.Failed,
+                    "Automation changed while run was active"
+                ) {
+                    saveAndRestore(spec, previous)
+                }
+            }
         }
     }
 
@@ -35,24 +44,43 @@ class AutomationRuntime(
         restoreMutex.withLock {
             val previous = repository.get(id)
                 ?: throw IllegalArgumentException("Automation not found")
-            repository.setEnabled(id, enabled)
-            val saved = repository.get(id)
-                ?: throw IllegalStateException("Automation disappeared after update")
-            restoreConfigurationOrRollback(saved, previous)
-            saved
+            if (previous.enabled == enabled) return@withLock previous
+            executionRegistry.mutate(
+                id,
+                if (enabled) AutomationRunStatus.Failed else AutomationRunStatus.Skipped,
+                if (enabled) "Automation changed while run was active" else "Automation was disabled while run was active"
+            ) {
+                repository.setEnabled(id, enabled)
+                val saved = repository.get(id)
+                    ?: throw IllegalStateException("Automation disappeared after update")
+                restoreConfigurationOrRollback(saved, previous)
+                saved
+            }
         }
     }
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
         restoreMutex.withLock {
-            repository.activeRuns(id).forEach { run ->
-                runCatching { flowContinuationScheduler.cancel(run.id) }
+            executionRegistry.mutate(
+                id,
+                AutomationRunStatus.Failed,
+                "Automation was deleted while run was active"
+            ) {
+                repository.activeRuns(id).forEach { run ->
+                    runCatching { flowContinuationScheduler.cancel(run.id) }
+                }
+                repository.delete(id)
+                runCatching { geofenceRegistrar.remove(id) }
+                runCatching { scheduleScheduler.cancel(id) }
+                restoreTriggersLocked()
             }
-            repository.delete(id)
-            runCatching { geofenceRegistrar.remove(id) }
-            runCatching { scheduleScheduler.cancel(id) }
-            restoreTriggersLocked()
         }
+    }
+
+    private suspend fun saveAndRestore(spec: AutomationSpec, previous: AutomationSpec?): AutomationSpec {
+        val saved = repository.upsert(spec)
+        restoreConfigurationOrRollback(saved, previous)
+        return saved
     }
 
     private suspend fun restoreTriggersLocked() {

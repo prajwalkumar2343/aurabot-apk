@@ -5,6 +5,7 @@ import com.aura.app.automations.AndroidAutomationActionExecutor
 import com.aura.app.automations.AlarmAutomationFlowContinuationScheduler
 import com.aura.app.automations.AutomationDatabase
 import com.aura.app.automations.AutomationEngine
+import com.aura.app.automations.AutomationExecutionRegistry
 import com.aura.app.automations.AutomationRepository
 import com.aura.app.automations.AutomationRuntime
 import com.aura.app.automations.GeofenceAutomationRegistrar
@@ -32,18 +33,21 @@ class AppContainer(context: Context) {
     val geofenceAutomationRegistrar = GeofenceAutomationRegistrar(appContext)
     val scheduleAutomationScheduler = ScheduleAutomationScheduler(appContext)
     val automationFlowContinuationScheduler = AlarmAutomationFlowContinuationScheduler(appContext)
+    val automationExecutionRegistry = AutomationExecutionRegistry()
     val etaProvider = LocalDistanceEtaProvider()
     val automationEngine = AutomationEngine(
         repository = automationRepository,
         contextEnricher = DefaultAutomationContextEnricher(etaProvider),
         actionExecutor = AndroidAutomationActionExecutor(appContext),
-        flowContinuationScheduler = automationFlowContinuationScheduler
+        flowContinuationScheduler = automationFlowContinuationScheduler,
+        executionRegistry = automationExecutionRegistry
     )
     val automationRuntime = AutomationRuntime(
         repository = automationRepository,
         geofenceRegistrar = geofenceAutomationRegistrar,
         scheduleScheduler = scheduleAutomationScheduler,
-        flowContinuationScheduler = automationFlowContinuationScheduler
+        flowContinuationScheduler = automationFlowContinuationScheduler,
+        executionRegistry = automationExecutionRegistry
     )
     val llmSettingsStore = LlmSettingsStore(appContext)
     private val localAssistantStore = LocalAssistantStore(appContext)

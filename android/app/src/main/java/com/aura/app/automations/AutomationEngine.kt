@@ -14,6 +14,7 @@ class AutomationEngine(
     private val contextEnricher: AutomationContextEnricher = DefaultAutomationContextEnricher(),
     private val actionExecutor: AutomationActionExecutor,
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
+    private val executionRegistry: AutomationExecutionRegistry = AutomationExecutionRegistry(),
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
     private val stateMutexes = List(StateMutexCount) { Mutex() }
@@ -47,6 +48,7 @@ class AutomationEngine(
                 runId = runId
             )
         }
+        val executionGeneration = executionRegistry.generation(requestedRun.automationId)
         val expectedWaitingStepId = repository.stepRuns(runId)
             .lastOrNull { it.status == AutomationRunStatus.Waiting }
             ?.id
@@ -58,7 +60,8 @@ class AutomationEngine(
                 spec = preparation.spec,
                 event = preparation.event,
                 existingRunId = runId,
-                startStepIndex = preparation.startStepIndex
+                startStepIndex = preparation.startStepIndex,
+                executionGeneration = executionGeneration
             )
             is ResumePreparation.Rejected -> preparation.result
         }
@@ -161,14 +164,21 @@ class AutomationEngine(
     }
 
     private suspend fun runAutomation(spec: AutomationSpec, event: AutomationEvent): AutomationRunResult {
-        return runAutomation(spec, event, existingRunId = null, startStepIndex = 0)
+        return runAutomation(
+            spec,
+            event,
+            existingRunId = null,
+            startStepIndex = 0,
+            executionGeneration = executionRegistry.generation(spec.id)
+        )
     }
 
     private suspend fun runAutomation(
         spec: AutomationSpec,
         event: AutomationEvent,
         existingRunId: String?,
-        startStepIndex: Int
+        startStepIndex: Int,
+        executionGeneration: Long
     ): AutomationRunResult {
         if (!spec.enabled) {
             return result(
@@ -292,11 +302,22 @@ class AutomationEngine(
             AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
         }
         return try {
-            if (steps.drop(startStepIndex).any { it.action?.type in AutomationActionTypeSets.CrossApp }) {
-                CrossAppExecutionMutex.withLock { executeSteps() }
-            } else {
-                executeSteps()
+            executionRegistry.track(spec.id, run.id, executionGeneration) {
+                if (steps.drop(startStepIndex).any { it.action?.type in AutomationActionTypeSets.CrossApp }) {
+                    CrossAppExecutionMutex.withLock { executeSteps() }
+                } else {
+                    executeSteps()
+                }
             }
+        } catch (error: AutomationConfigurationChangedException) {
+            withContext(NonCancellable) {
+                try {
+                    terminalizeRun(run, error.terminalStatus, error.message ?: "Automation configuration changed")
+                } catch (cleanupError: Exception) {
+                    error.addSuppressed(cleanupError)
+                }
+            }
+            throw error
         } catch (error: CancellationException) {
             withContext(NonCancellable) {
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")

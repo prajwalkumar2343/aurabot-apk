@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -190,6 +191,133 @@ class AutomationRuntimeTest {
         assertFalse(disabled.enabled)
         assertEquals(AutomationRunStatus.Skipped, repository.getRun(run.id)?.status)
         assertEquals("Automation is disabled", repository.getRun(run.id)?.message)
+    }
+
+    @Test
+    fun disableCancelsAndTerminalizesActiveExecution() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val registry = AutomationExecutionRegistry()
+        val executor = CancellableRuntimeActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            executionRegistry = registry,
+            clock = { 1_000L }
+        )
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            executionRegistry = registry
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val execution = async { engine.runNow(saved.id) }
+        executor.started.await()
+
+        val disabled = runtime.setEnabledAndRestore(saved.id, enabled = false)
+        val failure = runCatching { execution.await() }.exceptionOrNull()
+        val run = repository.runs(saved.id).single()
+
+        assertFalse(disabled.enabled)
+        assertTrue(executor.cancelled.isCompleted)
+        assertTrue(failure is AutomationConfigurationChangedException)
+        assertEquals(AutomationRunStatus.Skipped, run.status)
+        assertEquals("Automation was disabled while run was active", run.message)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun unchangedEnableStateDoesNotCancelActiveExecution() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val registry = AutomationExecutionRegistry()
+        val executor = ReleasableRuntimeActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            executionRegistry = registry,
+            clock = { 1_000L }
+        )
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            executionRegistry = registry
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val execution = async { engine.runNow(saved.id) }
+        executor.started.await()
+
+        val unchanged = runtime.setEnabledAndRestore(saved.id, enabled = true)
+
+        assertTrue(unchanged.enabled)
+        assertFalse(executor.cancelled)
+        assertFalse(execution.isCompleted)
+        executor.release.complete(Unit)
+        assertEquals(AutomationRunStatus.Success, execution.await().status)
+    }
+
+    @Test
+    fun updateCancelsOldRevisionBeforeSavingReplacement() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val registry = AutomationExecutionRegistry()
+        val executor = CancellableRuntimeActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            executionRegistry = registry,
+            clock = { 1_000L }
+        )
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            executionRegistry = registry
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val execution = async { engine.runNow(saved.id) }
+        executor.started.await()
+
+        val updated = runtime.upsertAndRestore(saved.copy(name = "Updated schedule"))
+        val failure = runCatching { execution.await() }.exceptionOrNull()
+        val run = repository.runs(saved.id).single()
+
+        assertEquals("Updated schedule", updated.name)
+        assertTrue(executor.cancelled.isCompleted)
+        assertTrue(failure is AutomationConfigurationChangedException)
+        assertEquals(AutomationRunStatus.Failed, run.status)
+        assertEquals("Automation changed while run was active", run.message)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun deleteCancelsActiveExecutionBeforeRemovingHistory() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val registry = AutomationExecutionRegistry()
+        val executor = CancellableRuntimeActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            executionRegistry = registry,
+            clock = { 1_000L }
+        )
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            executionRegistry = registry
+        )
+        val saved = repository.upsert(scheduleSpec())
+        val execution = async { engine.runNow(saved.id) }
+        executor.started.await()
+
+        runtime.deleteAndRestore(saved.id)
+        val failure = runCatching { execution.await() }.exceptionOrNull()
+
+        assertTrue(executor.cancelled.isCompleted)
+        assertTrue(failure is AutomationConfigurationChangedException)
+        assertEquals(null, repository.get(saved.id))
+        assertTrue(repository.runs(saved.id).isEmpty())
+        assertTrue(repository.logs(saved.id).isEmpty())
     }
 
     @Test
@@ -759,6 +887,37 @@ private class RecordingRuntimeFlowContinuationScheduler : AutomationFlowContinua
     override fun cancel(runId: String) {
         cancelled += runId
         if (runId == failOnCancel) error("alarm service unavailable")
+    }
+}
+
+private class CancellableRuntimeActionExecutor : AutomationActionExecutor {
+    val started = CompletableDeferred<Unit>()
+    val cancelled = CompletableDeferred<Unit>()
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        started.complete(Unit)
+        try {
+            awaitCancellation()
+        } finally {
+            cancelled.complete(Unit)
+        }
+    }
+}
+
+private class ReleasableRuntimeActionExecutor : AutomationActionExecutor {
+    val started = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
+    var cancelled = false
+
+    override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult {
+        started.complete(Unit)
+        try {
+            release.await()
+        } catch (error: CancellationException) {
+            cancelled = true
+            throw error
+        }
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "ok")
     }
 }
 
