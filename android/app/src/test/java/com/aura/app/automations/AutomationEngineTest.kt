@@ -1550,6 +1550,38 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun runLogFailureDoesNotRewriteSuccessfulExecution() = runTest {
+        val dao = FakeAutomationDao()
+        val maintenanceFailures = mutableListOf<Pair<String, Exception>>()
+        val repository = AutomationRepository(
+            dao = dao,
+            clock = { 1_000L },
+            maintenanceFailureReporter = { message, error -> maintenanceFailures += message to error }
+        )
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.logFailure = IllegalStateException("run log storage unavailable")
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(1, executor.events.size)
+        assertEquals(emptyList<AutomationRunLog>(), repository.logs(saved.id))
+        assertEquals(
+            listOf("Failed to persist run log for automation '${saved.id}'"),
+            maintenanceFailures.map { it.first }
+        )
+        assertTrue(maintenanceFailures.single().second === dao.logFailure)
+    }
+
+    @Test
     fun resumedFlowTerminalizesClaimedRunWhenStepPersistenceFails() = runTest {
         val dao = FakeAutomationDao()
         val repository = AutomationRepository(dao, clock = { 1_000L })
@@ -1922,6 +1954,7 @@ private class FakeAutomationDao : AutomationDao {
     private val logs = mutableListOf<AutomationRunLogEntity>()
     var failNextStepInsert = false
     var failTerminalizationAfterStepInsertFailure = false
+    var logFailure: Exception? = null
     var pruneFailure: Exception? = null
     private var failNextRunUpsert = false
 
@@ -1962,6 +1995,7 @@ private class FakeAutomationDao : AutomationDao {
     }
 
     override suspend fun insertRunLog(entity: AutomationRunLogEntity) {
+        logFailure?.let { throw it }
         logs += entity
     }
 

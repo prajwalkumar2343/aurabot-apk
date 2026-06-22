@@ -63,16 +63,23 @@ class AutomationRepository(
         status: String,
         message: String
     ) {
-        dao.insertRunLog(
-            AutomationRunLogEntity(
-                id = UUID.randomUUID().toString(),
-                automationId = automationId,
-                eventType = eventType,
-                status = status,
-                message = message,
-                createdAt = clock()
+        try {
+            dao.insertRunLog(
+                AutomationRunLogEntity(
+                    id = UUID.randomUUID().toString(),
+                    automationId = automationId,
+                    eventType = eventType,
+                    status = status,
+                    message = message,
+                    createdAt = clock()
+                )
             )
-        )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            reportMaintenanceFailure("Failed to persist run log for automation '$automationId'", error)
+            return
+        }
         pruneHistoryBestEffort(automationId)
     }
 
@@ -197,11 +204,15 @@ class AutomationRepository(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            try {
-                maintenanceFailureReporter("Failed to prune history for automation '$automationId'", error)
-            } catch (_: Exception) {
-                // Retention diagnostics must not change an already-persisted run outcome.
-            }
+            reportMaintenanceFailure("Failed to prune history for automation '$automationId'", error)
+        }
+    }
+
+    private fun reportMaintenanceFailure(message: String, error: Exception) {
+        try {
+            maintenanceFailureReporter(message, error)
+        } catch (_: Exception) {
+            // Diagnostics must not change an already-persisted run outcome.
         }
     }
 
