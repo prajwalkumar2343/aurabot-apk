@@ -166,7 +166,8 @@ class AutomationRepository(
         stepIndex: Int,
         status: String,
         attempt: Int,
-        message: String
+        message: String,
+        bestEffort: Boolean = false
     ): AutomationStepRunRecord {
         val now = clock()
         val entity = AutomationStepRunEntity(
@@ -183,7 +184,17 @@ class AutomationRepository(
             startedAt = now,
             completedAt = now
         )
-        dao.insertStepRun(entity)
+        try {
+            dao.insertStepRun(entity)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!bestEffort) throw error
+            reportMaintenanceFailure(
+                "Failed to persist at-most-once step '${step.id}' for automation '$automationId'",
+                error
+            )
+        }
         return entity.record()
     }
 

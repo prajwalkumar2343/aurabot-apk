@@ -445,7 +445,10 @@ class AutomationEngine(
                 stepIndex = stepIndex,
                 status = lastStatus,
                 attempt = attempt,
-                message = lastMessage
+                message = lastMessage,
+                bestEffort =
+                    lastStatus == AutomationRunStatus.Success &&
+                    step.action?.hasAtMostOnceSideEffect() == true
             )
             if (lastStatus != AutomationRunStatus.Failed || attempt == maxAttempts) break
             val backoffMillis = step.retryPolicy.backoffMillis.coerceAtLeast(0L)

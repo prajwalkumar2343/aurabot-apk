@@ -1520,6 +1520,49 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun successfulAtMostOnceActionSurvivesStepPersistenceFailure() = runTest {
+        val dao = FakeAutomationDao()
+        val maintenanceFailures = mutableListOf<Pair<String, Exception>>()
+        val repository = AutomationRepository(
+            dao = dao,
+            clock = { 1_000L },
+            maintenanceFailureReporter = { message, error -> maintenanceFailures += message to error }
+        )
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            manualSpec().copy(
+                actions = listOf(
+                    AutomationAction(
+                        type = AutomationActionTypes.DirectSms,
+                        messageTemplate = "On my way",
+                        recipientAddress = "+15555550123",
+                        requireConfirmation = false
+                    )
+                )
+            )
+        )
+        dao.failNextStepInsert = true
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(1, executor.events.size)
+        assertEquals(emptyList<AutomationStepRunRecord>(), repository.stepRuns(runId))
+        assertEquals(
+            listOf("Failed to persist at-most-once step 'action-1' for automation '${saved.id}'"),
+            maintenanceFailures.map { it.first }
+        )
+        assertEquals("step storage unavailable", maintenanceFailures.single().second.message)
+    }
+
+    @Test
     fun historyPruningFailureDoesNotRewriteSuccessfulExecution() = runTest {
         val dao = FakeAutomationDao()
         val maintenanceFailures = mutableListOf<Pair<String, Exception>>()

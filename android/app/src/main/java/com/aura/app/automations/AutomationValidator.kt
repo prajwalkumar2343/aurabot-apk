@@ -412,48 +412,6 @@ object AutomationValidator {
         return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
     }
 
-    private fun AutomationAction.isHighImpactCrossAppAction(): Boolean {
-        if (type !in highImpactGestureActionTypes) return false
-        if (metadata[AutomationActionMetadata.RiskLevel]?.equals("high", ignoreCase = true) == true) {
-            return true
-        }
-        val targetText = listOf(
-            metadata[AutomationActionMetadata.Text],
-            metadata[AutomationActionMetadata.TargetText],
-            metadata[AutomationActionMetadata.ContentDescription]
-        ).joinToString(" ").lowercase()
-        return highImpactTerms.any { term -> Regex("\\b${Regex.escape(term)}\\b").containsMatchIn(targetText) }
-    }
-
-    private fun AutomationAction.hasAtMostOnceSideEffect(): Boolean =
-        sendsDirectSms() || isHighImpactCrossAppAction()
-
-    private val highImpactGestureActionTypes = setOf(
-        AutomationActionTypes.TapText,
-        AutomationActionTypes.TapTarget,
-        AutomationActionTypes.TapBounds,
-        AutomationActionTypes.LongPressTarget
-    )
-
-    private val highImpactTerms = setOf(
-        "buy",
-        "cancel",
-        "confirm",
-        "delete",
-        "order",
-        "pay",
-        "post",
-        "publish",
-        "purchase",
-        "remove",
-        "send",
-        "share",
-        "submit",
-        "transfer",
-        "unsubscribe",
-        "withdraw"
-    )
-
     private const val MAX_RETRY_ATTEMPTS = 5
     private const val MAX_RETRY_BACKOFF_MILLIS = 30_000L
     private const val MAX_FLOW_WAIT_MILLIS = 604_800_000L
