@@ -502,8 +502,10 @@ class AutomationRuntimeTest {
         repository.log(saved.id, AutomationEvents.Manual, AutomationRunStatus.Waiting, "waiting")
         continuations.failOnCancel = runs.first().id
 
-        runtime.deleteAndRestore(saved.id)
+        val failure = runCatching { runtime.deleteAndRestore(saved.id) }.exceptionOrNull()
 
+        assertTrue(failure is AutomationDeletionException)
+        assertTrue(failure?.message.orEmpty().contains("alarm service unavailable"))
         assertEquals(runs.map { it.id }.toSet(), continuations.cancelled)
         assertEquals(null, repository.get(saved.id))
         assertTrue(repository.runs(saved.id).isEmpty())
@@ -512,6 +514,79 @@ class AutomationRuntimeTest {
             assertEquals(null, repository.getRun(run.id))
             assertTrue(repository.stepRuns(run.id).isEmpty())
         }
+    }
+
+    @Test
+    fun deleteAttemptsEveryCleanupAndAggregatesFailures() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            removeFailure = IllegalStateException("geofence cleanup unavailable")
+        }
+        val schedules = RecordingScheduleScheduler().apply {
+            cancelFailure = IllegalArgumentException("alarm cleanup unavailable")
+        }
+        val runtime = AutomationRuntime(repository, geofences, schedules)
+        val saved = repository.upsert(scheduleSpec())
+
+        val failure = runCatching { runtime.deleteAndRestore(saved.id) }.exceptionOrNull()
+
+        assertTrue(failure is AutomationDeletionException)
+        assertTrue(failure?.message.orEmpty().contains("geofence cleanup unavailable"))
+        assertTrue(failure?.message.orEmpty().contains("alarm cleanup unavailable"))
+        assertTrue(saved.id in geofences.removedExplicitly)
+        assertTrue(saved.id in schedules.cancelledExplicitly)
+        assertEquals(null, repository.get(saved.id))
+    }
+
+    @Test
+    fun deletePreservesCleanupCancellationAndStillReconcilesTriggers() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val geofences = RecordingGeofenceRegistrar().apply {
+            removeFailure = CancellationException("cancelled during geofence cleanup")
+        }
+        val schedules = RecordingScheduleScheduler()
+        val runtime = AutomationRuntime(repository, geofences, schedules)
+        val saved = repository.upsert(scheduleSpec())
+
+        val failure = runCatching { runtime.deleteAndRestore(saved.id) }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+        assertEquals("cancelled during geofence cleanup", failure?.message)
+        assertTrue(saved.id in schedules.cancelledExplicitly)
+        assertEquals(1, schedules.restoreCalls)
+        assertEquals(null, repository.get(saved.id))
+    }
+
+    @Test
+    fun deletePreservesStorageFailureAndSuppressesCleanupFailures() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val repository = AutomationRepository(dao, clock = { 1_000L })
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val geofences = RecordingGeofenceRegistrar().apply {
+            restoreFailure = IllegalArgumentException("trigger reconciliation unavailable")
+        }
+        val runtime = AutomationRuntime(
+            repository,
+            geofences,
+            RecordingScheduleScheduler(),
+            continuations
+        )
+        val saved = repository.upsert(waitFlowSpec())
+        val waitStep = saved.flow?.steps?.first() ?: error("wait step missing")
+        val run = waitingRun(repository, saved, waitStep)
+        continuations.failOnCancel = run.id
+        dao.deleteAutomationFailure = IllegalStateException("automation storage unavailable")
+        assertEquals(run.id, repository.activeRun(saved.id)?.id)
+
+        val failure = runCatching { runtime.deleteAndRestore(saved.id) }.exceptionOrNull()
+        val failureMessages = failure?.causalMessages().orEmpty()
+
+        assertTrue(failure is AutomationDeletionException)
+        assertEquals("Automation deletion failed: automation storage unavailable", failure?.message)
+        assertEquals("automation storage unavailable", failure?.cause?.message)
+        assertTrue(run.id in continuations.cancelled)
+        assertTrue(failureMessages.toString(), "alarm service unavailable" in failureMessages)
+        assertTrue(failureMessages.any { it.contains("trigger reconciliation unavailable") })
     }
 
     @Test
@@ -887,6 +962,17 @@ class AutomationRuntimeTest {
         )
     )
 
+    private fun Throwable.causalMessages(): Set<String> {
+        val visited = mutableSetOf<Throwable>()
+        fun collect(error: Throwable): List<String> {
+            if (!visited.add(error)) return emptyList()
+            return listOfNotNull(error.message) +
+                error.suppressed.flatMap(::collect) +
+                listOfNotNull(error.cause).flatMap(::collect)
+        }
+        return collect(this).toSet()
+    }
+
     private suspend fun waitingRun(
         repository: AutomationRepository,
         spec: AutomationSpec,
@@ -918,6 +1004,7 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
     val removedExplicitly = mutableListOf<String>()
     var restoreFailure: Exception? = null
     var restoreFailuresRemaining: Int = Int.MAX_VALUE
+    var removeFailure: Exception? = null
 
     override suspend fun restore(automations: List<AutomationSpec>) {
         automations.map { it.id }.forEach { id ->
@@ -936,6 +1023,7 @@ private class RecordingGeofenceRegistrar : AutomationGeofenceRegistrar {
     override suspend fun remove(automationId: String) {
         removedExplicitly += automationId
         activeIds.remove(automationId)
+        removeFailure?.let { throw it }
     }
 }
 
@@ -945,8 +1033,11 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
     val cancelledExplicitly = mutableListOf<String>()
     var restoreFailure: Exception? = null
     var restoreFailuresRemaining: Int = Int.MAX_VALUE
+    var cancelFailure: Exception? = null
+    var restoreCalls = 0
 
     override fun restore(automations: List<AutomationSpec>) {
+        restoreCalls += 1
         automations.map { it.id }.forEach { id ->
             cancelledByRestore += id
             activeIds.remove(id)
@@ -963,6 +1054,7 @@ private class RecordingScheduleScheduler : AutomationScheduleScheduler {
     override fun cancel(automationId: String) {
         cancelledExplicitly += automationId
         activeIds.remove(automationId)
+        cancelFailure?.let { throw it }
     }
 }
 
@@ -1026,6 +1118,7 @@ private class RuntimeFakeAutomationDao : AutomationDao {
     var totalListCalls = 0
         private set
     private var concurrentListCalls = 0
+    var deleteAutomationFailure: Exception? = null
 
     override suspend fun listAutomations(): List<AutomationEntity> {
         totalListCalls += 1
@@ -1058,6 +1151,7 @@ private class RuntimeFakeAutomationDao : AutomationDao {
     }
 
     override suspend fun deleteAutomation(id: String) {
+        deleteAutomationFailure?.let { throw it }
         automations.remove(id)
     }
 
