@@ -1520,6 +1520,36 @@ class AutomationEngineTest {
     }
 
     @Test
+    fun historyPruningFailureDoesNotRewriteSuccessfulExecution() = runTest {
+        val dao = FakeAutomationDao()
+        val maintenanceFailures = mutableListOf<Pair<String, Exception>>()
+        val repository = AutomationRepository(
+            dao = dao,
+            clock = { 1_000L },
+            maintenanceFailureReporter = { message, error -> maintenanceFailures += message to error }
+        )
+        val executor = RecordingActionExecutor()
+        val engine = AutomationEngine(
+            repository = repository,
+            actionExecutor = executor,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(manualSpec())
+        dao.pruneFailure = IllegalStateException("history storage unavailable")
+
+        val result = engine.runNow(saved.id)
+        val runId = result.runId ?: error("runId missing")
+
+        assertEquals(AutomationRunStatus.Success, result.status)
+        assertEquals(AutomationRunStatus.Success, repository.getRun(runId)?.status)
+        assertEquals(1, executor.events.size)
+        assertEquals(listOf(AutomationRunStatus.Success), repository.logs(saved.id).map { it.status })
+        assertEquals(2, maintenanceFailures.size)
+        assertTrue(maintenanceFailures.all { it.first == "Failed to prune history for automation '${saved.id}'" })
+        assertTrue(maintenanceFailures.all { it.second === dao.pruneFailure })
+    }
+
+    @Test
     fun resumedFlowTerminalizesClaimedRunWhenStepPersistenceFails() = runTest {
         val dao = FakeAutomationDao()
         val repository = AutomationRepository(dao, clock = { 1_000L })
@@ -1892,6 +1922,7 @@ private class FakeAutomationDao : AutomationDao {
     private val logs = mutableListOf<AutomationRunLogEntity>()
     var failNextStepInsert = false
     var failTerminalizationAfterStepInsertFailure = false
+    var pruneFailure: Exception? = null
     private var failNextRunUpsert = false
 
     override suspend fun listAutomations(): List<AutomationEntity> =
@@ -1992,6 +2023,7 @@ private class FakeAutomationDao : AutomationDao {
         stepRuns.filter { it.runId == runId }.sortedWith(compareBy<AutomationStepRunEntity> { it.stepIndex }.thenBy { it.attempt })
 
     override suspend fun pruneStepRuns(automationId: String, retainCount: Int) {
+        pruneFailure?.let { throw it }
         val prunedRunIds = terminalRunsToPrune(automationId, retainCount).mapTo(mutableSetOf()) { it.id }
         stepRuns.removeAll { it.runId in prunedRunIds }
     }
