@@ -31,6 +31,7 @@ import com.aura.app.miniapps.MiniAppRevisionPreview
 import com.aura.app.miniapps.MiniAppVersion
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -483,7 +484,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                         replies += "I need a complete automation plan to save that."
                     } else {
                         val saved = container.automationRuntime.upsertAndRestore(spec)
-                        refreshAutomations()
+                        refreshAutomationState()
                         replies += "Created automation: ${saved.name}."
                     }
                 }
@@ -495,28 +496,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshAutomations() {
         viewModelScope.launch {
             try {
-                val automations = container.automationRepository.list()
-                val logs = automations.associate { automation ->
-                    automation.id to container.automationRepository.logs(automation.id, limit = 5)
-                }
-                val permissionLabels = automations.associate { automation ->
-                    automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
-                        if (permission == AutomationPermissionPlanner.AccessibilityService) {
-                            "Accessibility service"
-                        } else {
-                            permission.substringAfterLast('.').replace('_', ' ').lowercase()
-                                .replaceFirstChar { it.uppercase() }
-                        }
-                    }
-                }
-                localState.update {
-                    it.copy(
-                        automations = automations,
-                        automationRunLogs = logs,
-                        automationPermissionLabels = permissionLabels,
-                        error = null
-                    )
-                }
+                refreshAutomationState()
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not load automations") }
             }
@@ -525,10 +507,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutomationEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
-            try {
-                container.automationRuntime.setEnabledAndRestore(id, enabled)
-                refreshAutomations()
-            } catch (error: Exception) {
+            val failure = AutomationUiMutationCoordinator.run(
+                operation = { container.automationRuntime.setEnabledAndRestore(id, enabled) },
+                refresh = ::refreshAutomationState
+            )
+            failure?.let { error ->
                 localState.update { it.copy(error = error.message ?: "Could not update automation") }
             }
         }
@@ -536,10 +519,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun deleteAutomation(id: String) {
         viewModelScope.launch {
-            try {
-                container.automationRuntime.deleteAndRestore(id)
-                refreshAutomations()
-            } catch (error: Exception) {
+            val failure = AutomationUiMutationCoordinator.run(
+                operation = { container.automationRuntime.deleteAndRestore(id) },
+                refresh = ::refreshAutomationState
+            )
+            failure?.let { error ->
                 localState.update { it.copy(error = error.message ?: "Could not delete automation") }
             }
         }
@@ -549,11 +533,38 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 val result = container.automationEngine.runNow(id)
-                refreshAutomations()
+                refreshAutomationState()
                 localState.update { it.copy(error = "Automation ${result.status}: ${result.message}") }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not run automation") }
             }
+        }
+    }
+
+    private suspend fun refreshAutomationState() {
+        val automations = container.automationRepository.list()
+        val logs = automations.associate { automation ->
+            automation.id to container.automationRepository.logs(automation.id, limit = 5)
+        }
+        val permissionLabels = automations.associate { automation ->
+            automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
+                if (permission == AutomationPermissionPlanner.AccessibilityService) {
+                    "Accessibility service"
+                } else {
+                    permission.substringAfterLast('.').replace('_', ' ').lowercase()
+                        .replaceFirstChar { it.uppercase() }
+                }
+            }
+        }
+        localState.update {
+            it.copy(
+                automations = automations,
+                automationRunLogs = logs,
+                automationPermissionLabels = permissionLabels,
+                error = null
+            )
         }
     }
 
@@ -1075,5 +1086,29 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return LauncherViewModel(container) as T
         }
+    }
+}
+
+internal object AutomationUiMutationCoordinator {
+    suspend fun run(
+        operation: suspend () -> Unit,
+        refresh: suspend () -> Unit
+    ): Exception? {
+        var failure: Exception? = try {
+            operation()
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error
+        }
+        try {
+            refresh()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (failure == null) failure = error else failure.addSuppressed(error)
+        }
+        return failure
     }
 }
