@@ -3,6 +3,7 @@ package com.aura.app.automations
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.aura.app.AuraApplication
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -20,31 +21,42 @@ class AutomationFlowContinuationReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val container = (context.applicationContext as AuraApplication).container
-                AutomationFlowContinuationCoordinator.handle(
-                    retryAttempt = retryAttempt,
-                    resume = { container.automationEngine.resumeRun(runId) },
-                    scheduleRetry = { nextAttempt ->
-                        container.automationFlowContinuationScheduler.scheduleRetry(
-                            runId = runId,
-                            delayMillis = AutomationFlowContinuationCoordinator.RetryDelayMillis,
-                            retryAttempt = nextAttempt
+                AutomationBroadcastWork.run(
+                    operation = {
+                        val container = (context.applicationContext as AuraApplication).container
+                        AutomationFlowContinuationCoordinator.handle(
+                            retryAttempt = retryAttempt,
+                            resume = { container.automationEngine.resumeRun(runId) },
+                            scheduleRetry = { nextAttempt ->
+                                container.automationFlowContinuationScheduler.scheduleRetry(
+                                    runId = runId,
+                                    delayMillis = AutomationFlowContinuationCoordinator.RetryDelayMillis,
+                                    retryAttempt = nextAttempt
+                                )
+                            },
+                            abandon = { failure ->
+                                withContext(NonCancellable) {
+                                    container.automationEngine.failWaitingRun(
+                                        runId,
+                                        "Flow continuation delivery failed: " +
+                                            (failure.message ?: failure::class.simpleName ?: "Unknown error")
+                                    )
+                                }
+                            }
                         )
                     },
-                    abandon = { failure ->
-                        withContext(NonCancellable) {
-                            container.automationEngine.failWaitingRun(
-                                runId,
-                                "Flow continuation delivery failed: " +
-                                    (failure.message ?: failure::class.simpleName ?: "Unknown error")
-                            )
-                        }
+                    reportFailure = { error ->
+                        Log.e(TAG, "Automation flow continuation failed for $runId", error)
                     }
                 )
             } finally {
                 pending.finish()
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "AutomationFlow"
     }
 }
 
