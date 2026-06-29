@@ -61,19 +61,49 @@ class AutomationRuntime(
 
     suspend fun deleteAndRestore(id: String) = withContext(Dispatchers.IO) {
         restoreMutex.withLock {
-            executionRegistry.mutate(
-                id,
-                AutomationRunStatus.Failed,
-                "Automation was deleted while run was active"
-            ) {
-                repository.activeRuns(id).forEach { run ->
-                    runCatching { flowContinuationScheduler.cancel(run.id) }
+            val cleanupFailures = mutableListOf<Exception>()
+            var reconciliationRequired = false
+            var primaryFailure: Throwable? = null
+            try {
+                executionRegistry.mutate(
+                    id,
+                    AutomationRunStatus.Failed,
+                    "Automation was deleted while run was active"
+                ) {
+                    val activeRuns = repository.activeRuns(id)
+                    reconciliationRequired = true
+                    withContext(NonCancellable) {
+                        activeRuns.forEach { run ->
+                            captureCleanupFailure { flowContinuationScheduler.cancel(run.id) }
+                                ?.let(cleanupFailures::add)
+                        }
+                        repository.delete(id)
+                        captureCleanupFailure { geofenceRegistrar.remove(id) }?.let(cleanupFailures::add)
+                        captureCleanupFailure { scheduleScheduler.cancel(id) }?.let(cleanupFailures::add)
+                    }
                 }
-                repository.delete(id)
-                runCatching { geofenceRegistrar.remove(id) }
-                runCatching { scheduleScheduler.cancel(id) }
+            } catch (error: Throwable) {
+                primaryFailure = error
             }
-            restoreTriggersLocked()
+            if (reconciliationRequired) {
+                withContext(NonCancellable) {
+                    captureCleanupFailure { restoreTriggersLocked() }?.let(cleanupFailures::add)
+                }
+            }
+            primaryFailure?.let { error ->
+                when (error) {
+                    is CancellationException -> {
+                        cleanupFailures.forEach(error::addSuppressed)
+                        throw error
+                    }
+                    is Exception -> throw AutomationDeletionException(error, cleanupFailures)
+                    else -> {
+                        cleanupFailures.forEach(error::addSuppressed)
+                        throw error
+                    }
+                }
+            }
+            cleanupFailures.throwDeletionFailures()
         }
     }
 
@@ -279,6 +309,16 @@ class AutomationRuntime(
         } catch (error: Exception) {
             error
         }
+
+    private fun List<Exception>.throwDeletionFailures() {
+        if (isEmpty()) return
+        val cancellation = filterIsInstance<CancellationException>().firstOrNull()
+        if (cancellation != null) {
+            filter { it !== cancellation }.forEach(cancellation::addSuppressed)
+            throw cancellation
+        }
+        throw AutomationDeletionException(this)
+    }
 }
 
 internal class AutomationRestoreException(failures: List<Exception>) : Exception(
@@ -312,6 +352,27 @@ internal class AutomationConfigurationException(
     init {
         (registrationFailures.drop(1) + rollbackFailures).forEach(::addSuppressed)
     }
+}
+
+internal class AutomationDeletionException(
+    primaryFailure: Exception?,
+    failures: List<Exception>
+) : Exception(
+    if (primaryFailure == null) {
+        failures.joinToString(
+            prefix = "Automation was deleted, but cleanup failed: ",
+            separator = "; "
+        ) { it.message ?: it::class.simpleName ?: "Unknown error" }
+    } else {
+        "Automation deletion failed: ${primaryFailure.message ?: primaryFailure::class.simpleName ?: "Unknown error"}"
+    },
+    primaryFailure ?: failures.firstOrNull()
+) {
+    init {
+        if (primaryFailure == null) failures.drop(1).forEach(::addSuppressed) else failures.forEach(::addSuppressed)
+    }
+
+    constructor(failures: List<Exception>) : this(null, failures)
 }
 
 private fun List<Exception>.failureMessages(): String =

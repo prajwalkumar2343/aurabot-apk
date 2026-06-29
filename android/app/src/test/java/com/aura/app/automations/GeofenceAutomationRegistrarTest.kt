@@ -32,7 +32,7 @@ class GeofenceAutomationRegistrarTest {
 
         GeofenceRegistrationCoordinator.restore(
             automationIds = listOf("old-geofence"),
-            hasEnabledGeofences = false,
+            enabledGeofenceCount = 0,
             hasPermissions = false,
             removeGeofences = { events += "remove:${it.joinToString()}" },
             addGeofences = { events += "add" }
@@ -42,13 +42,13 @@ class GeofenceAutomationRegistrarTest {
     }
 
     @Test
-    fun restoreReportsMissingPermissionsWithoutAttemptingAdd() = runTest {
+    fun restoreReportsMissingPermissionsBeforeChangingRegistrations() = runTest {
         val events = mutableListOf<String>()
 
         val failure = runCatching {
             GeofenceRegistrationCoordinator.restore(
                 automationIds = listOf("home"),
-                hasEnabledGeofences = true,
+                enabledGeofenceCount = 1,
                 hasPermissions = false,
                 removeGeofences = { events += "remove" },
                 addGeofences = { events += "add" }
@@ -59,7 +59,44 @@ class GeofenceAutomationRegistrarTest {
             "Geofence registration failed: Fine and background location permissions are required to arm geofence automations",
             failure?.message
         )
-        assertEquals(listOf("remove"), events)
+        assertEquals(emptyList<String>(), events)
+    }
+
+    @Test
+    fun restoreRejectsPlatformCapacityOverflowBeforeChangingRegistrations() = runTest {
+        val events = mutableListOf<String>()
+
+        val failure = runCatching {
+            GeofenceRegistrationCoordinator.restore(
+                automationIds = List(101) { "geofence-$it" },
+                enabledGeofenceCount = 101,
+                hasPermissions = true,
+                removeGeofences = { events += "remove" },
+                addGeofences = { events += "add" }
+            )
+        }.exceptionOrNull()
+
+        assertEquals(
+            "Geofence registration failed: At most 100 geofence automations can be enabled; " +
+                "101 are currently enabled",
+            failure?.message
+        )
+        assertEquals(emptyList<String>(), events)
+    }
+
+    @Test
+    fun restoreAllowsThePlatformCapacityBoundary() = runTest {
+        val events = mutableListOf<String>()
+
+        GeofenceRegistrationCoordinator.restore(
+            automationIds = List(100) { "geofence-$it" },
+            enabledGeofenceCount = GeofenceRegistrationCoordinator.MaxActiveGeofences,
+            hasPermissions = true,
+            removeGeofences = { events += "remove:${it.size}" },
+            addGeofences = { events += "add" }
+        )
+
+        assertEquals(listOf("remove:100", "add"), events)
     }
 
     @Test
@@ -69,7 +106,7 @@ class GeofenceAutomationRegistrarTest {
         val failure = runCatching {
             GeofenceRegistrationCoordinator.restore(
                 automationIds = listOf("work"),
-                hasEnabledGeofences = true,
+                enabledGeofenceCount = 1,
                 hasPermissions = true,
                 removeGeofences = {
                     events += "remove"
@@ -96,7 +133,7 @@ class GeofenceAutomationRegistrarTest {
         val failure = runCatching {
             GeofenceRegistrationCoordinator.restore(
                 automationIds = listOf("work"),
-                hasEnabledGeofences = true,
+                enabledGeofenceCount = 1,
                 hasPermissions = true,
                 removeGeofences = {
                     events += "remove"

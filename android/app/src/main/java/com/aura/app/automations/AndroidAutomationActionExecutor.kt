@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.telephony.SmsManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -23,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class AndroidAutomationActionExecutor(
     private val context: Context,
     private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer(),
-    private val crossAppController: CrossAppAutomationController = CrossAppAutomationController(context)
+    private val crossAppController: CrossAppAutomationController = CrossAppAutomationController(context),
+    private val smsDispatcher: AutomationSmsDispatcher = AndroidAutomationSmsDispatcher(context)
 ) : AutomationActionExecutor {
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
         withContext(Dispatchers.IO) {
@@ -116,14 +116,11 @@ class AndroidAutomationActionExecutor(
             return AutomationActionResult(action.type, AutomationRunStatus.Failed, "SMS permission is missing")
         }
         val body = renderer.render(action.messageTemplate ?: defaultEtaTemplate(), event.values)
-        val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            context.getSystemService(SmsManager::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            SmsManager.getDefault()
+        if (body.isBlank()) {
+            return AutomationActionResult(action.type, AutomationRunStatus.Failed, "Direct SMS body is empty")
         }
-        smsManager.sendTextMessage(recipient, null, body, null, null)
-        return AutomationActionResult(action.type, AutomationRunStatus.Success, "SMS sent")
+        smsDispatcher.send(recipient, body)
+        return AutomationActionResult(action.type, AutomationRunStatus.Success, "SMS queued for delivery")
     }
 
     private fun defaultEtaTemplate(): String =

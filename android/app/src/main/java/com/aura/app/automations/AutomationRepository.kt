@@ -1,7 +1,9 @@
 package com.aura.app.automations
 
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CancellationException
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -10,7 +12,10 @@ class AutomationRepository(
     private val gson: Gson = Gson(),
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val runHistoryLimit: Int = DefaultRunHistoryLimit,
-    private val logHistoryLimit: Int = DefaultLogHistoryLimit
+    private val logHistoryLimit: Int = DefaultLogHistoryLimit,
+    private val maintenanceFailureReporter: (String, Exception) -> Unit = { message, error ->
+        Log.e(TAG, message, error)
+    }
 ) {
     private val stringMapType = object : TypeToken<Map<String, String>>() {}.type
 
@@ -58,17 +63,24 @@ class AutomationRepository(
         status: String,
         message: String
     ) {
-        dao.insertRunLog(
-            AutomationRunLogEntity(
-                id = UUID.randomUUID().toString(),
-                automationId = automationId,
-                eventType = eventType,
-                status = status,
-                message = message,
-                createdAt = clock()
+        try {
+            dao.insertRunLog(
+                AutomationRunLogEntity(
+                    id = UUID.randomUUID().toString(),
+                    automationId = automationId,
+                    eventType = eventType,
+                    status = status,
+                    message = message,
+                    createdAt = clock()
+                )
             )
-        )
-        pruneHistory(automationId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            reportMaintenanceFailure("Failed to persist run log for automation '$automationId'", error)
+            return
+        }
+        pruneHistoryBestEffort(automationId)
     }
 
     suspend fun logs(automationId: String, limit: Int = 50): List<AutomationRunLog> =
@@ -129,7 +141,7 @@ class AutomationRepository(
                 completedAt = if (completed) now else existing.completedAt
             )
         )
-        if (completed) pruneHistory(existing.automationId)
+        if (completed) pruneHistoryBestEffort(existing.automationId)
     }
 
     suspend fun getRun(id: String): AutomationRunRecord? =
@@ -154,7 +166,8 @@ class AutomationRepository(
         stepIndex: Int,
         status: String,
         attempt: Int,
-        message: String
+        message: String,
+        bestEffort: Boolean = false
     ): AutomationStepRunRecord {
         val now = clock()
         val entity = AutomationStepRunEntity(
@@ -171,7 +184,17 @@ class AutomationRepository(
             startedAt = now,
             completedAt = now
         )
-        dao.insertStepRun(entity)
+        try {
+            dao.insertStepRun(entity)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!bestEffort) throw error
+            reportMaintenanceFailure(
+                "Failed to persist at-most-once step '${step.id}' for automation '$automationId'",
+                error
+            )
+        }
         return entity.record()
     }
 
@@ -184,6 +207,24 @@ class AutomationRepository(
             runRetainCount = runHistoryLimit.coerceAtLeast(0),
             logRetainCount = logHistoryLimit.coerceAtLeast(0)
         )
+    }
+
+    private suspend fun pruneHistoryBestEffort(automationId: String) {
+        try {
+            pruneHistory(automationId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            reportMaintenanceFailure("Failed to prune history for automation '$automationId'", error)
+        }
+    }
+
+    private fun reportMaintenanceFailure(message: String, error: Exception) {
+        try {
+            maintenanceFailureReporter(message, error)
+        } catch (_: Exception) {
+            // Diagnostics must not change an already-persisted run outcome.
+        }
     }
 
     internal fun revision(spec: AutomationSpec): String {
@@ -247,6 +288,7 @@ class AutomationRepository(
     )
 
     private companion object {
+        const val TAG = "AutomationRepository"
         const val DefaultRunHistoryLimit = 100
         const val DefaultLogHistoryLimit = 200
 

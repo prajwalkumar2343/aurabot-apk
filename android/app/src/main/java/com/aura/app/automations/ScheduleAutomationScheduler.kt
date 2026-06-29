@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CancellationException
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -17,13 +18,11 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
     override fun restore(automations: List<AutomationSpec>) {
-        automations
-            .map { it.id }
-            .filter { it.isNotBlank() }
-            .forEach { cancel(it) }
-        automations
-            .filter { it.enabled && it.trigger.type == AutomationTriggerTypes.Schedule }
-            .forEach { schedule(it) }
+        ScheduleRegistrationCoordinator.restore(
+            automations = automations,
+            cancel = ::cancel,
+            schedule = ::schedule
+        )
     }
 
     fun schedule(spec: AutomationSpec) {
@@ -113,5 +112,55 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
             }
             return next.toInstant().toEpochMilli()
         }
+    }
+}
+
+internal object ScheduleRegistrationCoordinator {
+    fun restore(
+        automations: List<AutomationSpec>,
+        cancel: (String) -> Unit,
+        schedule: (AutomationSpec) -> Unit
+    ) {
+        val failures = mutableListOf<Exception>()
+        automations
+            .map { it.id }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { automationId ->
+                captureFailure("cancel", automationId) { cancel(automationId) }?.let(failures::add)
+            }
+        automations
+            .filter {
+                it.id.isNotBlank() &&
+                    it.enabled &&
+                    it.trigger.type == AutomationTriggerTypes.Schedule
+            }
+            .distinctBy { it.id }
+            .forEach { spec ->
+                captureFailure("schedule", spec.id) { schedule(spec) }?.let(failures::add)
+            }
+        if (failures.isNotEmpty()) throw ScheduleRegistrationException(failures)
+    }
+
+    private fun captureFailure(operation: String, automationId: String, block: () -> Unit): Exception? =
+        try {
+            block()
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            IllegalStateException("Failed to $operation automation alarm '$automationId'", error)
+        }
+}
+
+internal class ScheduleRegistrationException(failures: List<Exception>) : Exception(
+    failures.joinToString(
+        prefix = "Schedule restoration failed: ",
+        separator = "; "
+    ) { it.message ?: it::class.simpleName ?: "Unknown error" },
+    failures.firstOrNull()
+) {
+    init {
+        failures.drop(1).forEach(::addSuppressed)
     }
 }

@@ -79,4 +79,19 @@ class ScheduleAutomationReceiverTest {
         assertEquals(listOf("reschedule failed"), failure?.suppressed?.map { it.message })
         assertEquals(listOf("execute", "reschedule"), events)
     }
+
+    @Test
+    fun coordinatorDoesNotInterceptFatalExecutionErrors() = runTest {
+        var rescheduled = false
+
+        val failure = runCatching {
+            ScheduleAutomationCoordinator.handle(
+                execute = { throw AssertionError("fatal") },
+                reschedule = { rescheduled = true }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is AssertionError)
+        assertTrue(!rescheduled)
+    }
 }

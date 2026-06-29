@@ -31,7 +31,7 @@ class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeof
             .mapNotNull { it.toGeofence() }
         GeofenceRegistrationCoordinator.restore(
             automationIds = automationIds,
-            hasEnabledGeofences = geofences.isNotEmpty(),
+            enabledGeofenceCount = geofences.size,
             hasPermissions = hasGeofencePermissions(),
             removeGeofences = { ids -> geofencingClient.removeGeofences(ids).await() },
             addGeofences = {
@@ -88,6 +88,8 @@ class GeofenceAutomationRegistrar(private val context: Context) : AutomationGeof
 }
 
 internal object GeofenceRegistrationCoordinator {
+    const val MaxActiveGeofences = 100
+
     fun initialTrigger(transitions: List<String>): Int =
         transitions.fold(0) { triggerMask, transition ->
             triggerMask or when (transition) {
@@ -98,23 +100,36 @@ internal object GeofenceRegistrationCoordinator {
 
     suspend fun restore(
         automationIds: List<String>,
-        hasEnabledGeofences: Boolean,
+        enabledGeofenceCount: Int,
         hasPermissions: Boolean,
         removeGeofences: suspend (List<String>) -> Unit,
         addGeofences: suspend () -> Unit
     ) {
+        if (enabledGeofenceCount > MaxActiveGeofences) {
+            throw GeofenceRegistrationException(
+                listOf(
+                    IllegalStateException(
+                        "At most $MaxActiveGeofences geofence automations can be enabled; " +
+                            "$enabledGeofenceCount are currently enabled"
+                    )
+                )
+            )
+        }
+        if (enabledGeofenceCount > 0 && !hasPermissions) {
+            throw GeofenceRegistrationException(
+                listOf(
+                    IllegalStateException(
+                        "Fine and background location permissions are required to arm geofence automations"
+                    )
+                )
+            )
+        }
         val failures = mutableListOf<Exception>()
         if (automationIds.isNotEmpty()) {
             captureFailure { removeGeofences(automationIds) }?.let(failures::add)
         }
-        if (hasEnabledGeofences) {
-            if (!hasPermissions) {
-                failures += IllegalStateException(
-                    "Fine and background location permissions are required to arm geofence automations"
-                )
-            } else {
-                captureFailure(addGeofences)?.let(failures::add)
-            }
+        if (enabledGeofenceCount > 0) {
+            captureFailure(addGeofences)?.let(failures::add)
         }
         if (failures.isNotEmpty()) throw GeofenceRegistrationException(failures)
     }
