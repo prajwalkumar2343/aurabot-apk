@@ -3,14 +3,16 @@ import uuid
 import jwt
 import requests
 import base64
+import asyncio
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
 
-from app.main import app
+from app.main import app, startup
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from app.services.auth_sessions import refresh_token_fingerprint
 
 def wav_payload(duration_ms=400):
     sample_rate = 16_000
@@ -58,14 +60,23 @@ class MockCollection:
         self.name = name
         self.store = []
 
+    def _matches(self, doc, query):
+        for k, v in query.items():
+            if doc.get(k) != v:
+                return False
+        return True
+
+    def _apply_update(self, doc, update):
+        for k, v in update.get("$set", {}).items():
+            doc[k] = v
+        for k, v in update.get("$inc", {}).items():
+            doc[k] = doc.get(k, 0) + v
+        for k in update.get("$unset", {}).keys():
+            doc.pop(k, None)
+
     async def find_one(self, query, projection=None):
         for doc in self.store:
-            match = True
-            for k, v in query.items():
-                if doc.get(k) != v:
-                    match = False
-                    break
-            if match:
+            if self._matches(doc, query):
                 return dict(doc)
         return None
 
@@ -83,34 +94,27 @@ class MockCollection:
                 self.deleted_count = count
         return DeleteResult(deleted_count)
 
-    async def find_one_and_update(self, query, update, return_document=True, projection=None):
-        doc = await self.find_one(query)
-        if not doc:
-            return None
-        set_fields = update.get("$set", {})
+    async def find_one_and_update(self, query, update, upsert=False, return_document=True, projection=None):
         for item in self.store:
-            if item.get("id") == doc.get("id"):
-                for k, v in set_fields.items():
-                    item[k] = v
+            if self._matches(item, query):
+                self._apply_update(item, update)
                 return dict(item)
-        return None
+        if not upsert:
+            return None
+        new_doc = dict(query)
+        self._apply_update(new_doc, update)
+        self.store.append(new_doc)
+        return dict(new_doc)
 
     async def update_one(self, query, update, upsert=False):
-        doc = await self.find_one(query)
-        set_fields = update.get("$set", {})
-        if not doc:
-            if upsert:
-                new_doc = dict(query)
-                for k, v in set_fields.items():
-                    new_doc[k] = v
-                self.store.append(new_doc)
-            return
         for item in self.store:
-            if (item.get("id") and item.get("id") == doc.get("id")) or \
-               (query.get("identifier") and item.get("identifier") == query.get("identifier")):
-                for k, v in set_fields.items():
-                    item[k] = v
-                break
+            if self._matches(item, query):
+                self._apply_update(item, update)
+                return
+        if upsert:
+            new_doc = dict(query)
+            self._apply_update(new_doc, update)
+            self.store.append(new_doc)
 
     def find(self, query, projection=None):
         matched = []
@@ -132,7 +136,9 @@ class MockDatabase:
         self.users = MockCollection("users")
         self.memories = MockCollection("memories")
         self.todos = MockCollection("todos")
+        self.mini_app_records = MockCollection("mini_app_records")
         self.login_attempts = MockCollection("login_attempts")
+        self.refresh_sessions = MockCollection("refresh_sessions")
         
         # Monkey patch delete_one specifically for login_attempts
         async def mock_delete_attempts(query):
@@ -164,7 +170,9 @@ def clean_mock_db():
     mock_db.users.store.clear()
     mock_db.memories.store.clear()
     mock_db.todos.store.clear()
+    mock_db.mini_app_records.store.clear()
     mock_db.login_attempts.store.clear()
+    mock_db.refresh_sessions.store.clear()
     
     # Pre-seed the admin user to match the app startup seed behavior
     mock_db.users.store.append({
@@ -196,6 +204,44 @@ def test_user_token():
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     return create_access_token(user_id, email)
+
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+def seed_refresh_session(user_id: str, jti: str) -> None:
+    mock_db.refresh_sessions.store.append({
+        "jti_hash": refresh_token_fingerprint(jti),
+        "user_id": user_id,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_DAYS)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+def test_startup_fails_when_required_index_creation_fails():
+    """Startup fails closed if database indexes cannot be verified."""
+    class BrokenIndexCollection(MockCollection):
+        async def create_index(self, keys, unique=False):
+            raise RuntimeError("index failure")
+
+    broken_db = MockDatabase()
+    broken_db.users = BrokenIndexCollection("users")
+    with patch("app.main.db_manager.connect"), patch("app.main.get_db", return_value=broken_db):
+        with pytest.raises(RuntimeError, match="index failure"):
+            asyncio.run(startup())
+
+def test_startup_fails_when_admin_seed_cannot_be_verified():
+    """Startup fails closed if the admin account cannot be seeded or verified."""
+    broken_db = MockDatabase()
+    broken_db.users.store.append({
+        "id": "admin_uuid",
+        "email": settings.ADMIN_EMAIL.lower().strip(),
+        "name": "Admin",
+        "role": "admin",
+        "password_hash": "not-a-bcrypt-hash",
+        "created_at": "date",
+    })
+    with patch("app.main.db_manager.connect"), patch("app.main.get_db", return_value=broken_db):
+        with pytest.raises(ValueError):
+            asyncio.run(startup())
 
 # ==============================================================================
 # TEST CASE GROUP 1: Health, system checks & CORS (8 Tests)
@@ -256,13 +302,22 @@ def test_7_cors_preflight_unsupported_method(client):
     assert response.status_code == 400
 
 def test_8_cors_preflight_lowercase_origin(client):
-    """8. CORS OPTIONS requests handle lowercase custom origins correctly."""
+    """8. CORS OPTIONS requests handle lowercase allowed origins correctly."""
     response = client.options("/api/health", headers={
-        "origin": "http://subdomain.domain.com",
+        "origin": "http://127.0.0.1:3000",
         "Access-Control-Request-Method": "POST"
     })
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://subdomain.domain.com"
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+
+def test_8b_cors_preflight_rejects_unlisted_credentialed_origin(client):
+    """8b. Credentialed CORS does not reflect arbitrary origins."""
+    response = client.options("/api/health", headers={
+        "Origin": "http://untrusted.example.com",
+        "Access-Control-Request-Method": "POST"
+    })
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
 
 # ==============================================================================
 # TEST CASE GROUP 2: Registration edge cases & constraints (13 Tests)
@@ -281,6 +336,53 @@ def test_9_register_user_success(client):
     assert data["name"] == "New User"
     assert "id" in data
     assert "x-access-token" in response.headers
+
+def test_9b_register_cookie_secure_flag_follows_runtime_setting(client):
+    """9b. Cookie security can be forced for production-like runtime settings."""
+    original_secure = settings.COOKIE_SECURE
+    settings.COOKIE_SECURE = True
+    try:
+        response = client.post("/api/auth/register", json={
+            "email": "securecookie@aura.app",
+            "password": "validpassword",
+        })
+    finally:
+        settings.COOKIE_SECURE = original_secure
+
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "Secure" in set_cookie
+
+def test_9c_production_runtime_rejects_insecure_defaults():
+    """9c. Production mode fails fast on default secrets or wildcard CORS."""
+    original_values = (
+        settings.ENVIRONMENT,
+        settings.JWT_SECRET,
+        settings.ADMIN_PASSWORD,
+        settings.COOKIE_SECURE,
+        settings.CORS_ORIGINS,
+    )
+    settings.ENVIRONMENT = "production"
+    settings.JWT_SECRET = "super_secret_default_jwt_key_please_change_in_production"
+    settings.ADMIN_PASSWORD = "not-default"
+    settings.COOKIE_SECURE = True
+    settings.CORS_ORIGINS = ("http://localhost:3000",)
+    try:
+        with pytest.raises(RuntimeError, match="JWT_SECRET"):
+            settings.validate_for_runtime()
+
+        settings.JWT_SECRET = "configured-secret"
+        settings.CORS_ORIGINS = ("*",)
+        with pytest.raises(RuntimeError, match="CORS_ORIGINS"):
+            settings.validate_for_runtime()
+    finally:
+        (
+            settings.ENVIRONMENT,
+            settings.JWT_SECRET,
+            settings.ADMIN_PASSWORD,
+            settings.COOKIE_SECURE,
+            settings.CORS_ORIGINS,
+        ) = original_values
 
 def test_10_register_duplicate_email(client):
     """10. Duplicate email registrations are rejected with 400."""
@@ -606,6 +708,7 @@ def test_46_auth_refresh_missing_refresh_token(client):
 def test_47_auth_refresh_valid(client):
     """47. Successful refresh call issues a new access token."""
     user_id = "test_user_id"
+    jti = "refresh-session-47"
     mock_db.users.store.append({
         "id": user_id,
         "email": "ref@aura.app",
@@ -614,19 +717,26 @@ def test_47_auth_refresh_valid(client):
         "password_hash": "hash",
         "created_at": "date"
     })
-    refresh = create_refresh_token(user_id)
+    refresh = create_refresh_token(user_id, jti)
+    seed_refresh_session(user_id, jti)
     client.cookies.set("refresh_token", refresh)
     response = client.post("/api/auth/refresh")
     assert response.status_code == 200
     assert "access_token" in response.json()
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
+    assert len(mock_db.refresh_sessions.store) == 2
 
 def test_48_auth_logout_clears_cookies(client):
     """48. Logging out clears JWT state cookies."""
+    user_id = "logout_user_id"
+    jti = "refresh-session-48"
     client.cookies.set("access_token", "dummy")
-    client.cookies.set("refresh_token", "dummy")
+    client.cookies.set("refresh_token", create_refresh_token(user_id, jti))
+    seed_refresh_session(user_id, jti)
     response = client.post("/api/auth/logout")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
 
 def test_49_auth_refresh_expired_refresh_token(client):
     """49. Rejects expired refresh tokens in cookies."""
@@ -653,8 +763,25 @@ def test_51_auth_refresh_tampered_token(client):
 
 def test_52_auth_refresh_user_not_found(client):
     """52. Handles refresh requests from deleted users safely."""
-    refresh = create_refresh_token("ghost_user")
+    jti = "refresh-session-52"
+    refresh = create_refresh_token("ghost_user", jti)
+    seed_refresh_session("ghost_user", jti)
     client.cookies.set("refresh_token", refresh)
+    response = client.post("/api/auth/refresh")
+    assert response.status_code == 401
+
+def test_52b_auth_refresh_requires_server_session(client):
+    """52b. Signed refresh tokens are rejected unless the server session exists."""
+    user_id = "test_user_id"
+    mock_db.users.store.append({
+        "id": user_id,
+        "email": "ref@aura.app",
+        "name": "Refresh User",
+        "role": "user",
+        "password_hash": "hash",
+        "created_at": "date"
+    })
+    client.cookies.set("refresh_token", create_refresh_token(user_id, "missing-server-session"))
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
 
@@ -1033,7 +1160,7 @@ def test_78_todos_boundary_volume_loading(client, test_user_token):
 # ==============================================================================
 
 @patch("app.services.llm.requests.post")
-def test_79_assistant_chat_gemini(mock_post, client):
+def test_79_assistant_chat_gemini(mock_post, client, test_user_token):
     """79. Assistant Gemini integration mock execution."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1046,14 +1173,51 @@ def test_79_assistant_chat_gemini(mock_post, client):
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy_key",
-        "model": "gemini-3"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy_key",
+            "model": "gemini-3"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 200
     assert response.json()["reply"] == "{happy} Hello there!"
+    args, kwargs = mock_post.call_args
+    assert args[0].endswith("/v1beta/models/gemini-3:generateContent")
+    assert kwargs["json"]["systemInstruction"]["parts"][0]["text"]
+    assert kwargs["json"]["tools"]
+
+@patch("app.services.llm.requests.post")
+def test_79c_assistant_chat_normalizes_gemini_model_url(mock_post, client, test_user_token):
+    """79c. Gemini provider routes strip provider prefixes before building Google API URLs."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [{
+            "content": {
+                "parts": [{"text": '{"reply":"{neutral} Ready.","actions":[]}'}]
+            }
+        }]
+    }
+    mock_post.return_value = mock_response
+
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy_key",
+            "model": "gemini/gemini-2.5-flash"
+        },
+        headers=auth_headers(test_user_token),
+    )
+
+    assert response.status_code == 200
+    args, _ = mock_post.call_args
+    assert args[0].endswith("/v1beta/models/gemini-2.5-flash:generateContent")
 
 @patch("app.services.llm.requests.post")
 def test_79b_assistant_chat_injects_authenticated_memory(mock_post, client, test_user_token):
@@ -1094,37 +1258,83 @@ def test_79b_assistant_chat_injects_authenticated_memory(mock_post, client, test
     assert "Passport" in system_text
     assert "blue drawer" in system_text
 
-def test_80_assistant_chat_invalid_provider(client):
+def test_80_assistant_chat_invalid_provider(client, test_user_token):
     """80. Chat yields 400 error if provider is unsupported."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "unknown_provider",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "unknown_provider",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 400
     assert "unsupported provider" in response.json()["detail"].lower()
 
-@patch("app.services.llm.requests.post")
-def test_81_assistant_chat_gemini_api_error(mock_post, client):
-    """81. Assistant service correctly propagates external API failures with 502/500."""
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    mock_response.text = "Internal Gemini Crash"
-    mock_post.return_value = mock_response
-
+def test_80b_assistant_chat_requires_auth_before_provider_call(client):
+    """80b. Chat requires auth before provider validation or outbound calls."""
     response = client.post("/api/assistant/chat", json={
         "message": "Hi",
         "provider": "gemini",
         "api_key": "dummy",
         "model": "model"
     })
+    assert response.status_code == 401
+
+def test_80c_provider_model_list_requires_auth(client):
+    """80c. Provider metadata calls require auth before relaying user API keys."""
+    response = client.post("/api/providers/openrouter/models", json={"api_key": "dummy"})
+    assert response.status_code == 401
+
+def test_80d_mini_app_builder_requires_auth(client):
+    """80d. Mini-app build/revise calls require auth before LLM and compile work."""
+    build_response = client.post("/api/mini-apps/build", json={
+        "prompt": "make notes",
+        "provider": "gemini",
+        "api_key": "dummy",
+        "model": "model",
+    })
+    assert build_response.status_code == 401
+
+    revise_response = client.post("/api/mini-apps/revise", json={
+        "instruction": "change it",
+        "currentBundle": {
+            "id": "generated.notes",
+            "metadata": {"name": "Notes"},
+            "dataSchema": {"recordType": "note"},
+        },
+        "provider": "gemini",
+        "api_key": "dummy",
+        "model": "model",
+    })
+    assert revise_response.status_code == 401
+
+@patch("app.services.llm.requests.post")
+def test_81_assistant_chat_gemini_api_error(mock_post, client, test_user_token):
+    """81. Assistant service correctly propagates external API failures with 502/500."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "Internal Gemini Crash"
+    mock_post.return_value = mock_response
+
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code in [500, 502]
     detail = response.json()["detail"].lower()
     assert "gemini error" in detail or "assistant error" in detail
 
 @patch("app.services.llm.requests.post")
-def test_82_assistant_action_parsing_fallback(mock_post, client):
+def test_82_assistant_action_parsing_fallback(mock_post, client, test_user_token):
     """82. Handles LLM text responses that do not contain valid json actions."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1137,18 +1347,22 @@ def test_82_assistant_action_parsing_fallback(mock_post, client):
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 200
     assert response.json()["reply"] == "Hello, I cannot parse actions for this"
     assert response.json()["actions"] == []
 
 @patch("app.api.assistant.requests.get")
-def test_83_openrouter_models_list(mock_get, client):
+def test_83_openrouter_models_list(mock_get, client, test_user_token):
     """83. Openrouter models query lists sorted candidates successfully."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1160,7 +1374,11 @@ def test_83_openrouter_models_list(mock_get, client):
     }
     mock_get.return_value = mock_response
 
-    response = client.post("/api/providers/openrouter/models", json={"api_key": "dummy"})
+    response = client.post(
+        "/api/providers/openrouter/models",
+        json={"api_key": "dummy"},
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 200
     data = response.json()["data"]
     assert len(data) == 2
@@ -1168,30 +1386,38 @@ def test_83_openrouter_models_list(mock_get, client):
     assert data[1]["name"] == "GPT 4"
 
 @patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
-def test_84_assistant_chat_gemini_timeout(mock_post, client):
+def test_84_assistant_chat_gemini_timeout(mock_post, client, test_user_token):
     """84. Gemini timeout exceptions map to a standard HTTP 502 response."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 502
     assert "timeout" in response.json()["detail"].lower() or "failed to connect" in response.json()["detail"].lower()
 
 @patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
-def test_85_assistant_chat_openai_timeout(mock_post, client):
+def test_85_assistant_chat_openai_timeout(mock_post, client, test_user_token):
     """85. OpenAI timeout exceptions map to a standard HTTP 502 response."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "openai",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "openai",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 502
 
 @patch("app.services.llm.requests.post")
-def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client):
+def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client, test_user_token):
     """85b. OpenAI chat requests include attached images instead of dropping them."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1206,14 +1432,18 @@ def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client):
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "What is in this image?",
-        "provider": "openai",
-        "api_key": "dummy",
-        "model": "gpt-4.1-mini",
-        "image_base64": "aW1hZ2U=",
-        "image_mime_type": "image/png",
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "What is in this image?",
+            "provider": "openai",
+            "api_key": "dummy",
+            "model": "gpt-4.1-mini",
+            "image_base64": "aW1hZ2U=",
+            "image_mime_type": "image/png",
+        },
+        headers=auth_headers(test_user_token),
+    )
 
     assert response.status_code == 200
     payload = mock_post.call_args.kwargs["json"]
@@ -1222,18 +1452,22 @@ def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client):
     assert user_content[1]["image_url"] == "data:image/png;base64,aW1hZ2U="
 
 @patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
-def test_86_assistant_chat_openrouter_timeout(mock_post, client):
+def test_86_assistant_chat_openrouter_timeout(mock_post, client, test_user_token):
     """86. OpenRouter timeout exceptions map to a standard HTTP 502 response."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "openrouter",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "openrouter",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 502
 
 @patch("app.services.llm.requests.post")
-def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client):
+def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client, test_user_token):
     """86b. OpenRouter chat requests include attached images instead of dropping them."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1249,14 +1483,18 @@ def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client)
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "What is in this image?",
-        "provider": "openrouter",
-        "api_key": "dummy",
-        "model": "openai/gpt-4.1-mini",
-        "image_base64": "aW1hZ2U=",
-        "image_mime_type": "image/png",
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "What is in this image?",
+            "provider": "openrouter",
+            "api_key": "dummy",
+            "model": "openai/gpt-4.1-mini",
+            "image_base64": "aW1hZ2U=",
+            "image_mime_type": "image/png",
+        },
+        headers=auth_headers(test_user_token),
+    )
 
     assert response.status_code == 200
     payload = mock_post.call_args.kwargs["json"]
@@ -1265,80 +1503,100 @@ def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client)
     assert user_content[1]["image_url"]["url"] == "data:image/png;base64,aW1hZ2U="
 
 @patch("app.services.llm.requests.post")
-def test_87_assistant_chat_gemini_403_forbidden(mock_post, client):
+def test_87_assistant_chat_gemini_403_forbidden(mock_post, client, test_user_token):
     """87. API key permission issues (403) are propagated as bad gateway/failures."""
     mock_response = MagicMock()
     mock_response.status_code = 403
     mock_response.text = "Forbidden API Key"
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 500 or response.status_code == 403
 
 @patch("app.services.llm.requests.post")
-def test_88_assistant_chat_gemini_429_rate_limit(mock_post, client):
+def test_88_assistant_chat_gemini_429_rate_limit(mock_post, client, test_user_token):
     """88. External Rate limit exceptions (429) propagate through safely."""
     mock_response = MagicMock()
     mock_response.status_code = 429
     mock_response.text = "Too many requests to provider"
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 500 or response.status_code == 429
 
 @patch("app.services.llm.requests.post")
-def test_89_assistant_chat_gemini_503_unavailable(mock_post, client):
+def test_89_assistant_chat_gemini_503_unavailable(mock_post, client, test_user_token):
     """89. External server offline (503) states handled securely."""
     mock_response = MagicMock()
     mock_response.status_code = 503
     mock_response.text = "Service Overloaded"
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 500 or response.status_code == 503
 
 # ==============================================================================
 # TEST CASE GROUP 9: Assistant payloads, audio & gateway echos (13 Tests)
 # ==============================================================================
 
-def test_90_assistant_chat_empty_api_key(client):
+def test_90_assistant_chat_empty_api_key(client, test_user_token):
     """90. Sending empty provider API keys results in 400 validation error."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 400
     assert "api key is required" in response.json()["detail"].lower()
 
-def test_91_assistant_chat_empty_message(client):
+def test_91_assistant_chat_empty_message(client, test_user_token):
     """91. Sending empty message in assistant chat."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 400
 
 @patch("app.services.llm.requests.post")
-def test_92_assistant_chat_session_retention(mock_post, client):
+def test_92_assistant_chat_session_retention(mock_post, client, test_user_token):
     """92. Checks custom session IDs are generated and returned."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1351,18 +1609,22 @@ def test_92_assistant_chat_session_retention(mock_post, client):
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model",
-        "session_id": "custom-session-123"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model",
+            "session_id": "custom-session-123"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 200
     assert response.json()["session_id"] == "custom-session-123"
 
 @patch("app.services.llm.requests.post")
-def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(mock_post, client):
+def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(mock_post, client, test_user_token):
     """93. Unbalanced JSON structures in LLM text returns are mapped to plain text fallbacks."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1375,12 +1637,16 @@ def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(mock_post, cli
     }
     mock_post.return_value = mock_response
 
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model"
+        },
+        headers=auth_headers(test_user_token),
+    )
     assert response.status_code == 200
     assert response.json()["reply"] == "{ malformed json reply text"
     assert response.json()["actions"] == []
@@ -1407,6 +1673,46 @@ def test_94_transcribe_audio_success(mock_post, client, test_user_token):
     )
     assert response.status_code == 200
     assert response.json()["text"] == "Hello world"
+    args, kwargs = mock_post.call_args
+    assert args[0].endswith(f"/v1beta/models/{settings.GEMINI_MODEL}:generateContent")
+    assert kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["mimeType"] == "audio/wav"
+
+def test_94a_transcribe_audio_requires_auth(client):
+    """94a. Transcription requires auth before decoding or provider calls."""
+    response = client.post(
+        "/api/transcribe",
+        json={"audio_base64": wav_payload(), "mime_type": "audio/wav"},
+    )
+    assert response.status_code == 401
+
+@patch("app.services.transcription.requests.post")
+def test_94b_transcribe_audio_normalizes_gemini_model_setting(mock_post, client, test_user_token):
+    """94b. Gemini transcription also normalizes prefixed model names."""
+    original_model = settings.GEMINI_MODEL
+    settings.GEMINI_MODEL = "models/gemini-2.5-flash"
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "candidates": [{
+            "content": {
+                "parts": [{"text": "Hello model"}]
+            }
+        }]
+    }
+    mock_post.return_value = mock_response
+
+    try:
+        response = client.post(
+            "/api/transcribe",
+            json={"audio_base64": wav_payload(), "mime_type": "audio/wav", "api_key": "test_key"},
+            headers={"Authorization": f"Bearer {test_user_token}"}
+        )
+    finally:
+        settings.GEMINI_MODEL = original_model
+
+    assert response.status_code == 200
+    args, _ = mock_post.call_args
+    assert args[0].endswith("/v1beta/models/gemini-2.5-flash:generateContent")
 
 def test_95_transcribe_audio_invalid_base64(client, test_user_token):
     """95. Transcription rejects corrupt base64 string payloads with 400."""
