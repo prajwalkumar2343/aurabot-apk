@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.security import get_current_user
 from app.services.mini_apps import (
     compile_mini_app_bundle,
     fallback_bundle,
@@ -17,7 +18,13 @@ from app.services.mini_apps import (
 
 @pytest.fixture
 def client():
-    return TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "mini-app-builder-test-user",
+        "email": "mini@app.test",
+        "role": "user",
+    }
+    yield TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def valid_bundle():
