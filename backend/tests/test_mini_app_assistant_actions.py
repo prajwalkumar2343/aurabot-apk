@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.security import get_current_user
 from app.models.chat import ChatIn
 from app.services.llm import (
     assistant_tool_definitions,
@@ -15,7 +16,16 @@ from app.services.llm import (
 
 
 def client():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "mini-app-assistant-test-user",
+        "email": "mini@app.test",
+        "role": "user",
+    }
     return TestClient(app, raise_server_exceptions=False)
+
+
+def teardown_function(_):
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_parse_mini_app_assistant_actions():
