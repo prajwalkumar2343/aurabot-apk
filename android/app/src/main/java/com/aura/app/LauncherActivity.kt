@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
+import android.content.ActivityNotFoundException
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -18,6 +18,8 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.view.WindowManager
 import com.aura.app.automations.AuraAutomationAccessibilityService
+import com.aura.app.automations.AutomationPermissionSettingsIntents
+import com.aura.app.automations.AutomationPermissionStatus
 import com.aura.app.automations.CrossAppAutomationController
 import com.aura.app.ui.AuraLauncherApp
 import com.aura.app.ui.LauncherViewModel
@@ -64,6 +66,7 @@ class LauncherActivity : ComponentActivity() {
         super.onResume()
         val isDefault = isDefaultLauncher(this)
         viewModel.setIsDefaultLauncher(isDefault)
+        viewModel.refreshAutomations()
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
@@ -107,7 +110,12 @@ class LauncherActivity : ComponentActivity() {
         }
     }
 
-    private fun requestAutomationPermissions() {
+    private fun requestAutomationPermissions(status: AutomationPermissionStatus?) {
+        if (status != null) {
+            startActivitySafely(AutomationPermissionSettingsIntents.intentFor(this, status))
+            return
+        }
+
         val runtimePermissions = buildList {
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
             add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -128,16 +136,22 @@ class LauncherActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) !=
                 PackageManager.PERMISSION_GRANTED
         ) {
-            startActivity(
-                Intent(
-                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:$packageName")
-                )
-            )
+            startActivitySafely(AutomationPermissionSettingsIntents.appDetailsIntent(this))
             return
         }
         if (!AuraAutomationAccessibilityService.isEnabled()) {
-            startActivity(CrossAppAutomationController.openAccessibilitySettingsIntent())
+            startActivitySafely(CrossAppAutomationController.openAccessibilitySettingsIntent())
+        }
+    }
+
+    private fun startActivitySafely(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivity(AutomationPermissionSettingsIntents.appDetailsIntent(this))
+            } catch (_: ActivityNotFoundException) {
+            }
         }
     }
 
