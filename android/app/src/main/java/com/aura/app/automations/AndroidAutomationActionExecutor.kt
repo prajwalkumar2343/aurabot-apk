@@ -13,6 +13,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.aura.app.LauncherActivity
 import com.aura.app.R
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,7 @@ class AndroidAutomationActionExecutor(
         createNotificationChannel()
         val body = renderer.render(action.messageTemplate ?: defaultEtaTemplate(), event.values)
         val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("smsto:${Uri.encode(action.recipientAddress.orEmpty())}")
+            data = "smsto:${Uri.encode(action.recipientAddress.orEmpty())}".toUri()
             putExtra("sms_body", body)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -140,7 +141,6 @@ class AndroidAutomationActionExecutor(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Aura automations",

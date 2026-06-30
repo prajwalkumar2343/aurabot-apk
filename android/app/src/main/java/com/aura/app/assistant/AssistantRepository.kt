@@ -1,6 +1,7 @@
 package com.aura.app.assistant
 
 import com.aura.app.session.SessionStore
+import com.aura.app.BuildConfig
 import com.aura.app.apps.AppInfo
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
@@ -10,7 +11,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.UUID
@@ -28,6 +28,9 @@ class AssistantRepository(
 
     init {
         val normalizedBaseUrl = baseUrl.trimEnd('/') + "/api/"
+        require(BuildConfig.DEBUG || normalizedBaseUrl.startsWith("https://")) {
+            "Aura backend URL must use HTTPS outside debug builds"
+        }
         val authInterceptor = Interceptor { chain ->
             val token = kotlinx.coroutines.runBlocking { sessionStore.accessToken() }
             val request = if (token.isNullOrBlank()) {
@@ -39,12 +42,8 @@ class AssistantRepository(
             }
             chain.proceed(request)
         }
-        val logger = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
         val client = OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
-            .addInterceptor(logger)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()

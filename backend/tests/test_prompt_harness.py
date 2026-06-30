@@ -2,6 +2,7 @@ from app.models.chat import ChatIn, ChatMiniAppIn
 from app.services.llm import build_system_message
 from app.services.prompt_harness import (
     build_prompt_harness,
+    load_skill_definitions,
     load_context_files,
     normalize_model_id,
     repair_needed,
@@ -32,9 +33,11 @@ def test_skill_discovery_uses_progressive_disclosure():
     active_system = build_system_message(active, build_prompt_harness(active))
 
     assert "Available skill summaries:" in neutral_system
-    assert "launcher_actions: When the user asks to block" not in neutral_system
-    assert "launcher_actions: When the user asks to block" in active_system
-    assert "mini_app_actions: For installed mini apps" in active_system
+    assert "### launcher_actions" not in neutral_system
+    assert "### launcher_actions" in active_system
+    assert "When the user asks to block" in active_system
+    assert "### mini_app_actions" in active_system
+    assert "For installed mini apps" in active_system
     assert "declared actions: check_workout" in active_system
 
 
@@ -42,9 +45,40 @@ def test_mini_app_builder_skill_guides_assistant_toward_react_runtime():
     chat = ChatIn(message="create a client tracker mini app", api_key="key", model="model")
     system = build_system_message(chat, build_prompt_harness(chat))
 
-    assert "mini_app_builder: When the user asks to create" in system
+    assert "### mini_app_builder" in system
+    assert "When the user asks to create" in system
     assert "asks for runtime react" in system
     assert "Generated mini apps must stay declarative" not in system
+
+
+def test_repo_skill_discovery_loads_ai_harness_from_skill_file():
+    skills = load_skill_definitions()
+    skill = next(item for item in skills if item.name == "ai-harness-architect")
+
+    assert skill.path == "skills/ai-harness-architect/SKILL.md"
+    assert "prompt/context systems" in skill.summary
+    assert "automation" in skill.triggers
+    assert "Convert natural language to structured tool calls" in skill.detail
+
+
+def test_ai_harness_rules_affect_automation_prompts():
+    chat = ChatIn(message="create an automation to text me every morning", api_key="key", model="model")
+    system = build_system_message(chat, build_prompt_harness(chat))
+
+    assert "### ai-harness-architect (skills/ai-harness-architect/SKILL.md)" in system
+    assert "Convert natural language to structured tool calls" in system
+    assert "Record a tool call before side effects begin" in system
+    assert "Use create_automation when the user asks Aura to do something later" in system
+
+
+def test_ai_harness_rules_affect_mini_app_prompts():
+    chat = ChatIn(message="build a field notes mini app", api_key="key", model="model")
+    system = build_system_message(chat, build_prompt_harness(chat))
+
+    assert "### ai-harness-architect (skills/ai-harness-architect/SKILL.md)" in system
+    assert "Use progressive disclosure for skills" in system
+    assert "### mini_app_builder" in system
+    assert "call create_mini_app with a specific professional mini_app_prompt" in system
 
 
 def test_planning_mode_auto_enables_plan_for_complex_requests():

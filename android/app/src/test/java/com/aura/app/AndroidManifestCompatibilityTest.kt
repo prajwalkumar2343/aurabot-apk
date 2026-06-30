@@ -9,6 +9,46 @@ import org.junit.Test
 
 class AndroidManifestCompatibilityTest {
     @Test
+    fun launcherUiIsSplitIntoFocusedSourceFiles() {
+        val uiDir = File("src/main/java/com/aura/app/ui")
+        val launcherLines = File(uiDir, "AuraLauncherApp.kt").readLines().size
+        val expectedFiles = listOf(
+            "LauncherHomeUi.kt",
+            "LauncherAppsScreen.kt",
+            "LauncherAppsMiniAppsUi.kt",
+            "LauncherFeatureScreens.kt",
+            "LauncherAutomationScreen.kt",
+            "LauncherSettingsUi.kt",
+            "LauncherSharedUi.kt"
+        )
+
+        assertTrue(
+            "AuraLauncherApp.kt should remain a route shell, not a giant all-in-one UI file",
+            launcherLines < 1_000
+        )
+        expectedFiles.forEach { fileName ->
+            assertTrue("$fileName should own a focused launcher UI boundary", File(uiDir, fileName).isFile)
+        }
+    }
+
+    @Test
+    fun appBackupIsDisabledForSecretBearingStores() {
+        val application = readManifest().getElementsByTagName("application").item(0)
+
+        assertEquals("false", application.attributes.getNamedItem("android:allowBackup")?.nodeValue)
+    }
+
+    @Test
+    fun releaseNetworkStackDoesNotIncludeHttpBodyLoggingInterceptor() {
+        val buildFile = File("build.gradle.kts").readText()
+
+        assertFalse(
+            "The app sends provider API keys in request bodies, so OkHttp logging must not be bundled",
+            "logging-interceptor" in buildFile
+        )
+    }
+
+    @Test
     fun launcherActivitiesDoNotLockPhoneOrientation() {
         val document = readManifest()
         val activities = document.getElementsByTagName("activity")

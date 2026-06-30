@@ -5,7 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aura.app.AppContainer
+import com.aura.app.automations.AndroidAutomationPermissionStatusResolver
 import com.aura.app.automations.AutomationPermissionPlanner
+import com.aura.app.automations.AutomationPermissionStatus
 import com.aura.app.automations.AutomationRunLog
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.apps.AppBlockRule
@@ -56,7 +58,7 @@ data class LauncherUiState(
     val appBlocks: List<AppBlockRule> = emptyList(),
     val automations: List<AutomationSpec> = emptyList(),
     val automationRunLogs: Map<String, List<AutomationRunLog>> = emptyMap(),
-    val automationPermissionLabels: Map<String, List<String>> = emptyMap(),
+    val automationPermissionStatuses: Map<String, List<AutomationPermissionStatus>> = emptyMap(),
     val miniApps: List<MiniAppInstall> = emptyList(),
     val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
     val activeMiniApp: MiniAppBundle? = null,
@@ -92,6 +94,7 @@ data class LauncherUiState(
 class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val localState = MutableStateFlow(LauncherUiState())
     private val automationPermissionPlanner = AutomationPermissionPlanner()
+    private val automationPermissionStatusResolver = AndroidAutomationPermissionStatusResolver(container.appContext)
     private val dismissedMiniAppEvolutions = mutableSetOf<String>()
     private val dismissedMemoryAppProposalTopics = mutableSetOf<String>()
     private var transcribingAudioBase64: String? = null
@@ -507,6 +510,20 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutomationEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
+            if (enabled) {
+                val automation = container.automationRepository.get(id)
+                val missingPermissions = automation
+                    ?.let { automationPermissionStatusResolver.statuses(it, automationPermissionPlanner) }
+                    .orEmpty()
+                    .filterNot { it.granted }
+                if (missingPermissions.isNotEmpty()) {
+                    refreshAutomationState()
+                    localState.update {
+                        it.copy(error = "Enable ${missingPermissions.joinToString { status -> status.label }} first")
+                    }
+                    return@launch
+                }
+            }
             val failure = AutomationUiMutationCoordinator.run(
                 operation = { container.automationRuntime.setEnabledAndRestore(id, enabled) },
                 refresh = ::refreshAutomationState
@@ -548,21 +565,14 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         val logs = automations.associate { automation ->
             automation.id to container.automationRepository.logs(automation.id, limit = 5)
         }
-        val permissionLabels = automations.associate { automation ->
-            automation.id to automationPermissionPlanner.requiredPermissions(automation).map { permission ->
-                if (permission == AutomationPermissionPlanner.AccessibilityService) {
-                    "Accessibility service"
-                } else {
-                    permission.substringAfterLast('.').replace('_', ' ').lowercase()
-                        .replaceFirstChar { it.uppercase() }
-                }
-            }
+        val permissionStatuses = automations.associate { automation ->
+            automation.id to automationPermissionStatusResolver.statuses(automation, automationPermissionPlanner)
         }
         localState.update {
             it.copy(
                 automations = automations,
                 automationRunLogs = logs,
-                automationPermissionLabels = permissionLabels,
+                automationPermissionStatuses = permissionStatuses,
                 error = null
             )
         }

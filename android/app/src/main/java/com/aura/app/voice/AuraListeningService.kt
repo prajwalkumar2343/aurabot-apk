@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import com.aura.app.LauncherActivity
 import com.aura.app.R
 import android.provider.Settings
+import android.util.Log
 import com.aura.app.AuraApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -279,7 +280,7 @@ class AuraListeningService : Service() {
                     startActivity(launchIntent)
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.w(TAG, "Failed to launch overlay on speech detection", e)
             }
         }
 
@@ -326,17 +327,10 @@ class AuraListeningService : Service() {
     }
 
     private fun stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Aura listening",
@@ -353,6 +347,7 @@ class AuraListeningService : Service() {
             PackageManager.PERMISSION_GRANTED
 
     companion object {
+        private const val TAG = "AuraListeningService"
         private const val CHANNEL_ID = "aura_listening"
         private const val NOTIFICATION_ID = 4201
         private const val ACTION_STOP = "com.aura.app.action.STOP_LISTENING"
