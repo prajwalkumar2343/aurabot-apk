@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import Request, HTTPException, Depends
 import jwt
 import bcrypt
+import uuid
 from app.core.config import settings
 from app.core.database import get_db
 
@@ -21,9 +22,10 @@ def create_access_token(user_id: str, email: str) -> str:
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(user_id: str, jti: Optional[str] = None) -> str:
     payload = {
         "sub": user_id,
+        "jti": jti or str(uuid.uuid4()),
         "exp": datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_DAYS),
         "type": "refresh",
     }
