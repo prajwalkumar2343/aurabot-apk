@@ -49,6 +49,23 @@ class AndroidManifestCompatibilityTest {
     }
 
     @Test
+    fun releaseBuildRejectsDebugBackendUrlBeforeStartup() {
+        val buildFile = File("build.gradle.kts").readText()
+        val repositoryFile = File("src/main/java/com/aura/app/assistant/AssistantRepository.kt").readText()
+
+        assertTrue(
+            "Release builds must validate auraBackendUrl before the APK can be produced",
+            "validateReleaseBackendUrl" in buildFile &&
+                "preReleaseBuild" in buildFile &&
+                "startsWith(\"https://\")" in buildFile
+        )
+        assertFalse(
+            "AssistantRepository construction must not crash app startup for a misconfigured URL",
+            "Aura backend URL must use HTTPS outside debug builds" in repositoryFile
+        )
+    }
+
+    @Test
     fun launcherActivitiesDoNotLockPhoneOrientation() {
         val document = readManifest()
         val activities = document.getElementsByTagName("activity")

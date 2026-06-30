@@ -272,7 +272,7 @@ private fun MiniAppActionPanel(
                             .clip(RoundedCornerShape(22.dp))
                             .background(color.copy(alpha = 0.12f))
                             .border(BorderStroke(1.dp, color.copy(alpha = 0.18f)), RoundedCornerShape(22.dp))
-                            .clickable { item.actionId?.let { onRunAction(bundle.id, it) } }
+                            .bounceClick { item.actionId?.let { onRunAction(bundle.id, it) } }
                             .padding(12.dp),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -564,7 +564,7 @@ private fun MiniAppListCard(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.background.copy(alpha = 0.34f))
-                        .clickable(enabled = item.actionId != null) {
+                        .bounceClick(enabled = item.actionId != null) {
                             item.actionId?.let { onRunAction(bundle.id, it) }
                         }
                         .padding(12.dp),
@@ -608,7 +608,7 @@ private fun MiniAppButtonCard(
             .clip(RoundedCornerShape(24.dp))
             .background(primary.copy(alpha = 0.13f))
             .border(BorderStroke(1.dp, primary.copy(alpha = 0.18f)), RoundedCornerShape(24.dp))
-            .clickable(enabled = component.actionId != null) {
+            .bounceClick(enabled = component.actionId != null) {
                 component.actionId?.let { onRunAction(bundle.id, it) }
             }
             .padding(16.dp),

@@ -477,7 +477,7 @@ fun AuraLauncherApp(
                                                     Color.Transparent
                                                 }
                                             )
-                                            .clickable {
+                                            .bounceClick {
                                                 navController.navigate(route.name) {
                                                     popUpTo(navController.graph.findStartDestination().id) {
                                                         saveState = true
@@ -522,6 +522,14 @@ fun AuraLauncherApp(
                     }
                 }
             ) { padding ->
+            val slideSpringSpec = spring<androidx.compose.ui.unit.IntOffset>(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+            val fadeSpringSpec = spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
             NavHost(
                 navController = navController,
                 startDestination = Route.Home.name,
@@ -529,26 +537,26 @@ fun AuraLauncherApp(
                 enterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 exitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 },
                 popEnterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 popExitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 }
             ) {
                 composable(Route.Home.name) {

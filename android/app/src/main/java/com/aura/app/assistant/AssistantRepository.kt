@@ -1,7 +1,6 @@
 package com.aura.app.assistant
 
 import com.aura.app.session.SessionStore
-import com.aura.app.BuildConfig
 import com.aura.app.apps.AppInfo
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
@@ -28,9 +27,6 @@ class AssistantRepository(
 
     init {
         val normalizedBaseUrl = baseUrl.trimEnd('/') + "/api/"
-        require(BuildConfig.DEBUG || normalizedBaseUrl.startsWith("https://")) {
-            "Aura backend URL must use HTTPS outside debug builds"
-        }
         val authInterceptor = Interceptor { chain ->
             val token = kotlinx.coroutines.runBlocking { sessionStore.accessToken() }
             val request = if (token.isNullOrBlank()) {
@@ -121,6 +117,7 @@ class AssistantRepository(
         image_mime_type: String? = null
     ): ChatResponse = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        settings.currentApiKeyError?.let { throw IllegalStateException(it) }
         val apiKey = settings.currentApiKey
         val model = settings.currentModel
         if (apiKey.isBlank()) {
@@ -170,11 +167,18 @@ class AssistantRepository(
 
     suspend fun transcribe(audioBase64: String, mimeType: String = "audio/wav"): String = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        when (settings.provider) {
+            LlmProvider.Gemini -> settings.googleApiKeyError
+            LlmProvider.OpenAI -> settings.openAiApiKeyError
+            LlmProvider.OpenRouter -> null
+        }?.let { throw IllegalStateException(it) }
         val voiceProvider = when {
             settings.provider == LlmProvider.OpenAI && settings.openAiApiKey.isNotBlank() -> LlmProvider.OpenAI
             settings.provider == LlmProvider.Gemini && settings.googleApiKey.isNotBlank() -> LlmProvider.Gemini
             settings.googleApiKey.isNotBlank() -> LlmProvider.Gemini
             settings.openAiApiKey.isNotBlank() -> LlmProvider.OpenAI
+            settings.googleApiKeyError != null || settings.openAiApiKeyError != null ->
+                throw IllegalStateException("Stored voice API keys could not be read. Re-enter a key in Settings.")
             else -> throw IllegalStateException("Add a Google or OpenAI API key for voice transcription")
         }
         val voiceApiKey = when (voiceProvider) {
@@ -195,6 +199,7 @@ class AssistantRepository(
 
     suspend fun openRouterModels(): List<OpenRouterModelInfo> = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        settings.openRouterApiKeyError?.let { throw IllegalStateException(it) }
         val apiKey = settings.openRouterApiKey.trim()
         if (apiKey.isBlank()) {
             throw IllegalStateException("Add an OpenRouter API key in Settings")
@@ -204,6 +209,7 @@ class AssistantRepository(
 
     suspend fun buildMiniApp(prompt: String): MiniAppBundle = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        settings.currentApiKeyError?.let { throw IllegalStateException(it) }
         val apiKey = settings.currentApiKey
         val model = settings.currentModel
         if (apiKey.isBlank()) {
@@ -228,6 +234,7 @@ class AssistantRepository(
         recordSample: List<Map<String, Any>>
     ): MiniAppRevisionResponse = withContext(Dispatchers.IO) {
         val settings = llmSettingsStore.state.first()
+        settings.currentApiKeyError?.let { throw IllegalStateException(it) }
         val apiKey = settings.currentApiKey
         val model = settings.currentModel
         if (apiKey.isBlank()) {
