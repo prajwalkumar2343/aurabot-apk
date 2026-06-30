@@ -27,45 +27,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def startup():
+    settings.validate_for_runtime()
+
     # Connect database
     db_manager.connect()
     db = get_db()
     
-    # Create database indexes
-    try:
-        await db.users.create_index("email", unique=True)
-        await db.users.create_index("id", unique=True)
-        await db.memories.create_index([("user_id", 1), ("created_at", -1)])
-        await db.todos.create_index([("user_id", 1), ("created_at", -1)])
-        await db.mini_app_records.create_index([("user_id", 1), ("mini_app_id", 1), ("record_type", 1), ("created_at", -1)])
-        await db.login_attempts.create_index("identifier")
-        logger.info("Database indexes verified/created successfully.")
-    except Exception as e:
-        logger.warning(f"Index creation warning: {e}")
+    await db.users.create_index("email", unique=True)
+    await db.users.create_index("id", unique=True)
+    await db.memories.create_index([("user_id", 1), ("created_at", -1)])
+    await db.todos.create_index([("user_id", 1), ("created_at", -1)])
+    await db.mini_app_records.create_index([("user_id", 1), ("mini_app_id", 1), ("record_type", 1), ("created_at", -1)])
+    await db.login_attempts.create_index("identifier")
+    await db.refresh_sessions.create_index("jti_hash", unique=True)
+    logger.info("Database indexes verified/created successfully.")
 
     # Seed Admin Account
-    try:
-        admin_email = settings.ADMIN_EMAIL.lower().strip()
-        admin_password = settings.ADMIN_PASSWORD
-        existing = await db.users.find_one({"email": admin_email})
-        if not existing:
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()),
-                "email": admin_email,
-                "name": "Admin",
-                "role": "admin",
-                "password_hash": hash_password(admin_password),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            logger.info(f"Seeded admin user: {admin_email}")
-        elif not verify_password(admin_password, existing["password_hash"]):
-            await db.users.update_one(
-                {"email": admin_email},
-                {"$set": {"password_hash": hash_password(admin_password)}},
-            )
-            logger.info("Updated admin password hash based on latest settings.")
-    except Exception as e:
-        logger.error(f"Failed to seed/verify admin user on startup: {e}")
+    admin_email = settings.ADMIN_EMAIL.lower().strip()
+    admin_password = settings.ADMIN_PASSWORD
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": admin_email,
+            "name": "Admin",
+            "role": "admin",
+            "password_hash": hash_password(admin_password),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"Seeded admin user: {admin_email}")
+    elif not verify_password(admin_password, existing["password_hash"]):
+        await db.users.update_one(
+            {"email": admin_email},
+            {"$set": {"password_hash": hash_password(admin_password)}},
+        )
+        logger.info("Updated admin password hash based on latest settings.")
 
     try:
         await init_memory_backend()
@@ -105,7 +101,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=list(settings.CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
