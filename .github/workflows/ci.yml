@@ -59,7 +59,7 @@ jobs:
         run: flake8 app tests --select=E9,F63,F7,F82 --count --show-source --statistics
 
       - name: Run local backend tests
-        run: pytest tests --ignore=tests/test_aura_backend.py --junitxml=../test_reports/pytest/backend-ci-results.xml
+        run: pytest tests --junitxml=../test_reports/pytest/backend-ci-results.xml
 
       - name: Upload backend test report
         if: always()
@@ -72,7 +72,7 @@ jobs:
   android:
     name: Android
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -96,6 +96,12 @@ jobs:
         with:
           cache-provider: basic
 
+      - name: Enable KVM for managed devices
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
@@ -105,6 +111,14 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Run Android instrumentation smoke tests
+        timeout-minutes: 25
+        run: >
+          ./gradlew pixel2Api34DebugAndroidTest
+          -Pandroid.testInstrumentationRunnerArguments.class=com.aura.app.LauncherResponsivePhoneSmokeTest,com.aura.app.FieldNotesReactRuntimeSmokeTest
+          --no-daemon
+          --stacktrace
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -112,6 +126,9 @@ jobs:
           name: android-reports
           path: |
             android/app/build/reports/tests/
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/managed_device_android_test_additional_output/
             android/app/build/reports/lint-results-debug.html
             android/app/build/reports/lint-results-debug.xml
           if-no-files-found: ignore
