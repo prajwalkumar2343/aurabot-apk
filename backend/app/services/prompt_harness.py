@@ -7,6 +7,7 @@ from app.models.chat import ChatActionOut, ChatIn
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONTEXT_FILES = ("README.md", "memory/PRD.md")
+SKILLS_ROOT = WORKSPACE_ROOT / "skills"
 ALLOWED_CONTEXT_FILES = {
     "README.md",
     "memory/PRD.md",
@@ -14,6 +15,7 @@ ALLOWED_CONTEXT_FILES = {
     "design_guidelines.json",
 }
 MAX_CONTEXT_CHARS = 1800
+MAX_SKILL_DETAIL_CHARS = 5000
 DEFAULT_GEMINI_FAST_MODEL = "gemini-2.5-flash"
 DEFAULT_GEMINI_DEEP_MODEL = "gemini-2.5-pro"
 
@@ -26,70 +28,23 @@ class ContextSnippet:
 
 
 @dataclass(frozen=True)
-class SkillCard:
+class SkillDefinition:
     name: str
     summary: str
     triggers: tuple[str, ...]
     detail: str
+    path: str
 
 
 @dataclass(frozen=True)
 class PromptHarness:
     context_snippets: list[ContextSnippet] = field(default_factory=list)
     skill_summaries: list[str] = field(default_factory=list)
-    activated_skills: list[SkillCard] = field(default_factory=list)
+    activated_skills: list[SkillDefinition] = field(default_factory=list)
     planning_mode: str = "off"
     routed_model: Optional[str] = None
     route_reason: str = "model routing disabled"
     max_repair_attempts: int = 1
-
-
-SKILL_CARDS = (
-    SkillCard(
-        name="launcher_actions",
-        summary="Use local Android launcher actions for opening apps and blocking distractions.",
-        triggers=("block", "restrict", "pause", "limit", "open app", "launcher"),
-        detail=(
-            "When the user asks to block, restrict, pause, or limit an app, call block_app with "
-            "an exact package name when available and a positive duration. Ask a short clarification "
-            "only if the target app cannot be inferred from installed apps or the user request."
-        ),
-    ),
-    SkillCard(
-        name="mini_app_actions",
-        summary="Use installed Aura mini app intents for opening mini apps and local records.",
-        triggers=("mini app", "habit", "streak", "log", "check in", "record", "tracker"),
-        detail=(
-            "For installed mini apps, prefer exact mini_app_id and declared action_id when available. "
-            "Use create_mini_app_record for check-ins/logging and query_mini_app_records for counts, "
-            "history, or streak-like requests."
-        ),
-    ),
-    SkillCard(
-        name="memory_tasks",
-        summary="Use local memories and tasks as grounding context for personal assistant replies.",
-        triggers=("memory", "remember", "todo", "task", "remind", "what do i"),
-        detail=(
-            "Ground answers in the Local memories and Local tasks sections. Do not invent personal "
-            "facts beyond those sections. If a requested memory/task mutation is not available as a "
-            "tool, state the limitation briefly."
-        ),
-    ),
-    SkillCard(
-        name="mini_app_builder",
-        summary="Create safe Aura mini apps, usually as React runtime apps for assistant-built custom tools.",
-        triggers=("build", "create", "make", "generate", "mini app"),
-        detail=(
-            "When the user asks to create, build, make, or generate a mini app, call create_mini_app "
-            "with a specific professional mini_app_prompt that asks for runtime react unless the user explicitly "
-            "requested a native/declarative mini app. The prompt should describe the workflow, data model, polished "
-            "React UI, local records, assistant intents, and any helpful screens/actions. Do not ask for APKs, "
-            "webviews, plugins, remote URLs, network calls, browser storage APIs, or unsupported capabilities. "
-            "When the user asks to revise, upgrade, patch, or add capabilities to an installed mini app, call "
-            "revise_mini_app with the exact target mini app and a specific revision_instruction."
-        ),
-    ),
-)
 
 
 def _safe_context_path(path: str) -> Optional[Path]:
@@ -122,16 +77,117 @@ def load_context_files(requested: Iterable[str], message: str = "") -> list[Cont
     return snippets
 
 
-def discover_skills(data: ChatIn) -> tuple[list[str], list[SkillCard]]:
+def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
+    if not raw.startswith("---\n"):
+        return {}, raw
+
+    marker = "\n---\n"
+    end = raw.find(marker, 4)
+    if end == -1:
+        return {}, raw
+
+    frontmatter = raw[4:end]
+    body = raw[end + len(marker):]
+    metadata: dict[str, object] = {}
+    current_list_key: Optional[str] = None
+
+    for line in frontmatter.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("  - ") and current_list_key:
+            items = metadata.setdefault(current_list_key, [])
+            if isinstance(items, list):
+                items.append(line[4:].strip().strip("\"'"))
+            continue
+        current_list_key = None
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if not value:
+            metadata[key] = []
+            current_list_key = key
+            continue
+        if value.startswith("[") and value.endswith("]"):
+            metadata[key] = [
+                item.strip().strip("\"'")
+                for item in value[1:-1].split(",")
+                if item.strip()
+            ]
+        else:
+            metadata[key] = value.strip("\"'")
+
+    return metadata, body
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, list):
+        return tuple(str(item).strip().lower() for item in value if str(item).strip())
+    if isinstance(value, str):
+        return tuple(item.strip().lower() for item in value.split(",") if item.strip())
+    return ()
+
+
+def _relative_workspace_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(WORKSPACE_ROOT).as_posix()
+    except ValueError:
+        return path.name
+
+
+def load_skill_definitions(skills_root: Path = SKILLS_ROOT) -> list[SkillDefinition]:
+    if not skills_root.exists() or not skills_root.is_dir():
+        return []
+
+    skill_files = sorted(path for path in skills_root.glob("*/SKILL.md") if path.is_file())
+    definitions: list[SkillDefinition] = []
+    seen_names: set[str] = set()
+
+    for path in skill_files:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        metadata, body = _parse_frontmatter(raw)
+        name = str(metadata.get("name") or path.parent.name).strip()
+        if not name or name in seen_names:
+            continue
+        summary = str(metadata.get("description") or "").strip()
+        triggers = _string_list(metadata.get("triggers"))
+        detail = body.strip()
+        if len(detail) > MAX_SKILL_DETAIL_CHARS:
+            detail = detail[:MAX_SKILL_DETAIL_CHARS].rstrip() + "\n[truncated]"
+        definitions.append(
+            SkillDefinition(
+                name=name,
+                summary=summary,
+                triggers=triggers,
+                detail=detail,
+                path=_relative_workspace_path(path),
+            )
+        )
+        seen_names.add(name)
+
+    return definitions
+
+
+def discover_skills(data: ChatIn) -> tuple[list[str], list[SkillDefinition]]:
     message = data.message.lower()
-    summaries = [f"- {card.name}: {card.summary}" for card in SKILL_CARDS]
-    activated: list[SkillCard] = []
-    for card in SKILL_CARDS:
-        if any(trigger in message for trigger in card.triggers):
-            activated.append(card)
-    if data.mini_apps and not any(card.name == "mini_app_actions" for card in activated):
-        activated.append(next(card for card in SKILL_CARDS if card.name == "mini_app_actions"))
-    return summaries, activated[:3]
+    definitions = load_skill_definitions()
+    summaries = [
+        f"- {skill.name}: {skill.summary} ({skill.path})"
+        for skill in definitions
+        if skill.summary
+    ]
+    activated: list[SkillDefinition] = []
+    for skill in definitions:
+        if skill.triggers and any(trigger in message for trigger in skill.triggers):
+            activated.append(skill)
+    if data.mini_apps and not any(skill.name == "mini_app_actions" for skill in activated):
+        mini_app_actions = next((skill for skill in definitions if skill.name == "mini_app_actions"), None)
+        if mini_app_actions:
+            activated.append(mini_app_actions)
+    return summaries, activated[:4]
 
 
 def resolve_planning_mode(data: ChatIn) -> str:
@@ -194,10 +250,10 @@ def format_context_snippets(snippets: list[ContextSnippet]) -> str:
     return "\n\n".join(f"### {snippet.path}\n{snippet.content}" for snippet in snippets)
 
 
-def format_activated_skills(skills: list[SkillCard]) -> str:
+def format_activated_skills(skills: list[SkillDefinition]) -> str:
     if not skills:
         return "- none"
-    return "\n".join(f"- {skill.name}: {skill.detail}" for skill in skills)
+    return "\n\n".join(f"### {skill.name} ({skill.path})\n{skill.detail}" for skill in skills)
 
 
 def format_skill_summaries(summaries: list[str]) -> str:
