@@ -32,7 +32,7 @@ MAX_RECORD_VALUE_CHARS = 4000
 
 
 @router.post("/build", response_model=MiniAppBuildOut)
-async def build_mini_app(data: MiniAppBuildIn):
+async def build_mini_app(data: MiniAppBuildIn, user=Depends(get_current_user)):
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
     raw = await asyncio.to_thread(call_builder_llm, data)
@@ -49,7 +49,7 @@ async def build_mini_app(data: MiniAppBuildIn):
 
 
 @router.post("/revise", response_model=MiniAppRevisionOut)
-async def revise_mini_app(data: MiniAppRevisionIn):
+async def revise_mini_app(data: MiniAppRevisionIn, user=Depends(get_current_user)):
     if not data.instruction.strip():
         raise HTTPException(status_code=400, detail="Revision instruction is required")
     raw = await asyncio.to_thread(call_revision_llm, data)
