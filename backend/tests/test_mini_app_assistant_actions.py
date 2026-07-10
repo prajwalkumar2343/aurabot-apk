@@ -78,10 +78,13 @@ def test_assistant_tool_registry_exposes_intended_tools():
     create_mini_app = next(tool for tool in tools if tool["name"] == "create_mini_app")
     assert create_mini_app["parameters"]["required"] == ["mini_app_prompt"]
     assert "React runtime" in create_mini_app["description"]
+    assert "required Aura home widget" in create_mini_app["description"]
     assert "runtime react" in create_mini_app["parameters"]["properties"]["mini_app_prompt"]["description"]
+    assert "opens the full app when tapped" in create_mini_app["parameters"]["properties"]["mini_app_prompt"]["description"]
     revise_mini_app = next(tool for tool in tools if tool["name"] == "revise_mini_app")
     assert revise_mini_app["parameters"]["required"] == ["revision_instruction"]
     assert "preserving its local records" in revise_mini_app["description"]
+    assert "Aura home widget" in revise_mini_app["description"]
 
 
 def test_parse_create_mini_app_assistant_action():

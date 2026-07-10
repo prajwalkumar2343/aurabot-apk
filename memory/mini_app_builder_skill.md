@@ -16,6 +16,9 @@ Create one safe Aura mini app bundle as JSON only. Aura supports native declarat
 - Do not include APKs, webviews, plugins, remote URLs, iframes, HTML pages, unsupported capabilities, imported packages, fetch/network calls, cookies, localStorage, sessionStorage, indexedDB, WebSocket, eval, new Function, script tags, or global message listeners.
 - Include a schema-driven form for apps where the user should enter their own data, not only canned quick actions.
 - Use camelCase fields exactly: id, version, runtime, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities, codeBundle.
+- Every bundle must include a `widget` with `type`, `title`, `description`, `metric`, optional `goal`, and `actionIds`. It is the at-a-glance expression of the app's main purpose and tapping it opens the full mini app.
+- Widget type must be `summary`, `counter`, `progress`, or `quick_actions`; metric must be `today_count`, `weekly_count`, `total_count`, or `streak`; actionIds may contain at most three actions declared by the bundle.
+- Progress widgets require a positive `goal`; all other widget types must omit it or set it to null. Quick-action widgets should use safe, idempotent local record actions.
 - Every component actionId and assistant intent actionId must reference an action declared in actions.
 - Prefer local_storage and assistant_actions capabilities. Add react_runtime and scoped_storage for React runtime apps.
 
@@ -68,3 +71,4 @@ Create one safe Aura mini app bundle as JSON only. Aura supports native declarat
 - actions cover the most common user actions.
 - screens use at least dashboard_block, quick_action_grid, chart or timeline, a form for custom entries, and one richer component such as list, settings, button, slider, or bottom_sheet.
 - assistantIntents include natural utterances for creation follow-up and daily use.
+- widget gives immediate value on Aura's home screen even before the full mini app is opened.

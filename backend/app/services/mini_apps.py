@@ -10,6 +10,7 @@ from typing import Optional
 from app.models.chat import ChatIn
 from app.models.mini_apps import MiniAppBuildIn, MiniAppBundle, MiniAppRevisionIn
 from app.services.llm import call_gemini, call_openai, call_openrouter
+from app.services.mini_app_widgets import ensure_mini_app_widget, validate_mini_app_widget
 
 
 MINI_APP_BUILDER_SKILL_PATH = Path(__file__).resolve().parents[3] / "memory" / "mini_app_builder_skill.md"
@@ -35,9 +36,11 @@ SUPPORTED_CAPABILITIES = {"local_storage", "assistant_actions", "notifications",
 SUPPORTED_FIELDS = {"text", "number", "boolean", "date", "datetime"}
 SUPPORTED_RUNTIMES = {"native", "react"}
 SUPPORTED_CODE_APIS = {"records"}
+MINI_APP_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 MAX_APP_JSX_CHARS = 30000
 MAX_CSS_CHARS = 16000
 MAX_COMPILED_JS_CHARS = 1_500_000
+MAX_LLM_OUTPUT_CHARS = 2_000_000
 BLOCKED_CODE_PATTERNS = (
     "addEventListener('message'",
     'addEventListener("message"',
@@ -101,7 +104,8 @@ def mini_app_builder_system_prompt(
         f"{mini_app_builder_skill_prompt()}\n\n"
         f"Supported component types: {components}. "
         f"{runtime_rule}"
-        "Use camelCase fields exactly matching the schema: id, version, runtime, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities, codeBundle. "
+        "Use camelCase fields exactly matching the schema: id, version, runtime, metadata, theme, icon, dataSchema, screens, actions, assistantIntents, capabilities, codeBundle, widget. "
+        "Every mini app must include widget with type, title, description, metric, optional goal, and actionIds. The widget must express the app's main purpose at a glance and opens the full mini app when tapped. Use type summary, counter, progress, or quick_actions; metric today_count, weekly_count, total_count, or streak; and no more than three declared action ids. Progress widgets require a positive goal; other types omit goal. Quick-action widgets use safe local record actions. "
         "When creating React mini apps, set runtime to react, include react_runtime and scoped_storage capabilities, and include codeBundle with appJsx and css. "
         "React code must declare `export default function App(props)` and use only React plus the provided Aura APIs from props: records.list, records.create, records.update, records.delete. "
         "Do not import packages, fetch URLs, use cookies, localStorage, sessionStorage, indexedDB, WebSocket, eval, new Function, script tags, or global message listeners. "
@@ -131,6 +135,7 @@ def mini_app_revision_system_prompt(data: MiniAppRevisionIn, repair_error: Optio
         "When the user asks to track a new attribute, add it to dataSchema.fields, add useful UI for entering/viewing it, "
         "add or update chart/list/timeline components when helpful, add quick actions when safe, and add assistantIntents "
         "for natural voice use. For React apps, revise codeBundle.appJsx and css while keeping only the allowed records API. "
+        "Preserve and improve the existing widget so it continues to express the revised app's main purpose. "
         "Do not include compiledJs; Aura will compile it. Do not use imports, network calls, browser storage, eval, or script tags.\n\n"
         f"Current bundle JSON:\n{json.dumps(current, ensure_ascii=False)}\n\n"
         f"Recent record sample JSON:\n{json.dumps(record_sample, ensure_ascii=False)}\n\n"
@@ -148,6 +153,8 @@ def mini_app_revision_system_prompt(data: MiniAppRevisionIn, repair_error: Optio
 
 def parse_json_object(raw: str) -> dict:
     text = raw.strip()
+    if len(text) > MAX_LLM_OUTPUT_CHARS:
+        raise HTTPException(status_code=422, detail="LLM response is too large")
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
@@ -165,12 +172,14 @@ def parse_json_object(raw: str) -> dict:
 
 def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
     try:
-        bundle = MiniAppBundle(**payload)
+        bundle = ensure_mini_app_widget(MiniAppBundle(**payload))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Invalid mini app bundle: {str(exc)[:200]}")
 
     if not bundle.id.strip():
         raise HTTPException(status_code=422, detail="Mini app id is required")
+    if not MINI_APP_ID_PATTERN.fullmatch(bundle.id):
+        raise HTTPException(status_code=422, detail="Mini app id must use lowercase letters, numbers, dots, underscores, or hyphens")
     if bundle.runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=422, detail=f"Unsupported runtime: {bundle.runtime}")
     if not bundle.metadata.name.strip():
@@ -207,6 +216,10 @@ def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
             for field_name in action.values:
                 if field_name not in schema_field_names:
                     raise HTTPException(status_code=422, detail=f"Unknown action field: {field_name}")
+            for value in action.values.values():
+                if len(value) > 4000:
+                    raise HTTPException(status_code=422, detail=f"Action value is too large: {action.id}")
+    validate_mini_app_widget(bundle, action_ids)
     screen_ids = {screen.id for screen in bundle.screens}
     if len(screen_ids) != len(bundle.screens):
         raise HTTPException(status_code=422, detail="Screen ids must be unique")
@@ -231,6 +244,8 @@ def validate_mini_app_bundle(payload: dict) -> MiniAppBundle:
             raise HTTPException(status_code=422, detail=f"Unknown intent action: {intent.actionId}")
         if intent.screenId and intent.screenId not in screen_ids:
             raise HTTPException(status_code=422, detail=f"Unknown intent screen: {intent.screenId}")
+        if any(not utterance.strip() or len(utterance) > 160 for utterance in intent.utterances):
+            raise HTTPException(status_code=422, detail=f"Invalid intent utterance: {intent.name}")
     return bundle
 
 

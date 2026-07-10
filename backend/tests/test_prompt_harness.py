@@ -79,6 +79,8 @@ def test_ai_harness_rules_affect_mini_app_prompts():
     assert "Use progressive disclosure for skills" in system
     assert "### mini_app_builder" in system
     assert "call create_mini_app with a specific professional mini_app_prompt" in system
+    assert "Every mini app bundle must include that widget" in system
+    assert "required Aura home widget representing the app's main purpose" in system
 
 
 def test_planning_mode_auto_enables_plan_for_complex_requests():
