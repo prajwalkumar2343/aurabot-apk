@@ -65,12 +65,22 @@ async def revoke_refresh_session(db: Any, jti: str, user_id: Optional[str] = Non
 
 async def consume_active_refresh_session(db: Any, user_id: str, jti: str) -> dict:
     """Atomically mark one unexpired refresh session as consumed."""
+    jti_hash = refresh_token_fingerprint(jti)
+    candidate = await db.refresh_sessions.find_one({"jti_hash": jti_hash, "user_id": user_id})
+    expires_at = _parse_datetime(candidate.get("expires_at")) if candidate else None
+    if not candidate or candidate.get("revoked_at") or not expires_at or expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    expiry_guard: dict = (
+        {"$gt": datetime.now(timezone.utc)}
+        if isinstance(candidate.get("expires_at"), datetime)
+        else candidate["expires_at"]
+    )
     session = await db.refresh_sessions.find_one_and_update(
         {
-            "jti_hash": refresh_token_fingerprint(jti),
+            "jti_hash": jti_hash,
             "user_id": user_id,
             "revoked_at": {"$exists": False},
-            "expires_at": {"$gt": datetime.now(timezone.utc)},
+            "expires_at": expiry_guard,
         },
         {"$set": {"revoked_at": datetime.now(timezone.utc)}},
         return_document=ReturnDocument.AFTER,

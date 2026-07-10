@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import requests
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.models.memory import MemoryCreate, MemoryOut, MemorySearchOut
