@@ -10,8 +10,12 @@ data class LoginResponse(
     val email: String,
     val name: String?,
     val role: String?,
-    val access_token: String
+    val access_token: String,
+    val refresh_token: String
 )
+
+data class RefreshRequest(val refresh_token: String)
+data class RefreshResponse(val access_token: String, val refresh_token: String)
 
 data class UserResponse(val id: String, val email: String, val name: String?, val role: String?)
 
