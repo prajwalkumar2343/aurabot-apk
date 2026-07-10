@@ -226,6 +226,8 @@ fun HomeScreen(
     onSwipeLeft: () -> Unit,
     onSelectWallpaper: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMiniApp: (String) -> Unit,
+    onRunMiniAppWidgetAction: (String, String) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
     onClearAttachment: () -> Unit,
     onLaunchPicker: () -> Unit,
@@ -287,6 +289,12 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+        MiniAppHomeWidgetSection(
+            widgets = state.homeMiniAppWidgets,
+            unavailableCount = state.unavailableMiniAppWidgetCount,
+            onOpenMiniApp = onOpenMiniApp,
+            onRunAction = onRunMiniAppWidgetAction
+        )
         Spacer(Modifier.weight(1f))
         AssistantComposer(
             value = state.assistantInput,

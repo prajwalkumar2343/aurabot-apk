@@ -148,6 +148,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -179,6 +182,7 @@ import com.aura.app.miniapps.MiniAppVersion
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
@@ -290,11 +294,21 @@ fun AuraLauncherApp(
     onMinimizeApp: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val onboardingComplete = state.session.onboardingComplete
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showHomePrompt by remember { mutableStateOf(false) }
+
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                viewModel.refreshMiniAppWidgets()
+                delay(15 * 60 * 1000L)
+            }
+        }
+    }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -582,6 +596,11 @@ fun AuraLauncherApp(
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
                         onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onOpenSettings = { navController.navigate(Route.Settings.name) },
+                        onOpenMiniApp = { miniAppId ->
+                            viewModel.openMiniApp(miniAppId)
+                            navController.navigate(Route.MiniApp.name)
+                        },
+                        onRunMiniAppWidgetAction = viewModel::runMiniAppWidgetAction,
                         onLaunchApp = { app ->
                             if (app.packageName == "com.aura.app.settings") {
                                 navController.navigate(Route.Settings.name)

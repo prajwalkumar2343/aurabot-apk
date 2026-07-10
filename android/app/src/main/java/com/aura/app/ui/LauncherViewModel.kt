@@ -31,6 +31,8 @@ import com.aura.app.miniapps.MiniAppInstall
 import com.aura.app.miniapps.MiniAppRecord
 import com.aura.app.miniapps.MiniAppRevisionPreview
 import com.aura.app.miniapps.MiniAppVersion
+import com.aura.app.miniapps.MiniAppWidgetSnapshot
+import com.aura.app.miniapps.MiniAppWidgetCatalog
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
 import kotlinx.coroutines.CancellationException
@@ -41,6 +43,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class LauncherUiState(
     val session: SessionState = SessionState(),
@@ -60,6 +64,8 @@ data class LauncherUiState(
     val automationRunLogs: Map<String, List<AutomationRunLog>> = emptyMap(),
     val automationPermissionStatuses: Map<String, List<AutomationPermissionStatus>> = emptyMap(),
     val miniApps: List<MiniAppInstall> = emptyList(),
+    val homeMiniAppWidgets: List<MiniAppWidgetSnapshot> = emptyList(),
+    val unavailableMiniAppWidgetCount: Int = 0,
     val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
     val activeMiniApp: MiniAppBundle? = null,
     val activeMiniAppRecords: List<MiniAppRecord> = emptyList(),
@@ -98,6 +104,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val dismissedMiniAppEvolutions = mutableSetOf<String>()
     private val dismissedMemoryAppProposalTopics = mutableSetOf<String>()
     private var transcribingAudioBase64: String? = null
+    private val widgetRefreshMutex = Mutex()
+    private val widgetActionMutex = Mutex()
+    private val widgetActionsInFlight = mutableSetOf<String>()
 
     val uiState: StateFlow<LauncherUiState> =
         combine(
@@ -598,14 +607,17 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
         val installed = container.miniAppRepository.install(bundle)
         val installedApps = container.miniAppRepository.listInstalled()
+        val installedBundle = container.miniAppRepository.bundle(bundle.id) ?: bundle
         val records = if (openAfterCreate) container.miniAppRepository.records(bundle.id) else emptyList()
         val versions = if (openAfterCreate) container.miniAppRepository.versions(bundle.id) else emptyList()
-        localState.update {
-            it.copy(
+        updateStateWithWidgetCatalog { state, widgetCatalog ->
+            state.copy(
                 miniApps = installedApps,
-                activeMiniApp = if (openAfterCreate) bundle else it.activeMiniApp,
-                activeMiniAppRecords = if (openAfterCreate) records else it.activeMiniAppRecords,
-                activeMiniAppVersions = if (openAfterCreate) versions else it.activeMiniAppVersions
+                homeMiniAppWidgets = widgetCatalog.widgets,
+                unavailableMiniAppWidgetCount = widgetCatalog.invalidMiniAppIds.size,
+                activeMiniApp = if (openAfterCreate) installedBundle else state.activeMiniApp,
+                activeMiniAppRecords = if (openAfterCreate) records else state.activeMiniAppRecords,
+                activeMiniAppVersions = if (openAfterCreate) versions else state.activeMiniAppVersions
             )
         }
         return installed
@@ -615,7 +627,16 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 container.miniAppRepository.ensureBuiltInsInstalled()
-                localState.update { it.copy(miniApps = container.miniAppRepository.listInstalled()) }
+                val backfillFailures = container.miniAppRepository.backfillLegacyWidgets()
+                val installed = container.miniAppRepository.listInstalled()
+                updateStateWithWidgetCatalog { state, widgetCatalog ->
+                    val unavailableCount = (backfillFailures + widgetCatalog.invalidMiniAppIds).distinct().size
+                    state.copy(
+                        miniApps = installed,
+                        homeMiniAppWidgets = widgetCatalog.widgets,
+                        unavailableMiniAppWidgetCount = unavailableCount
+                    )
+                }
             } catch (error: Exception) {
                 localState.update { it.copy(error = error.message ?: "Could not load mini apps") }
             }
@@ -762,6 +783,55 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    private suspend fun refreshHomeMiniAppWidget(miniAppId: String) {
+        try {
+            widgetRefreshMutex.withLock {
+                val snapshot = container.miniAppRepository.widgetSnapshot(miniAppId)
+                localState.update { state ->
+                    val current = state.homeMiniAppWidgets
+                    val updated = when {
+                        snapshot == null -> current.filterNot { it.bundle.id == miniAppId }
+                        current.any { it.bundle.id == miniAppId } -> current.map {
+                            if (it.bundle.id == miniAppId) snapshot else it
+                        }
+                        else -> current + snapshot
+                    }
+                    state.copy(homeMiniAppWidgets = updated)
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            localState.update { it.copy(error = error.message ?: "Could not refresh mini app widget") }
+        }
+    }
+
+    fun refreshMiniAppWidgets() {
+        viewModelScope.launch {
+            try {
+                updateStateWithWidgetCatalog { state, catalog ->
+                    state.copy(
+                        homeMiniAppWidgets = catalog.widgets,
+                        unavailableMiniAppWidgetCount = catalog.invalidMiniAppIds.size
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not refresh mini app widgets") }
+            }
+        }
+    }
+
+    private suspend fun updateStateWithWidgetCatalog(
+        transform: (LauncherUiState, MiniAppWidgetCatalog) -> LauncherUiState
+    ) {
+        widgetRefreshMutex.withLock {
+            val catalog = container.miniAppRepository.widgetCatalog()
+            localState.update { state -> transform(state, catalog) }
+        }
+    }
+
     fun closeMiniApp() {
         localState.update {
             it.copy(
@@ -778,13 +848,37 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun runMiniAppAction(miniAppId: String, actionId: String) {
         viewModelScope.launch {
             container.miniAppRepository.runAction(miniAppId, actionId)
+            refreshHomeMiniAppWidget(miniAppId)
             openMiniApp(miniAppId)
+        }
+    }
+
+    fun runMiniAppWidgetAction(miniAppId: String, actionId: String) {
+        viewModelScope.launch {
+            val operationKey = "$miniAppId:$actionId"
+            val admitted = widgetActionMutex.withLock { widgetActionsInFlight.add(operationKey) }
+            if (!admitted) return@launch
+            try {
+                val record = container.miniAppRepository.runAction(miniAppId, actionId)
+                if (record == null) {
+                    localState.update { it.copy(error = "This widget action is no longer available") }
+                } else {
+                    refreshHomeMiniAppWidget(miniAppId)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                localState.update { it.copy(error = error.message ?: "Could not run mini app widget action") }
+            } finally {
+                widgetActionMutex.withLock { widgetActionsInFlight.remove(operationKey) }
+            }
         }
     }
 
     fun createMiniAppRecord(miniAppId: String, recordType: String, values: Map<String, String>) {
         viewModelScope.launch {
             container.miniAppRepository.createRecord(miniAppId, recordType, values)
+            refreshHomeMiniAppWidget(miniAppId)
             openMiniApp(miniAppId)
         }
     }
@@ -795,6 +889,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun createMiniAppRecordForRuntime(miniAppId: String, recordType: String, values: Map<String, String>): MiniAppRecord =
         container.miniAppRepository.createRecord(miniAppId, recordType, values).also {
             val records = container.miniAppRepository.records(miniAppId)
+            refreshHomeMiniAppWidget(miniAppId)
             val suggestion = uiState.value.activeMiniApp?.let { bundle -> suggestMiniAppEvolution(bundle, records) }
             localState.update { state ->
                 state.copy(
@@ -871,13 +966,17 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 val installed = container.miniAppRepository.applyRevision(preview)
                 val records = container.miniAppRepository.records(installed.id)
                 val versions = container.miniAppRepository.versions(installed.id)
-                localState.update {
-                    it.copy(
-                        miniApps = container.miniAppRepository.listInstalled(),
-                        activeMiniApp = preview.bundle,
+                val installedApps = container.miniAppRepository.listInstalled()
+                val activeBundle = container.miniAppRepository.bundle(installed.id) ?: preview.bundle
+                updateStateWithWidgetCatalog { state, widgetCatalog ->
+                    state.copy(
+                        miniApps = installedApps,
+                        homeMiniAppWidgets = widgetCatalog.widgets,
+                        unavailableMiniAppWidgetCount = widgetCatalog.invalidMiniAppIds.size,
+                        activeMiniApp = activeBundle,
                         activeMiniAppRecords = records,
                         activeMiniAppVersions = versions,
-                        activeMiniAppEvolutionSuggestion = suggestMiniAppEvolution(preview.bundle, records),
+                        activeMiniAppEvolutionSuggestion = suggestMiniAppEvolution(activeBundle, records),
                         pendingMiniAppRevision = null,
                         error = null
                     )
@@ -896,10 +995,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 val bundle = container.miniAppRepository.bundle(id)
                 val records = container.miniAppRepository.records(id)
                 val versions = container.miniAppRepository.versions(id)
-                localState.update {
+                val installed = container.miniAppRepository.listInstalled()
+                updateStateWithWidgetCatalog { state, widgetCatalog ->
                     val suggestion = bundle?.let { activeBundle -> suggestMiniAppEvolution(activeBundle, records) }
-                    it.copy(
-                        miniApps = container.miniAppRepository.listInstalled(),
+                    state.copy(
+                        miniApps = installed,
+                        homeMiniAppWidgets = widgetCatalog.widgets,
+                        unavailableMiniAppWidgetCount = widgetCatalog.invalidMiniAppIds.size,
                         activeMiniApp = bundle,
                         activeMiniAppRecords = records,
                         activeMiniAppVersions = versions,
@@ -917,6 +1019,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun updateMiniAppRecordForRuntime(miniAppId: String, recordId: String, values: Map<String, String>): MiniAppRecord? =
         container.miniAppRepository.updateRecord(miniAppId, recordId, values).also {
             val records = container.miniAppRepository.records(miniAppId)
+            refreshHomeMiniAppWidget(miniAppId)
             localState.update { state ->
                 state.copy(
                     activeMiniAppRecords = records,
@@ -926,20 +1029,22 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
 
     suspend fun deleteMiniAppRecordForRuntime(miniAppId: String, recordId: String): Boolean {
-        container.miniAppRepository.deleteRecord(miniAppId, recordId)
+        val deleted = container.miniAppRepository.deleteRecord(miniAppId, recordId)
         val records = container.miniAppRepository.records(miniAppId)
+        refreshHomeMiniAppWidget(miniAppId)
         localState.update { state ->
             state.copy(
                 activeMiniAppRecords = records,
                 activeMiniAppEvolutionSuggestion = state.activeMiniApp?.let { bundle -> suggestMiniAppEvolution(bundle, records) }
             )
         }
-        return true
+        return deleted
     }
 
     fun deleteMiniAppRecord(miniAppId: String, recordId: String) {
         viewModelScope.launch {
             container.miniAppRepository.deleteRecord(miniAppId, recordId)
+            refreshHomeMiniAppWidget(miniAppId)
             openMiniApp(miniAppId)
         }
     }
