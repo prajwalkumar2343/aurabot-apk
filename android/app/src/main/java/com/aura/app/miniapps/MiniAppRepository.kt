@@ -2,7 +2,11 @@ package com.aura.app.miniapps
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class MiniAppRepository(
     private val dao: MiniAppDao,
@@ -17,56 +21,58 @@ class MiniAppRepository(
         val valid = MiniAppValidator.validate(bundle)
         val now = clock()
         val existing = dao.bundle(valid.id)
-        dao.installBundle(
-            MiniAppBundleEntity(
-                id = valid.id,
-                name = valid.metadata.name,
-                description = valid.metadata.description,
-                category = valid.metadata.category,
-                iconValue = valid.icon.value,
-                iconBackground = valid.icon.background,
-                builtIn = valid.metadata.builtIn,
-                bundleJson = gson.toJson(valid),
-                installedAt = existing?.installedAt ?: now,
-                updatedAt = now
+        val existingBundle = existing?.let { entity ->
+            try {
+                MiniAppValidator.validate(gson.fromJson(entity.bundleJson, MiniAppBundle::class.java))
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (existing != null && existingBundle == valid) {
+            val canonical = valid.entity(existing.installedAt, existing.updatedAt)
+            if (existing != canonical) {
+                dao.installBundle(canonical)
+            }
+            return valid.install(existing.installedAt)
+        }
+        val installedAt = existing?.installedAt ?: now
+        dao.persistInstall(
+            bundle = valid.entity(installedAt, now),
+            version = valid.versionEntity("Installed ${valid.metadata.name}.", listOf("Initial install."), now),
+            event = MiniAppEventEntity(
+                UUID.randomUUID().toString(),
+                valid.id,
+                if (existing == null) "installed" else "reinstalled",
+                "{}",
+                now
             )
         )
-        storeVersion(valid, "Installed ${valid.metadata.name}.", listOf("Initial install."), now)
-        dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), valid.id, "installed", "{}", now))
-        return valid.install(now)
+        return valid.install(installedAt)
     }
 
     suspend fun applyRevision(preview: MiniAppRevisionPreview): MiniAppInstall {
         val valid = MiniAppValidator.validate(preview.bundle)
         val now = clock()
         val existing = dao.bundle(valid.id)
-        existing?.bundleJson?.let { json ->
-            val current = gson.fromJson(json, MiniAppBundle::class.java)
-            storeVersion(
-                current,
-                "Snapshot before v${valid.version}.",
-                listOf("Rollback point before: ${preview.summary}"),
-                existing.updatedAt
+        val current = existing?.bundleJson?.let { json ->
+            MiniAppValidator.validate(gson.fromJson(json, MiniAppBundle::class.java))
+        } ?: throw MiniAppValidationException("Unknown mini app: ${valid.id}")
+        validateRevisionCompatibility(current, valid)
+        val versions = buildList {
+            add(
+                current.versionEntity(
+                    "Snapshot before v${valid.version}.",
+                    listOf("Rollback point before: ${preview.summary}"),
+                    existing.updatedAt
+                )
             )
-            migrateRecords(current, valid)
-        }
-        dao.installBundle(
-            MiniAppBundleEntity(
-                id = valid.id,
-                name = valid.metadata.name,
-                description = valid.metadata.description,
-                category = valid.metadata.category,
-                iconValue = valid.icon.value,
-                iconBackground = valid.icon.background,
-                builtIn = false,
-                bundleJson = gson.toJson(valid),
-                installedAt = existing?.installedAt ?: now,
-                updatedAt = now
-            )
-        )
-        storeVersion(valid, preview.summary, preview.migrationPlan, now)
-        dao.insertEvent(
-            MiniAppEventEntity(
+            add(valid.versionEntity(preview.summary, preview.migrationPlan, now))
+        }.distinctBy { it.version }
+        dao.persistRevision(
+            migratedRecords = migratedRecords(current, valid, now),
+            bundle = valid.entity(existing.installedAt, now, builtIn = false),
+            versions = versions,
+            event = MiniAppEventEntity(
                 UUID.randomUUID().toString(),
                 valid.id,
                 "revision_applied",
@@ -74,14 +80,55 @@ class MiniAppRepository(
                 now
             )
         )
-        return valid.install(existing?.installedAt ?: now)
+        return valid.install(existing.installedAt)
     }
 
     suspend fun listInstalled(): List<MiniAppInstall> =
         dao.listBundles().map { it.install() }
 
     suspend fun bundle(id: String): MiniAppBundle? =
-        dao.bundle(id)?.bundleJson?.let { gson.fromJson(it, MiniAppBundle::class.java) }
+        dao.bundle(id)?.bundleJson?.let { MiniAppValidator.validate(gson.fromJson(it, MiniAppBundle::class.java)) }
+
+    suspend fun backfillLegacyWidgets(): List<String> {
+        val invalidIds = mutableListOf<String>()
+        dao.listBundles().forEach { entity ->
+            try {
+                val decoded = gson.fromJson(entity.bundleJson, MiniAppBundle::class.java)
+                val normalized = try {
+                    MiniAppValidator.validate(decoded)
+                } catch (_: MiniAppValidationException) {
+                    MiniAppValidator.validate(decoded.copy(widget = null))
+                }
+                if (decoded.widget != normalized.widget) {
+                    dao.installBundle(entity.copy(bundleJson = gson.toJson(normalized)))
+                }
+            } catch (_: Exception) {
+                invalidIds += entity.id
+            }
+        }
+        return invalidIds
+    }
+
+    suspend fun widgetCatalog(): MiniAppWidgetCatalog {
+        val validBundles = mutableListOf<MiniAppBundle>()
+        val invalidIds = mutableListOf<String>()
+        dao.listBundles().forEach { entity ->
+            try {
+                validBundles += MiniAppValidator.validate(gson.fromJson(entity.bundleJson, MiniAppBundle::class.java))
+            } catch (_: Exception) {
+                invalidIds += entity.id
+            }
+        }
+        return MiniAppWidgetCatalog(
+            widgets = widgetSnapshots(validBundles),
+            invalidMiniAppIds = invalidIds
+        )
+    }
+
+    suspend fun widgetSnapshot(miniAppId: String): MiniAppWidgetSnapshot? {
+        val bundle = bundle(miniAppId) ?: return null
+        return widgetSnapshots(listOf(bundle)).first()
+    }
 
     suspend fun versions(miniAppId: String): List<MiniAppVersion> {
         val activeVersion = bundle(miniAppId)?.version
@@ -93,22 +140,9 @@ class MiniAppRepository(
         val bundle = MiniAppValidator.validate(gson.fromJson(target.bundleJson, MiniAppBundle::class.java))
         val existing = dao.bundle(miniAppId)
         val now = clock()
-        dao.installBundle(
-            MiniAppBundleEntity(
-                id = bundle.id,
-                name = bundle.metadata.name,
-                description = bundle.metadata.description,
-                category = bundle.metadata.category,
-                iconValue = bundle.icon.value,
-                iconBackground = bundle.icon.background,
-                builtIn = bundle.metadata.builtIn,
-                bundleJson = gson.toJson(bundle),
-                installedAt = existing?.installedAt ?: now,
-                updatedAt = now
-            )
-        )
-        dao.insertEvent(
-            MiniAppEventEntity(
+        dao.persistRollback(
+            bundle = bundle.entity(existing?.installedAt ?: now, now),
+            event = MiniAppEventEntity(
                 UUID.randomUUID().toString(),
                 miniAppId,
                 "revision_rolled_back",
@@ -145,17 +179,16 @@ class MiniAppRepository(
             createdAt = now,
             updatedAt = now
         )
-        dao.upsertRecord(
-            MiniAppRecordEntity(
+        val entity = MiniAppRecordEntity(
                 id = record.id,
                 miniAppId = miniAppId,
                 recordType = normalizedRecordType,
                 valuesJson = gson.toJson(normalizedValues),
                 createdAt = now,
                 updatedAt = now
-            )
         )
-        dao.insertEvent(
+        dao.persistRecordMutation(
+            entity,
             MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_created", gson.toJson(normalizedValues), now)
         )
         return record
@@ -173,17 +206,19 @@ class MiniAppRepository(
         normalizeRecordType(bundle, existing.recordType)
         val normalizedValues = normalizeRecordValues(bundle, existing.record().values + values)
         val now = clock()
-        dao.upsertRecord(existing.copy(recordType = bundle.dataSchema.recordType, valuesJson = gson.toJson(normalizedValues), updatedAt = now))
-        dao.insertEvent(
+        dao.persistRecordMutation(
+            existing.copy(recordType = bundle.dataSchema.recordType, valuesJson = gson.toJson(normalizedValues), updatedAt = now),
             MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_updated", gson.toJson(normalizedValues), now)
         )
         return dao.record(miniAppId, recordId)?.record()
     }
 
-    suspend fun deleteRecord(miniAppId: String, recordId: String) {
-        dao.deleteRecord(miniAppId, recordId)
-        dao.insertEvent(MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_deleted", """{"id":"$recordId"}""", clock()))
-    }
+    suspend fun deleteRecord(miniAppId: String, recordId: String): Boolean =
+        dao.deleteRecordWithEvent(
+            miniAppId,
+            recordId,
+            MiniAppEventEntity(UUID.randomUUID().toString(), miniAppId, "record_deleted", """{"id":"$recordId"}""", clock())
+        )
 
     private fun MiniAppBundleEntity.install() = MiniAppInstall(
         id = id,
@@ -193,7 +228,11 @@ class MiniAppRepository(
         icon = MiniAppIcon(value = iconValue, background = iconBackground),
         builtIn = builtIn,
         installedAt = installedAt,
-        version = gson.fromJson(bundleJson, MiniAppBundle::class.java)?.version ?: 1
+        version = try {
+            gson.fromJson(bundleJson, MiniAppBundle::class.java)?.version ?: 1
+        } catch (_: Exception) {
+            1
+        }
     )
 
     private fun MiniAppBundle.install(now: Long) = MiniAppInstall(
@@ -207,48 +246,128 @@ class MiniAppRepository(
         version = version
     )
 
-    private suspend fun storeVersion(bundle: MiniAppBundle, summary: String, migrationPlan: List<String>, createdAt: Long) {
-        dao.upsertVersion(
-            MiniAppVersionEntity(
-                miniAppId = bundle.id,
-                version = bundle.version,
-                name = bundle.metadata.name,
-                summary = summary,
-                migrationPlanJson = gson.toJson(migrationPlan),
-                bundleJson = gson.toJson(bundle),
-                createdAt = createdAt
-            )
-        )
-    }
-
-    private suspend fun migrateRecords(previous: MiniAppBundle, next: MiniAppBundle) {
+    private suspend fun migratedRecords(previous: MiniAppBundle, next: MiniAppBundle, now: Long): List<MiniAppRecordEntity> {
         val previousFieldNames = previous.dataSchema.fields.map { it.name }.toSet()
         val newDefaults = next.dataSchema.fields
             .filter { it.name !in previousFieldNames && it.defaultValue != null }
             .associate { it.name to it.defaultValue.orEmpty() }
         val oldPrimaryType = previous.dataSchema.recordType
         val newPrimaryType = next.dataSchema.recordType
-        if (newDefaults.isEmpty() && oldPrimaryType == newPrimaryType) return
-        records(next.id).forEach { record ->
+        if (newDefaults.isEmpty() && oldPrimaryType == newPrimaryType) return emptyList()
+        return records(next.id).mapNotNull { record ->
             val migratedValues = newDefaults.entries.fold(record.values) { values, (key, defaultValue) ->
                 if (key in values) values else values + (key to defaultValue)
             }
             val migratedType = if (record.recordType == oldPrimaryType) newPrimaryType else record.recordType
             if (migratedValues != record.values || migratedType != record.recordType) {
-                val now = clock()
-                dao.upsertRecord(
-                    MiniAppRecordEntity(
-                        id = record.id,
-                        miniAppId = record.miniAppId,
-                        recordType = migratedType,
-                        valuesJson = gson.toJson(migratedValues),
-                        createdAt = record.createdAt,
-                        updatedAt = now
-                    )
+                MiniAppRecordEntity(
+                    id = record.id,
+                    miniAppId = record.miniAppId,
+                    recordType = migratedType,
+                    valuesJson = gson.toJson(migratedValues),
+                    createdAt = record.createdAt,
+                    updatedAt = now
                 )
+            } else null
+        }
+    }
+
+    private fun validateRevisionCompatibility(previous: MiniAppBundle, next: MiniAppBundle) {
+        if (next.version != previous.version + 1) {
+            throw MiniAppValidationException("Mini app revision must increment version by exactly 1")
+        }
+        val nextFields = next.dataSchema.fields.associateBy { it.name }
+        previous.dataSchema.fields.forEach { previousField ->
+            val nextField = nextFields[previousField.name]
+                ?: throw MiniAppValidationException("Mini app revision cannot remove field: ${previousField.name}")
+            if (nextField.type != previousField.type) {
+                throw MiniAppValidationException("Mini app revision cannot change field type: ${previousField.name}")
             }
         }
     }
+
+    private suspend fun widgetSnapshots(bundles: List<MiniAppBundle>): List<MiniAppWidgetSnapshot> {
+        if (bundles.isEmpty()) return emptyList()
+        val now = clock()
+        val todayStart = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val weekStart = now - TimeUnit.DAYS.toMillis(7)
+        val stats = bundles
+            .map { it.id }
+            .chunked(MAX_WIDGET_STATS_BATCH_SIZE)
+            .flatMap { ids -> dao.widgetRecordStats(ids, todayStart, weekStart, now) }
+            .associateBy { it.miniAppId }
+        val streakIds = bundles.filter { it.widget?.metric == "streak" }.map { it.id }
+        val streakDays = streakIds
+            .chunked(MAX_WIDGET_STATS_BATCH_SIZE)
+            .flatMap { ids ->
+                dao.recentRecordDays(ids, now - TimeUnit.DAYS.toMillis(STREAK_LOOKBACK_DAYS), now)
+            }
+            .filter { it.dayKey.isNotBlank() }
+            .groupBy({ it.miniAppId }, { it.dayKey })
+        return bundles.map { bundle ->
+            val recordStats = stats[bundle.id]
+            val streak = if (bundle.widget?.metric == "streak") {
+                calculateWidgetStreak(streakDays[bundle.id].orEmpty(), now)
+            } else 0
+            MiniAppWidgetSnapshot(
+                bundle = bundle,
+                totalCount = recordStats?.totalCount ?: 0,
+                todayCount = recordStats?.todayCount ?: 0,
+                weeklyCount = recordStats?.weeklyCount ?: 0,
+                streak = streak
+            )
+        }
+    }
+
+    private fun calculateWidgetStreak(dayKeys: List<String>, now: Long): Int {
+        if (dayKeys.isEmpty()) return 0
+        val availableDays = dayKeys.toSet()
+        val format = SimpleDateFormat("yyyyMMdd", Locale.US)
+        val calendar = Calendar.getInstance().apply { timeInMillis = now }
+        var streak = 0
+        while (streak < MAX_STREAK_DAY_KEYS && format.format(calendar.time) in availableDays) {
+            streak += 1
+            calendar.add(Calendar.DATE, -1)
+        }
+        return streak
+    }
+
+    private fun MiniAppBundle.entity(
+        installedAt: Long,
+        updatedAt: Long,
+        builtIn: Boolean = metadata.builtIn
+    ) = MiniAppBundleEntity(
+        id = id,
+        name = metadata.name,
+        description = metadata.description,
+        category = metadata.category,
+        iconValue = icon.value,
+        iconBackground = icon.background,
+        builtIn = builtIn,
+        bundleJson = gson.toJson(this),
+        installedAt = installedAt,
+        updatedAt = updatedAt
+    )
+
+    private fun MiniAppBundle.versionEntity(
+        summary: String,
+        migrationPlan: List<String>,
+        createdAt: Long
+    ) = MiniAppVersionEntity(
+        miniAppId = id,
+        version = version,
+        name = metadata.name,
+        summary = summary,
+        migrationPlanJson = gson.toJson(migrationPlan),
+        bundleJson = gson.toJson(this),
+        createdAt = createdAt
+    )
 
     private fun normalizeRecordType(bundle: MiniAppBundle, recordType: String): String {
         val schemaRecordType = bundle.dataSchema.recordType
@@ -299,5 +418,11 @@ class MiniAppRepository(
             createdAt = createdAt,
             updatedAt = updatedAt
         )
+    }
+
+    private companion object {
+        const val MAX_STREAK_DAY_KEYS = 366
+        const val STREAK_LOOKBACK_DAYS = 367L
+        const val MAX_WIDGET_STATS_BATCH_SIZE = 400
     }
 }
