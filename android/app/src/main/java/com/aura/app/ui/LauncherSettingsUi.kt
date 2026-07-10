@@ -493,6 +493,7 @@ fun SettingsScreen(
     onConfigureTasks: () -> Unit,
     onConfigureMemories: () -> Unit,
     onConfigureAutomations: () -> Unit,
+    onConfigureDreams: () -> Unit,
     onQuitApp: () -> Unit,
     onSetAppMode: (String) -> Unit
 ) {
@@ -571,6 +572,12 @@ fun SettingsScreen(
                 subtitle = "${state.automations.size} saved rules for schedules, places, and actions.",
                 icon = Icons.Rounded.AutoAwesome,
                 onClick = onConfigureAutomations
+            )
+            SettingsRow(
+                title = "Aura Dreams",
+                subtitle = "Private nightly analysis with approval-gated improvements.",
+                icon = Icons.Rounded.AutoAwesome,
+                onClick = onConfigureDreams
             )
 
             Spacer(Modifier.height(8.dp))
