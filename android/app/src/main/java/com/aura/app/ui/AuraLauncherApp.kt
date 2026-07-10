@@ -214,6 +214,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.aura.app.ui.dreams.DreamsScreen
+import com.aura.app.ui.dreams.DreamsViewModel
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -222,6 +224,7 @@ private enum class Route(val title: String) {
     Tasks("Tasks"),
     Memory("Memory"),
     Automations("Automations"),
+    Dreams("Dreams"),
     Settings("Settings"),
     Models("Models"),
     MiniApp("MiniApp")
@@ -684,6 +687,7 @@ fun AuraLauncherApp(
                         onConfigureTasks = { navController.navigate(Route.Tasks.name) },
                         onConfigureMemories = { navController.navigate(Route.Memory.name) },
                         onConfigureAutomations = { navController.navigate(Route.Automations.name) },
+                        onConfigureDreams = { navController.navigate(Route.Dreams.name) },
                         onQuitApp = onQuitApp,
                         onSetAppMode = viewModel::setAppMode
                     )
@@ -697,6 +701,17 @@ fun AuraLauncherApp(
                         onRunNow = viewModel::runAutomationNow,
                         onDelete = viewModel::deleteAutomation,
                         onOpenPermissions = onRequestAutomationPermissions
+                    )
+                }
+                composable(Route.Dreams.name) {
+                    val container = (context.applicationContext as com.aura.app.AuraApplication).container
+                    val dreamsViewModel: DreamsViewModel = viewModel(
+                        factory = DreamsViewModel.factory(container)
+                    )
+                    DreamsScreen(
+                        viewModel = dreamsViewModel,
+                        wallpaperUri = state.session.wallpaperUri,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable(Route.Models.name) {
@@ -726,6 +741,7 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Tasks -> Icons.Rounded.CheckCircle
     Route.Memory -> Icons.Rounded.Layers
     Route.Automations -> Icons.Rounded.AutoAwesome
+    Route.Dreams -> Icons.Rounded.AutoAwesome
     Route.Settings -> Icons.Rounded.Settings
     Route.Models -> Icons.Rounded.Settings
     Route.MiniApp -> Icons.Rounded.Store
