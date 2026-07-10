@@ -109,8 +109,8 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "For cross-app automations, use open_app, wait_for_app, inspect_screen, wait_for_idle, wait_for_target, wait_for_text, wait_until_gone, scroll_until_target, tap_target, tap_text, tap_bounds, type_text, clear_text, scroll, swipe, press_back, and press_home steps. Prefer open_app with packageName from the installed apps list; open_app waits for the package when accessibility is enabled, and wait_for_app can explicitly guard later transitions. Then use inspect_screen for unknown screens, wait_for_idle after broad app/screen transitions, wait_for_target for stable viewId/contentDescription/className selectors, wait_for_text for simple visible text, and wait_until_gone for loading indicators or transient dialogs before tap/type steps. Use scroll_until_target with maxScrolls when the target may be lower in a list or settings screen. Prefer stable selectors from screen inspection in this order: viewId, contentDescription, exact text, className plus occurrence. Add timeoutMillis for slow screens, maxNodes for bounded inspections, stableSamples for idle detection, diagnosticMaxNodes for failure snapshots, and settleMillis after app transitions. Cross-app UI control requires the user to enable Aura's Accessibility Service. Direct sends, purchases, deletes, posts, payments, or irreversible actions must be in flow.steps with a checkpoint before the high-impact action; set metadata.riskLevel=high when a selector is risky even if the label is ambiguous. "
         "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
         "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
-        "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, and assistant intents. "
-        "When revising an installed mini app from chat, call revise_mini_app with the target mini app and a specific revision_instruction. "
+        "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, assistant intents, and a required Aura home widget representing the app's main purpose. The widget must open the full mini app when tapped. "
+        "When revising an installed mini app from chat, call revise_mini_app with the target mini app and a specific revision_instruction that preserves or improves its Aura home widget. "
         "When blocking an app, prefer an exact package_name from the installed app list and choose the requested duration in minutes. "
         "If no duration is given, use 30 minutes. "
         f"Planning mode is {harness.planning_mode}. "
@@ -357,13 +357,13 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "create_mini_app",
-            "description": "Create, install, and optionally open a professional Aura mini app from a user request. Ask for a React runtime mini app unless the user explicitly requested native/declarative output.",
+            "description": "Create, install, and optionally open a professional Aura mini app with a required Aura home widget. Ask for a React runtime mini app unless the user explicitly requested native/declarative output.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mini_app_prompt": {
                         "type": "string",
-                        "description": "A concise but specific prompt describing the mini app to build. Include runtime react for normal assistant-built apps, plus workflow, data to track, polished React UI, local records, actions, and assistant intents.",
+                        "description": "A concise but specific prompt describing the mini app to build. Include runtime react for normal assistant-built apps, plus workflow, data to track, polished React UI, local records, actions, assistant intents, and a required Aura home widget that represents the app's main purpose and opens the full app when tapped.",
                     },
                     "open_after_create": {
                         "type": "boolean",
@@ -388,7 +388,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "revise_mini_app",
-            "description": "Revise, upgrade, or patch an installed Aura mini app while preserving its local records. Use this when the user asks to add fields, charts, actions, assistant intents, or workflow changes to an existing mini app.",
+            "description": "Revise, upgrade, or patch an installed Aura mini app while preserving its local records and Aura home widget. Use this when the user asks to add fields, charts, actions, assistant intents, widget changes, or workflow changes to an existing mini app.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -396,7 +396,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                     "mini_app_query": {"type": "string", "description": "Fallback mini app name query."},
                     "revision_instruction": {
                         "type": "string",
-                        "description": "Specific change request for the existing mini app, including fields, screens, charts, actions, and assistant intents to add or adjust.",
+                        "description": "Specific change request for the existing mini app, including fields, screens, charts, actions, assistant intents, and Aura home widget behavior to add, preserve, or adjust.",
                     },
                 },
                 "required": ["revision_instruction"],

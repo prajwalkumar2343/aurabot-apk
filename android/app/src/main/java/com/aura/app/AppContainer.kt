@@ -19,6 +19,15 @@ import com.aura.app.assistant.LlmSettingsStore
 import com.aura.app.assistant.LocalAssistantStore
 import com.aura.app.miniapps.MiniAppDatabase
 import com.aura.app.miniapps.MiniAppRepository
+import com.aura.app.dreams.DreamDatabase
+import com.aura.app.dreams.DreamEvidenceCollector
+import com.aura.app.dreams.DreamNotificationPublisher
+import com.aura.app.dreams.DreamOrchestrator
+import com.aura.app.dreams.DreamProposalApplier
+import com.aura.app.dreams.DreamProposalEngine
+import com.aura.app.dreams.DreamRepository
+import com.aura.app.dreams.DreamScheduler
+import com.aura.app.dreams.DreamSettingsStore
 import com.aura.app.session.SessionStore
 import com.aura.app.voice.VoiceServiceController
 
@@ -57,6 +66,33 @@ class AppContainer(context: Context) {
         localAssistantStore = localAssistantStore,
         llmSettingsStore = llmSettingsStore
     )
+    val dreamSettingsStore = DreamSettingsStore(appContext)
+    val dreamRepository = DreamRepository(DreamDatabase.get(appContext).dreamDao())
+    val dreamEvidenceCollector = DreamEvidenceCollector(
+        automationRepository = automationRepository,
+        assistantRepository = assistantRepository,
+        miniAppRepository = miniAppRepository
+    )
+    val dreamProposalEngine = DreamProposalEngine(
+        automationRepository = automationRepository,
+        assistantRepository = assistantRepository,
+        miniAppRepository = miniAppRepository
+    )
+    val dreamOrchestrator = DreamOrchestrator(
+        repository = dreamRepository,
+        settingsStore = dreamSettingsStore,
+        evidenceCollector = dreamEvidenceCollector,
+        proposalEngine = dreamProposalEngine
+    )
+    val dreamProposalApplier = DreamProposalApplier(
+        dreamRepository = dreamRepository,
+        automationRepository = automationRepository,
+        automationRuntime = automationRuntime,
+        miniAppRepository = miniAppRepository,
+        assistantRepository = assistantRepository
+    )
+    val dreamScheduler = DreamScheduler(appContext)
+    val dreamNotificationPublisher = DreamNotificationPublisher(appContext)
     val voiceServiceController = VoiceServiceController(appContext, sessionStore)
     val voiceSpeaker = com.aura.app.voice.VoiceSpeaker(appContext)
 }

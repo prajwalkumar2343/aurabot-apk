@@ -12,10 +12,10 @@ from app.core.security import (
     create_refresh_token,
     get_current_user,
 )
-from app.models.auth import RegisterIn, LoginIn, UserOut
+from app.models.auth import RegisterIn, LoginIn, RefreshIn, UserOut, AuthOut
 from app.core.config import settings
 from app.services.auth_sessions import (
-    require_active_refresh_session,
+    consume_active_refresh_session,
     revoke_refresh_session,
     store_refresh_session,
 )
@@ -53,6 +53,12 @@ def _set_auth_cookies(response: Response, access: str, refresh: Optional[str] = 
             max_age=settings.REFRESH_DAYS * 86400,
             path="/",
         )
+
+
+def _refresh_token_from_request(request: Request, data: Optional[RefreshIn]) -> Optional[str]:
+    if data and data.refresh_token:
+        return data.refresh_token
+    return request.cookies.get("refresh_token")
 
 
 async def _issue_refresh_token(db, user_id: str) -> str:
@@ -95,7 +101,7 @@ async def _record_failed_login(db, identifier: str, now: datetime) -> int:
         )
     return count
 
-@router.post("/register", response_model=UserOut)
+@router.post("/register", response_model=AuthOut)
 async def register(data: RegisterIn, response: Response, db = Depends(get_db)):
     email = data.email.lower().strip()
     if await db.users.find_one({"email": email}):
@@ -114,9 +120,16 @@ async def register(data: RegisterIn, response: Response, db = Depends(get_db)):
     refresh = await _issue_refresh_token(db, user_id)
     _set_auth_cookies(response, access, refresh)
     response.headers["X-Access-Token"] = access
-    return UserOut(id=user_id, email=email, name=doc["name"], role="user")
+    return {
+        "id": user_id,
+        "email": email,
+        "name": doc["name"],
+        "role": "user",
+        "access_token": access,
+        "refresh_token": refresh,
+    }
 
-@router.post("/login")
+@router.post("/login", response_model=AuthOut)
 async def login(data: LoginIn, request: Request, response: Response, db = Depends(get_db)):
     email = data.email.lower().strip()
     ip = request.client.host if request.client else "unknown"
@@ -143,16 +156,23 @@ async def login(data: LoginIn, request: Request, response: Response, db = Depend
         "name": user.get("name"),
         "role": user.get("role", "user"),
         "access_token": access,
+        "refresh_token": refresh,
     }
 
 @router.post("/logout")
-async def logout(request: Request, response: Response, db = Depends(get_db)):
-    token = request.cookies.get("refresh_token")
+async def logout(
+    request: Request,
+    response: Response,
+    data: Optional[RefreshIn] = None,
+    db = Depends(get_db),
+):
+    token = _refresh_token_from_request(request, data)
     if token:
         try:
             payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
             if payload.get("type") == "refresh" and payload.get("jti"):
-                await revoke_refresh_session(db, str(payload["jti"]))
+                user_id = str(payload.get("sub") or "")
+                await revoke_refresh_session(db, str(payload["jti"]), user_id or None)
         except jwt.InvalidTokenError:
             pass
     response.delete_cookie("access_token", path="/")
@@ -169,8 +189,13 @@ async def me(user=Depends(get_current_user)):
     )
 
 @router.post("/refresh")
-async def refresh_token(request: Request, response: Response, db = Depends(get_db)):
-    token = request.cookies.get("refresh_token")
+async def refresh_token(
+    request: Request,
+    response: Response,
+    data: Optional[RefreshIn] = None,
+    db = Depends(get_db),
+):
+    token = _refresh_token_from_request(request, data)
     if not token:
         raise HTTPException(status_code=401, detail="No refresh token")
     try:
@@ -181,14 +206,13 @@ async def refresh_token(request: Request, response: Response, db = Depends(get_d
         jti = str(payload.get("jti") or "")
         if not user_id or not jti:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
-        await require_active_refresh_session(db, user_id, jti)
+        await consume_active_refresh_session(db, user_id, jti)
         user = await db.users.find_one({"id": user_id}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
-        await revoke_refresh_session(db, jti)
         access = create_access_token(user["id"], user["email"])
         refresh = await _issue_refresh_token(db, user["id"])
         _set_auth_cookies(response, access, refresh)
-        return {"access_token": access}
+        return {"access_token": access, "refresh_token": refresh}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")

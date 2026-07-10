@@ -148,6 +148,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -179,6 +182,7 @@ import com.aura.app.miniapps.MiniAppVersion
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
@@ -214,6 +218,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.aura.app.ui.dreams.DreamsScreen
+import com.aura.app.ui.dreams.DreamsViewModel
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -222,6 +228,7 @@ private enum class Route(val title: String) {
     Tasks("Tasks"),
     Memory("Memory"),
     Automations("Automations"),
+    Dreams("Dreams"),
     Settings("Settings"),
     Models("Models"),
     MiniApp("MiniApp")
@@ -287,11 +294,21 @@ fun AuraLauncherApp(
     onMinimizeApp: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val onboardingComplete = state.session.onboardingComplete
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showHomePrompt by remember { mutableStateOf(false) }
+
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                viewModel.refreshMiniAppWidgets()
+                delay(15 * 60 * 1000L)
+            }
+        }
+    }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -477,7 +494,7 @@ fun AuraLauncherApp(
                                                     Color.Transparent
                                                 }
                                             )
-                                            .clickable {
+                                            .bounceClick {
                                                 navController.navigate(route.name) {
                                                     popUpTo(navController.graph.findStartDestination().id) {
                                                         saveState = true
@@ -522,6 +539,14 @@ fun AuraLauncherApp(
                     }
                 }
             ) { padding ->
+            val slideSpringSpec = spring<androidx.compose.ui.unit.IntOffset>(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+            val fadeSpringSpec = spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
             NavHost(
                 navController = navController,
                 startDestination = Route.Home.name,
@@ -529,26 +554,26 @@ fun AuraLauncherApp(
                 enterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 exitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 },
                 popEnterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 popExitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 }
             ) {
                 composable(Route.Home.name) {
@@ -571,6 +596,11 @@ fun AuraLauncherApp(
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
                         onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onOpenSettings = { navController.navigate(Route.Settings.name) },
+                        onOpenMiniApp = { miniAppId ->
+                            viewModel.openMiniApp(miniAppId)
+                            navController.navigate(Route.MiniApp.name)
+                        },
+                        onRunMiniAppWidgetAction = viewModel::runMiniAppWidgetAction,
                         onLaunchApp = { app ->
                             if (app.packageName == "com.aura.app.settings") {
                                 navController.navigate(Route.Settings.name)
@@ -676,6 +706,7 @@ fun AuraLauncherApp(
                         onConfigureTasks = { navController.navigate(Route.Tasks.name) },
                         onConfigureMemories = { navController.navigate(Route.Memory.name) },
                         onConfigureAutomations = { navController.navigate(Route.Automations.name) },
+                        onConfigureDreams = { navController.navigate(Route.Dreams.name) },
                         onQuitApp = onQuitApp,
                         onSetAppMode = viewModel::setAppMode
                     )
@@ -689,6 +720,17 @@ fun AuraLauncherApp(
                         onRunNow = viewModel::runAutomationNow,
                         onDelete = viewModel::deleteAutomation,
                         onOpenPermissions = onRequestAutomationPermissions
+                    )
+                }
+                composable(Route.Dreams.name) {
+                    val container = (context.applicationContext as com.aura.app.AuraApplication).container
+                    val dreamsViewModel: DreamsViewModel = viewModel(
+                        factory = DreamsViewModel.factory(container)
+                    )
+                    DreamsScreen(
+                        viewModel = dreamsViewModel,
+                        wallpaperUri = state.session.wallpaperUri,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable(Route.Models.name) {
@@ -718,6 +760,7 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Tasks -> Icons.Rounded.CheckCircle
     Route.Memory -> Icons.Rounded.Layers
     Route.Automations -> Icons.Rounded.AutoAwesome
+    Route.Dreams -> Icons.Rounded.AutoAwesome
     Route.Settings -> Icons.Rounded.Settings
     Route.Models -> Icons.Rounded.Settings
     Route.MiniApp -> Icons.Rounded.Store

@@ -392,7 +392,7 @@ fun OnboardingScreen(
                                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp)
                                         )
-                                        .clickable { selectedAppMode = mode }
+                                        .bounceClick { selectedAppMode = mode }
                                         .padding(16.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -427,7 +427,7 @@ fun OnboardingScreen(
                                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp)
                                         )
-                                        .clickable { selectedStorageMode = mode }
+                                        .bounceClick { selectedStorageMode = mode }
                                         .padding(16.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -462,7 +462,7 @@ fun OnboardingScreen(
                                             .height(36.dp)
                                             .clip(RoundedCornerShape(18.dp))
                                             .background(if (isSelected) Color.White else Color.Transparent)
-                                            .clickable { 
+                                            .bounceClick { 
                                                 accountMode = mode 
                                                 authMessage = null
                                             },
@@ -593,7 +593,7 @@ fun OnboardingScreen(
                                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp)
                                         )
-                                        .clickable { selectedProvider = provider }
+                                        .bounceClick { selectedProvider = provider }
                                         .padding(16.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

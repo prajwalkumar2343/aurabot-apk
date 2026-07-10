@@ -92,6 +92,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.4")
     implementation("androidx.room:room-runtime:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
@@ -107,5 +108,25 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-web:3.7.0")
+    androidTestImplementation("androidx.work:work-testing:2.11.2")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+}
+
+val validateReleaseBackendUrl = tasks.register("validateReleaseBackendUrl") {
+    group = "verification"
+    description = "Ensures release builds do not ship with a debug or plaintext Aura backend URL."
+    doLast {
+        val releaseBackendUrl = providers.gradleProperty("auraBackendUrl").orNull?.trim().orEmpty()
+        if (!releaseBackendUrl.startsWith("https://")) {
+            throw org.gradle.api.GradleException(
+                "Release builds require -PauraBackendUrl=https://...; the checked-in emulator default is debug-only."
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(validateReleaseBackendUrl)
+    }
 }

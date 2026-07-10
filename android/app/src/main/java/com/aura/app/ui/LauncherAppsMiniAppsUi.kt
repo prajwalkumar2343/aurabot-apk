@@ -560,7 +560,7 @@ private fun MiniAppScreenTabs(
                     .height(42.dp)
                     .clip(RoundedCornerShape(15.dp))
                     .background(if (selected) primary.copy(alpha = 0.18f) else Color.Transparent)
-                    .clickable { onSelect(screen.id) },
+                    .bounceClick { onSelect(screen.id) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(

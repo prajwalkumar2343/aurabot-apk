@@ -226,6 +226,8 @@ fun HomeScreen(
     onSwipeLeft: () -> Unit,
     onSelectWallpaper: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMiniApp: (String) -> Unit,
+    onRunMiniAppWidgetAction: (String, String) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
     onClearAttachment: () -> Unit,
     onLaunchPicker: () -> Unit,
@@ -287,6 +289,12 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+        MiniAppHomeWidgetSection(
+            widgets = state.homeMiniAppWidgets,
+            unavailableCount = state.unavailableMiniAppWidgetCount,
+            onOpenMiniApp = onOpenMiniApp,
+            onRunAction = onRunMiniAppWidgetAction
+        )
         Spacer(Modifier.weight(1f))
         AssistantComposer(
             value = state.assistantInput,
@@ -392,7 +400,7 @@ private fun HomeChatLayer(state: LauncherUiState, onClick: () -> Unit) {
             .fillMaxWidth()
             .heightIn(min = 112.dp, max = 176.dp)
             .glassCard(shape = RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
+            .bounceClick(onClick = onClick)
             .padding(16.dp)
     ) {
         Column(
@@ -732,26 +740,10 @@ private fun AuraEyes(
 
 @Composable
 fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "app_scale"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick { onLaunchApp(app) }
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -792,26 +784,10 @@ fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "suggested_scale"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick { onLaunchApp(app) }
             .glassCard(shape = RoundedCornerShape(20.dp))
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -854,26 +830,10 @@ fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "list_item_scale"
-    )
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick(pressedScale = 0.96f) { onLaunchApp(app) }
             .glassCard(shape = RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

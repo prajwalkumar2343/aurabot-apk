@@ -286,9 +286,11 @@ fun AssistantComposer(
                         fontWeight = FontWeight.Bold
                     )
                 }
-                IconButton(
-                    onClick = onClearAttachment,
-                    modifier = Modifier.size(24.dp)
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .bounceClick(onClick = onClearAttachment),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Clear,
@@ -310,9 +312,11 @@ fun AssistantComposer(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            IconButton(
-                onClick = { showPickerDialog = true },
-                modifier = Modifier.size(44.dp)
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .bounceClick { showPickerDialog = true },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Add,
@@ -362,7 +366,7 @@ fun AssistantComposer(
                             )
                         }
                     )
-                    .clickable(onClick = onSend),
+                    .bounceClick(onClick = onSend),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

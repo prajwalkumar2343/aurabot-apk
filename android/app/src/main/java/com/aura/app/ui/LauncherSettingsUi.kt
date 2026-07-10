@@ -230,8 +230,12 @@ fun ModelsScreen(
 ) {
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -261,17 +265,21 @@ fun ModelsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LlmProvider.entries.forEach { provider ->
                             val selected = state.llmSettings.provider == provider
-                            FilledTonalButton(
-                                onClick = { onProviderSelected(provider) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
-                                    contentColor = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface)
+                                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)), RoundedCornerShape(16.dp))
+                                    .bounceClick { onProviderSelected(provider) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(provider.label.uppercase(), fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = provider.label.uppercase(),
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                     }
@@ -304,6 +312,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.googleApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.googleModel,
                         onValueChange = onGoogleModelChanged,
@@ -349,6 +364,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.openAiApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.openAiModel,
                         onValueChange = onOpenAiModelChanged,
@@ -394,6 +416,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.openRouterApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.openRouterModel,
                         onValueChange = onOpenRouterModelChanged,
@@ -410,16 +439,23 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
-                    Button(
-                        onClick = onLoadOpenRouterModels,
-                        enabled = !state.loadingModels,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.onBackground,
-                            contentColor = MaterialTheme.colorScheme.background
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (state.loadingModels) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onBackground)
+                            .then(
+                                if (!state.loadingModels) Modifier.bounceClick(onClick = onLoadOpenRouterModels)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(if (state.loadingModels) "LOADING" else "LOAD MODELS", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (state.loadingModels) "LOADING" else "LOAD MODELS",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.background
+                        )
                     }
                 }
                 if (state.openRouterModels.isNotEmpty()) {
@@ -457,6 +493,7 @@ fun SettingsScreen(
     onConfigureTasks: () -> Unit,
     onConfigureMemories: () -> Unit,
     onConfigureAutomations: () -> Unit,
+    onConfigureDreams: () -> Unit,
     onQuitApp: () -> Unit,
     onSetAppMode: (String) -> Unit
 ) {
@@ -535,6 +572,12 @@ fun SettingsScreen(
                 subtitle = "${state.automations.size} saved rules for schedules, places, and actions.",
                 icon = Icons.Rounded.AutoAwesome,
                 onClick = onConfigureAutomations
+            )
+            SettingsRow(
+                title = "Aura Dreams",
+                subtitle = "Private nightly analysis with approval-gated improvements.",
+                icon = Icons.Rounded.AutoAwesome,
+                onClick = onConfigureDreams
             )
 
             Spacer(Modifier.height(8.dp))
@@ -666,7 +709,7 @@ fun SettingsScreen(
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
+                        modifier = Modifier.fillMaxWidth().bounceClick {
                             onSetAppMode("launcher")
                             showAppModeDialog = false
                         },
@@ -682,7 +725,7 @@ fun SettingsScreen(
                         }
                     }
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
+                        modifier = Modifier.fillMaxWidth().bounceClick {
                             onSetAppMode("normal")
                             showAppModeDialog = false
                         },
@@ -698,7 +741,7 @@ fun SettingsScreen(
                         }
                     }
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
+                        modifier = Modifier.fillMaxWidth().bounceClick {
                             val overlayGranted = android.provider.Settings.canDrawOverlays(context)
                             if (overlayGranted) {
                                 onSetAppMode("overlay")

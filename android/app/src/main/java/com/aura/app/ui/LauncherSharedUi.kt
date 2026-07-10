@@ -324,6 +324,35 @@ fun Modifier.glassCard(
         .border(width = borderWidth, brush = borderBrush, shape = shape)
 }
 
+fun Modifier.bounceClick(
+    dampingRatio: Float = Spring.DampingRatioMediumBouncy,
+    stiffness: Float = Spring.StiffnessMediumLow,
+    pressedScale: Float = 0.94f,
+    showRipple: Boolean = true,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+): Modifier = this.composed {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) pressedScale else 1f,
+        animationSpec = spring(
+            dampingRatio = dampingRatio,
+            stiffness = stiffness
+        ),
+        label = "bounce_click_scale"
+    )
+    this
+        .scale(scale)
+        .clickable(
+            interactionSource = interactionSource,
+            indication = if (showRipple) LocalIndication.current else null,
+            enabled = enabled,
+            onClick = onClick
+        )
+}
+
+
 @Composable
 private fun MeshBackground(
     isDark: Boolean,
@@ -634,7 +663,7 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
 @Composable
 fun AppInitial(app: AppInfo, modifier: Modifier = Modifier, onLaunchApp: (AppInfo) -> Unit) {
     Column(
-        modifier = modifier.clickable { onLaunchApp(app) },
+        modifier = modifier.bounceClick { onLaunchApp(app) },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
@@ -656,7 +685,7 @@ fun AppRow(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .glassCard(shape = RoundedCornerShape(16.dp))
-            .clickable { onLaunchApp(app) }
+            .bounceClick { onLaunchApp(app) }
             .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -704,19 +733,11 @@ fun SettingsRow(
     onClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "settings_row_press"
-    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(pressScale)
             .glassCard(shape = RoundedCornerShape(16.dp))
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .bounceClick(pressedScale = 0.97f, showRipple = false, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
         Row(

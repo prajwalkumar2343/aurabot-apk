@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 from app.services.prompt_harness import DEFAULT_GEMINI_FAST_MODEL
@@ -10,8 +11,9 @@ ROOT_DIR = APP_DIR.parent
 # Load .env file if it exists
 load_dotenv(ROOT_DIR / ".env")
 
-DEFAULT_JWT_SECRET = "super_secret_default_jwt_key_please_change_in_production"
-DEFAULT_ADMIN_PASSWORD = "admin123"
+LOCAL_ENVIRONMENTS = {"development", "test"}
+GENERATED_JWT_SECRET = secrets.token_urlsafe(48)
+LEGACY_INSECURE_JWT_SECRET = "super_secret_default_jwt_key_please_change_in_production"
 
 
 def _csv(value: str) -> tuple[str, ...]:
@@ -31,7 +33,8 @@ class Settings:
     DB_NAME: str = os.environ.get("DB_NAME", "aura_assistant")
     SUPERMEMORY_API_KEY: str = os.environ.get("SUPERMEMORY_API_KEY", "")
     SUPERMEMORY_BASE_URL: str = os.environ.get("SUPERMEMORY_BASE_URL", "https://api.supermemory.ai")
-    JWT_SECRET: str = os.environ.get("JWT_SECRET", DEFAULT_JWT_SECRET)
+    JWT_SECRET: str = os.environ.get("JWT_SECRET", GENERATED_JWT_SECRET)
+    JWT_SECRET_CONFIGURED: bool = bool(os.environ.get("JWT_SECRET"))
     JWT_ALGORITHM: str = "HS256"
     ACCESS_MIN: int = 60 * 24  # 1 day (mobile)
     REFRESH_DAYS: int = 30
@@ -49,18 +52,16 @@ class Settings:
     
     # Admin Settings
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@aura.app")
-    ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
+    ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
 
     def validate_for_runtime(self) -> None:
-        if self.ENVIRONMENT not in {"prod", "production"}:
+        if self.ENVIRONMENT in LOCAL_ENVIRONMENTS:
             return
-        if self.JWT_SECRET == DEFAULT_JWT_SECRET:
-            raise RuntimeError("JWT_SECRET must be configured in production")
-        if self.ADMIN_PASSWORD == DEFAULT_ADMIN_PASSWORD:
-            raise RuntimeError("ADMIN_PASSWORD must be configured in production")
+        if self.JWT_SECRET in {GENERATED_JWT_SECRET, LEGACY_INSECURE_JWT_SECRET}:
+            raise RuntimeError("JWT_SECRET must be configured outside local development")
         if not self.COOKIE_SECURE:
-            raise RuntimeError("COOKIE_SECURE must be enabled in production")
+            raise RuntimeError("COOKIE_SECURE must be enabled outside local development")
         if "*" in self.CORS_ORIGINS:
-            raise RuntimeError("CORS_ORIGINS cannot contain '*' in production")
+            raise RuntimeError("CORS_ORIGINS cannot contain '*' outside local development")
 
 settings = Settings()

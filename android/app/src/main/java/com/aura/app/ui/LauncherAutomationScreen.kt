@@ -230,12 +230,21 @@ fun AutomationsScreen(
     }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh automations")
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .bounceClick(onClick = onRefresh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh automations", tint = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -394,23 +403,35 @@ private fun AutomationCard(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(
-                    onClick = { onRunNow(automation.id) },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .bounceClick { onRunNow(automation.id) }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("TEST")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Spacer(Modifier.width(6.dp))
+                        Text("TEST", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
-                OutlinedButton(
-                    onClick = { onDelete(automation.id) },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline), RoundedCornerShape(14.dp))
+                        .bounceClick { onDelete(automation.id) }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("DELETE")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text("DELETE", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
@@ -464,8 +485,12 @@ private fun AutomationPermissionRow(
             )
         }
         if (!status.granted) {
-            TextButton(onClick = onOpen, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                Text("OPEN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onOpen)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("OPEN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             }
         }
     }

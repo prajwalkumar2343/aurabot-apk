@@ -3,7 +3,6 @@ package com.aura.app.assistant
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -11,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -23,10 +23,13 @@ data class LlmSettingsState(
     val provider: LlmProvider = LlmProvider.Gemini,
     val googleApiKey: String = "",
     val googleModel: String = DEFAULT_GEMINI_MODEL,
+    val googleApiKeyError: String? = null,
     val openAiApiKey: String = "",
     val openAiModel: String = "gpt-4.1-mini",
+    val openAiApiKeyError: String? = null,
     val openRouterApiKey: String = "",
-    val openRouterModel: String = ""
+    val openRouterModel: String = "",
+    val openRouterApiKeyError: String? = null
 ) {
     val currentApiKey: String
         get() = when (provider) {
@@ -34,6 +37,13 @@ data class LlmSettingsState(
             LlmProvider.OpenAI -> openAiApiKey
             LlmProvider.OpenRouter -> openRouterApiKey
         }.trim()
+
+    val currentApiKeyError: String?
+        get() = when (provider) {
+            LlmProvider.Gemini -> googleApiKeyError
+            LlmProvider.OpenAI -> openAiApiKeyError
+            LlmProvider.OpenRouter -> openRouterApiKeyError
+        }
 
     val currentModel: String
         get() = when (provider) {
@@ -43,7 +53,18 @@ data class LlmSettingsState(
         }.trim()
 }
 
-class LlmSettingsStore(private val context: Context) {
+internal interface AssistantLlmSettingsStore {
+    val state: Flow<LlmSettingsState>
+    suspend fun setProvider(provider: LlmProvider)
+    suspend fun setGoogleApiKey(value: String)
+    suspend fun setGoogleModel(value: String)
+    suspend fun setOpenAiApiKey(value: String)
+    suspend fun setOpenAiModel(value: String)
+    suspend fun setOpenRouterApiKey(value: String)
+    suspend fun setOpenRouterModel(value: String)
+}
+
+class LlmSettingsStore(private val context: Context) : AssistantLlmSettingsStore {
     private val secretCodec = AndroidKeystoreSecretCodec()
     private val providerKey = stringPreferencesKey("provider")
     private val googleApiKeyKey = stringPreferencesKey("google_api_key")
@@ -53,35 +74,41 @@ class LlmSettingsStore(private val context: Context) {
     private val openRouterApiKeyKey = stringPreferencesKey("openrouter_api_key")
     private val openRouterModelKey = stringPreferencesKey("openrouter_model")
 
-    val state: Flow<LlmSettingsState> = context.llmSettingsDataStore.data.map { prefs ->
+    override val state: Flow<LlmSettingsState> = context.llmSettingsDataStore.data.map { prefs ->
+        val googleApiKey = secretCodec.decode(prefs[googleApiKeyKey] ?: "")
+        val openAiApiKey = secretCodec.decode(prefs[openAiApiKeyKey] ?: "")
+        val openRouterApiKey = secretCodec.decode(prefs[openRouterApiKeyKey] ?: "")
         LlmSettingsState(
             provider = LlmProvider.fromWireValue(prefs[providerKey]),
-            googleApiKey = secretCodec.decode(prefs[googleApiKeyKey] ?: ""),
+            googleApiKey = googleApiKey.value,
             googleModel = prefs[googleModelKey] ?: DEFAULT_GEMINI_MODEL,
-            openAiApiKey = secretCodec.decode(prefs[openAiApiKeyKey] ?: ""),
+            googleApiKeyError = googleApiKey.errorMessage("Google Gemini"),
+            openAiApiKey = openAiApiKey.value,
             openAiModel = prefs[openAiModelKey] ?: "gpt-4.1-mini",
-            openRouterApiKey = secretCodec.decode(prefs[openRouterApiKeyKey] ?: ""),
-            openRouterModel = prefs[openRouterModelKey] ?: ""
+            openAiApiKeyError = openAiApiKey.errorMessage("OpenAI"),
+            openRouterApiKey = openRouterApiKey.value,
+            openRouterModel = prefs[openRouterModelKey] ?: "",
+            openRouterApiKeyError = openRouterApiKey.errorMessage("OpenRouter")
         )
     }
 
-    suspend fun setProvider(provider: LlmProvider) {
+    override suspend fun setProvider(provider: LlmProvider) {
         context.llmSettingsDataStore.edit { prefs ->
             prefs[providerKey] = provider.wireValue
         }
     }
 
-    suspend fun setGoogleApiKey(value: String) = setSecretString(googleApiKeyKey, value)
+    override suspend fun setGoogleApiKey(value: String) = setSecretString(googleApiKeyKey, value)
 
-    suspend fun setGoogleModel(value: String) = setString(googleModelKey, value)
+    override suspend fun setGoogleModel(value: String) = setString(googleModelKey, value)
 
-    suspend fun setOpenAiApiKey(value: String) = setSecretString(openAiApiKeyKey, value)
+    override suspend fun setOpenAiApiKey(value: String) = setSecretString(openAiApiKeyKey, value)
 
-    suspend fun setOpenAiModel(value: String) = setString(openAiModelKey, value)
+    override suspend fun setOpenAiModel(value: String) = setString(openAiModelKey, value)
 
-    suspend fun setOpenRouterApiKey(value: String) = setSecretString(openRouterApiKeyKey, value)
+    override suspend fun setOpenRouterApiKey(value: String) = setSecretString(openRouterApiKeyKey, value)
 
-    suspend fun setOpenRouterModel(value: String) = setString(openRouterModelKey, value)
+    override suspend fun setOpenRouterModel(value: String) = setString(openRouterModelKey, value)
 
     private suspend fun setString(key: androidx.datastore.preferences.core.Preferences.Key<String>, value: String) {
         context.llmSettingsDataStore.edit { prefs ->
@@ -100,36 +127,45 @@ class LlmSettingsStore(private val context: Context) {
     }
 }
 
-private class AndroidKeystoreSecretCodec {
+internal data class DecodedSecret(val value: String, val readable: Boolean) {
+    fun errorMessage(providerLabel: String): String? =
+        if (readable) null else "Stored $providerLabel API key could not be read. Re-enter it in Settings."
+}
+
+internal class AndroidKeystoreSecretCodec(private val keyAlias: String = DefaultKeyAlias) {
     fun encode(value: String): String {
         val cipher = Cipher.getInstance(Transformation)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey(createIfMissing = true))
         val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val packed = cipher.iv + encrypted
-        return Prefix + Base64.encodeToString(packed, Base64.NO_WRAP)
+        return Prefix + Base64.getEncoder().encodeToString(packed)
     }
 
-    fun decode(value: String): String {
-        if (value.isBlank()) return ""
-        if (!value.startsWith(Prefix)) return value
+    fun decode(value: String): DecodedSecret {
+        if (value.isBlank()) return DecodedSecret("", readable = true)
+        if (!value.startsWith(Prefix)) return DecodedSecret(value, readable = true)
         return runCatching {
-            val packed = Base64.decode(value.removePrefix(Prefix), Base64.NO_WRAP)
+            val packed = Base64.getDecoder().decode(value.removePrefix(Prefix))
+            require(packed.size > GcmIvBytes) { "Encrypted secret payload is too short" }
             val iv = packed.copyOfRange(0, GcmIvBytes)
             val encrypted = packed.copyOfRange(GcmIvBytes, packed.size)
             val cipher = Cipher.getInstance(Transformation)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(GcmTagBits, iv))
-            String(cipher.doFinal(encrypted), StandardCharsets.UTF_8)
-        }.getOrDefault("")
+            cipher.init(Cipher.DECRYPT_MODE, secretKey(createIfMissing = false), GCMParameterSpec(GcmTagBits, iv))
+            DecodedSecret(String(cipher.doFinal(encrypted), StandardCharsets.UTF_8), readable = true)
+        }.getOrElse {
+            DecodedSecret("", readable = false)
+        }
     }
 
-    private fun secretKey(): SecretKey {
+    private fun secretKey(createIfMissing: Boolean): SecretKey {
         val keyStore = KeyStore.getInstance(AndroidKeyStore).apply { load(null) }
-        (keyStore.getEntry(KeyAlias, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+        (keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+        check(createIfMissing) { "Android Keystore entry is unavailable" }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, AndroidKeyStore)
         keyGenerator.init(
             KeyGenParameterSpec.Builder(
-                KeyAlias,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -143,7 +179,7 @@ private class AndroidKeystoreSecretCodec {
     private companion object {
         const val Prefix = "keystore:v1:"
         const val AndroidKeyStore = "AndroidKeyStore"
-        const val KeyAlias = "aura_llm_settings_api_keys"
+        const val DefaultKeyAlias = "aura_llm_settings_api_keys"
         const val Transformation = "AES/GCM/NoPadding"
         const val GcmIvBytes = 12
         const val GcmTagBits = 128

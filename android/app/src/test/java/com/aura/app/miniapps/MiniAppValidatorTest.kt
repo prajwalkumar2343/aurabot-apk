@@ -11,6 +11,9 @@ class MiniAppValidatorTest {
 
         assertEquals("builtin.habit_tracker", bundle.id)
         assertEquals("Habit Tracker", bundle.metadata.name)
+        assertEquals("Habit Tracker", bundle.widget?.title)
+        assertEquals("today_count", bundle.widget?.metric)
+        assertEquals(listOf("check_water", "check_workout", "check_reading"), bundle.widget?.actionIds)
     }
 
     @Test
@@ -132,6 +135,91 @@ class MiniAppValidatorTest {
         assertThrows(MiniAppValidationException::class.java) {
             MiniAppValidator.validate(base.copy(dataSchema = base.dataSchema.copy(recordType = " ")))
         }
+    }
+
+    @Test
+    fun rejectsInvalidWidgetContracts() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(widget = MiniAppWidget(type = "webview", title = "Bad", description = "Bad")))
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    widget = MiniAppWidget(
+                        type = "quick_actions",
+                        title = "Habits",
+                        description = "Track habits",
+                        actionIds = listOf("missing")
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun rejectsUnsafeIdsAndOversizedBundleSections() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(base.copy(id = "Unsafe App Id"))
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    screens = List(13) { index -> MiniAppScreen("screen_$index", "Screen $index") }
+                )
+            )
+        }
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    widget = MiniAppWidget(
+                        title = "x".repeat(61),
+                        description = "Too long",
+                        metric = "total_count"
+                    )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun progressWidgetsRequireGoalsAndQuickActionsMustBeSafe() {
+        val base = BuiltInMiniApps.habitTracker
+
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(widget = MiniAppWidget("progress", "Goal", "Weekly goal", "weekly_count"))
+            )
+        }
+        val deleteAction = MiniAppAction("delete", "delete_record")
+        assertThrows(MiniAppValidationException::class.java) {
+            MiniAppValidator.validate(
+                base.copy(
+                    actions = base.actions + deleteAction,
+                    widget = MiniAppWidget(
+                        type = "quick_actions",
+                        title = "Habits",
+                        description = "Track habits",
+                        actionIds = listOf("delete")
+                    )
+                )
+            )
+        }
+        val validProgress = MiniAppValidator.validate(
+            base.copy(
+                widget = MiniAppWidget(
+                    type = "progress",
+                    title = "Weekly goal",
+                    description = "Track weekly progress",
+                    metric = "weekly_count",
+                    goal = 7
+                )
+            )
+        )
+        assertEquals(7, validProgress.widget?.goal)
     }
 
     @Test

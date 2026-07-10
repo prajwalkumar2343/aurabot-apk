@@ -62,6 +62,12 @@ class MockCollection:
 
     def _matches(self, doc, query):
         for k, v in query.items():
+            if isinstance(v, dict):
+                if "$exists" in v and (k in doc) != v["$exists"]:
+                    return False
+                if "$gt" in v and not (doc.get(k) is not None and doc[k] > v["$gt"]):
+                    return False
+                continue
             if doc.get(k) != v:
                 return False
         return True
@@ -128,7 +134,7 @@ class MockCollection:
                 matched.append(doc)
         return MockCursor(matched)
 
-    async def create_index(self, keys, unique=False):
+    async def create_index(self, keys, unique=False, **kwargs):
         pass
 
 class MockDatabase:
@@ -212,8 +218,8 @@ def seed_refresh_session(user_id: str, jti: str) -> None:
     mock_db.refresh_sessions.store.append({
         "jti_hash": refresh_token_fingerprint(jti),
         "user_id": user_id,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_DAYS)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_DAYS),
+        "created_at": datetime.now(timezone.utc),
     })
 
 def test_startup_fails_when_required_index_creation_fails():
@@ -228,8 +234,8 @@ def test_startup_fails_when_required_index_creation_fails():
         with pytest.raises(RuntimeError, match="index failure"):
             asyncio.run(startup())
 
-def test_startup_fails_when_admin_seed_cannot_be_verified():
-    """Startup fails closed if the admin account cannot be seeded or verified."""
+def test_startup_does_not_rotate_an_existing_admin_password():
+    """Startup never mutates an existing admin account without an explicit reset flow."""
     broken_db = MockDatabase()
     broken_db.users.store.append({
         "id": "admin_uuid",
@@ -240,8 +246,8 @@ def test_startup_fails_when_admin_seed_cannot_be_verified():
         "created_at": "date",
     })
     with patch("app.main.db_manager.connect"), patch("app.main.get_db", return_value=broken_db):
-        with pytest.raises(ValueError):
-            asyncio.run(startup())
+        asyncio.run(startup())
+    assert broken_db.users.store[0]["password_hash"] == "not-a-bcrypt-hash"
 
 # ==============================================================================
 # TEST CASE GROUP 1: Health, system checks & CORS (8 Tests)
@@ -324,7 +330,7 @@ def test_8b_cors_preflight_rejects_unlisted_credentialed_origin(client):
 # ==============================================================================
 
 def test_9_register_user_success(client):
-    """9. Successful user registration generates correct schemas and cookies."""
+    """9. Successful user registration generates correct auth schema and cookies."""
     response = client.post("/api/auth/register", json={
         "email": "newuser@aura.app",
         "password": "validpassword",
@@ -335,7 +341,32 @@ def test_9_register_user_success(client):
     assert data["email"] == "newuser@aura.app"
     assert data["name"] == "New User"
     assert "id" in data
+    assert data["access_token"]
+    assert data["refresh_token"]
     assert "x-access-token" in response.headers
+
+def test_9a_register_tokens_authenticate_new_user_without_login(client):
+    """9a. A new Android signup can use the register token body immediately."""
+    response = client.post("/api/auth/register", json={
+        "email": "token-signup@aura.app",
+        "password": "validpassword",
+        "name": "Token Signup"
+    })
+    assert response.status_code == 200
+    data = response.json()
+
+    me = client.get("/api/auth/me", headers=auth_headers(data["access_token"]))
+    assert me.status_code == 200
+    assert me.json()["email"] == "token-signup@aura.app"
+
+    memory = client.post(
+        "/api/memories",
+        json={"title": "First auth call", "content": "Created right after signup"},
+        headers=auth_headers(data["access_token"]),
+    )
+    assert memory.status_code == 200
+    assert memory.json()["title"] == "First auth call"
+    assert len(mock_db.login_attempts.store) == 0
 
 def test_9b_register_cookie_secure_flag_follows_runtime_setting(client):
     """9b. Cookie security can be forced for production-like runtime settings."""
@@ -484,6 +515,7 @@ def test_22_login_admin_success(client):
     data = response.json()
     assert data["role"] == "admin"
     assert "access_token" in data
+    assert "refresh_token" in data
 
 def test_23_login_user_success(client, test_user_token):
     """23. Valid seeded user logs in successfully."""
@@ -706,7 +738,7 @@ def test_46_auth_refresh_missing_refresh_token(client):
     assert "no refresh token" in response.json()["detail"].lower()
 
 def test_47_auth_refresh_valid(client):
-    """47. Successful refresh call issues a new access token."""
+    """47. Successful refresh call issues rotated access and refresh tokens."""
     user_id = "test_user_id"
     jti = "refresh-session-47"
     mock_db.users.store.append({
@@ -723,8 +755,36 @@ def test_47_auth_refresh_valid(client):
     response = client.post("/api/auth/refresh")
     assert response.status_code == 200
     assert "access_token" in response.json()
+    assert "refresh_token" in response.json()
     assert mock_db.refresh_sessions.store[0].get("revoked_at")
     assert len(mock_db.refresh_sessions.store) == 2
+
+def test_47b_auth_refresh_body_rotates_and_rejects_old_refresh_token(client):
+    """47b. Android body refresh rotates the server session and revokes reuse."""
+    user_id = "test_user_id"
+    jti = "refresh-session-47b"
+    mock_db.users.store.append({
+        "id": user_id,
+        "email": "body-ref@aura.app",
+        "name": "Refresh User",
+        "role": "user",
+        "password_hash": "hash",
+        "created_at": "date"
+    })
+    refresh = create_refresh_token(user_id, jti)
+    seed_refresh_session(user_id, jti)
+
+    response = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["access_token"]
+    assert data["refresh_token"]
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
+    assert len(mock_db.refresh_sessions.store) == 2
+
+    reused = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert reused.status_code == 401
 
 def test_48_auth_logout_clears_cookies(client):
     """48. Logging out clears JWT state cookies."""
@@ -734,6 +794,19 @@ def test_48_auth_logout_clears_cookies(client):
     client.cookies.set("refresh_token", create_refresh_token(user_id, jti))
     seed_refresh_session(user_id, jti)
     response = client.post("/api/auth/logout")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
+
+def test_48b_auth_logout_revokes_body_refresh_token(client):
+    """48b. Android logout can revoke a refresh session without cookies."""
+    user_id = "logout_body_user_id"
+    jti = "refresh-session-48b"
+    refresh = create_refresh_token(user_id, jti)
+    seed_refresh_session(user_id, jti)
+
+    response = client.post("/api/auth/logout", json={"refresh_token": refresh})
+
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert mock_db.refresh_sessions.store[0].get("revoked_at")
@@ -782,6 +855,28 @@ def test_52b_auth_refresh_requires_server_session(client):
         "created_at": "date"
     })
     client.cookies.set("refresh_token", create_refresh_token(user_id, "missing-server-session"))
+    response = client.post("/api/auth/refresh")
+    assert response.status_code == 401
+
+def test_52c_auth_refresh_rejects_expired_server_session(client):
+    """52c. Server-side refresh session expiry is enforced."""
+    user_id = "test_user_id"
+    jti = "expired-server-session"
+    mock_db.users.store.append({
+        "id": user_id,
+        "email": "ref@aura.app",
+        "name": "Refresh User",
+        "role": "user",
+        "password_hash": "hash",
+        "created_at": "date"
+    })
+    mock_db.refresh_sessions.store.append({
+        "jti_hash": refresh_token_fingerprint(jti),
+        "user_id": user_id,
+        "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    client.cookies.set("refresh_token", create_refresh_token(user_id, jti))
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
 

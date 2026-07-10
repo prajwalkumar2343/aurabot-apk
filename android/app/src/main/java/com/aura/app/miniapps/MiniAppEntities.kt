@@ -65,3 +65,15 @@ data class MiniAppVersionEntity(
     val bundleJson: String,
     val createdAt: Long
 )
+
+data class MiniAppWidgetRecordStats(
+    val miniAppId: String,
+    val totalCount: Long,
+    val todayCount: Long,
+    val weeklyCount: Long
+)
+
+data class MiniAppWidgetRecordDay(
+    val miniAppId: String,
+    val dayKey: String
+)

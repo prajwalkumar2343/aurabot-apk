@@ -12,7 +12,30 @@ data class MiniAppBundle(
     val actions: List<MiniAppAction> = emptyList(),
     val assistantIntents: List<MiniAppAssistantIntent> = emptyList(),
     val capabilities: List<String> = listOf("local_storage"),
-    val codeBundle: MiniAppCodeBundle? = null
+    val codeBundle: MiniAppCodeBundle? = null,
+    val widget: MiniAppWidget? = null
+)
+
+data class MiniAppWidget(
+    val type: String = "summary",
+    val title: String = "",
+    val description: String = "",
+    val metric: String = "today_count",
+    val goal: Int? = null,
+    val actionIds: List<String> = emptyList()
+)
+
+data class MiniAppWidgetSnapshot(
+    val bundle: MiniAppBundle,
+    val totalCount: Long = 0,
+    val todayCount: Long = 0,
+    val weeklyCount: Long = 0,
+    val streak: Int = 0
+)
+
+data class MiniAppWidgetCatalog(
+    val widgets: List<MiniAppWidgetSnapshot>,
+    val invalidMiniAppIds: List<String> = emptyList()
 )
 
 data class MiniAppMetadata(
