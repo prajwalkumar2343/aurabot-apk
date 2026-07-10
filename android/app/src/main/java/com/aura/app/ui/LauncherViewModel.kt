@@ -271,7 +271,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun logout() {
         viewModelScope.launch {
-            container.sessionStore.setToken(null)
+            container.assistantRepository.logout()
             localState.update {
                 it.copy(
                     memories = emptyList(),
@@ -486,15 +486,23 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     if (spec == null) {
                         replies += "I need a complete automation plan to save that."
                     } else {
-                        val saved = container.automationRuntime.upsertAndRestore(spec)
+                        val saved = container.automationRuntime.upsertAndRestore(spec.asAssistantDraft())
                         refreshAutomationState()
-                        replies += "Created automation: ${saved.name}."
+                        replies += "Saved ${saved.name} as a disabled draft. Review it and explicitly enable it when ready."
                     }
                 }
             }
         }
         return replies
     }
+
+    private fun AutomationSpec.asAssistantDraft(): AutomationSpec = copy(
+        enabled = false,
+        actions = actions.map { action -> action.copy(requireConfirmation = true) },
+        flow = flow?.copy(steps = flow.steps.map { step ->
+            step.copy(action = step.action?.copy(requireConfirmation = true))
+        })
+    )
 
     fun refreshAutomations() {
         viewModelScope.launch {

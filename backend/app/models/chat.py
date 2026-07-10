@@ -2,11 +2,11 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 class ChatMemoryIn(BaseModel):
-    title: str
-    content: str
+    title: str = Field(max_length=240)
+    content: str = Field(max_length=8_000)
 
 class ChatTodoIn(BaseModel):
-    title: str
+    title: str = Field(max_length=500)
     done: bool
 
 class ChatAppIn(BaseModel):
@@ -42,22 +42,22 @@ class ChatActionOut(BaseModel):
     automation_spec: Optional[dict] = None
 
 class ChatIn(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    provider: str = "gemini"
-    api_key: str
-    model: str
-    memories: List[ChatMemoryIn] = Field(default_factory=list)
-    todos: List[ChatTodoIn] = Field(default_factory=list)
-    apps: List[ChatAppIn] = Field(default_factory=list)
-    mini_apps: List[ChatMiniAppIn] = Field(default_factory=list)
-    automations: List[ChatAutomationIn] = Field(default_factory=list)
+    message: str = Field(max_length=12_000)
+    session_id: Optional[str] = Field(default=None, max_length=200)
+    provider: str = Field(default="gemini", max_length=40)
+    api_key: str = Field(max_length=1_024)
+    model: str = Field(max_length=200)
+    memories: List[ChatMemoryIn] = Field(default_factory=list, max_length=40)
+    todos: List[ChatTodoIn] = Field(default_factory=list, max_length=100)
+    apps: List[ChatAppIn] = Field(default_factory=list, max_length=500)
+    mini_apps: List[ChatMiniAppIn] = Field(default_factory=list, max_length=100)
+    automations: List[ChatAutomationIn] = Field(default_factory=list, max_length=100)
     context_files: List[str] = Field(default_factory=list)
     planning_mode: str = "auto"
     model_route: str = "off"
     max_repair_attempts: int = 1
-    image_base64: Optional[str] = None
-    image_mime_type: Optional[str] = None
+    image_base64: Optional[str] = Field(default=None, max_length=8_000_000)
+    image_mime_type: Optional[str] = Field(default=None, max_length=100)
 
 class ChatOut(BaseModel):
     reply: str

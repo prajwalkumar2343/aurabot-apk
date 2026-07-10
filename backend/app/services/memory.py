@@ -95,7 +95,8 @@ class MemoryService:
 
         supermemory_id = existing.get("supermemory_id")
         if supermemory_enabled() and supermemory_id:
-            await self._forget_supermemory(supermemory_id)
+            if not await self._forget_supermemory(supermemory_id):
+                raise HTTPException(status_code=503, detail="Cloud memory deletion failed; retry later")
 
         res = await self.db.memories.delete_one({"id": memory_id, "user_id": user_id})
         return res.deleted_count > 0
@@ -142,7 +143,7 @@ class MemoryService:
             logger.warning("Supermemory create failed: %s", exc)
         return None
 
-    async def _forget_supermemory(self, supermemory_id: str) -> None:
+    async def _forget_supermemory(self, supermemory_id: str) -> bool:
         try:
             response = await _post_supermemory(
                 f"{_base_url()}/v4/memories/{supermemory_id}/forget",
@@ -151,8 +152,11 @@ class MemoryService:
             )
             if response.status_code >= 400:
                 logger.warning("Supermemory forget failed: %s %s", response.status_code, response.text[:200])
+                return False
+            return True
         except Exception as exc:
             logger.warning("Supermemory forget failed: %s", exc)
+            return False
 
     async def _search_supermemory(self, user_id: str, query: str, limit: int) -> list[MemorySearchOut]:
         try:

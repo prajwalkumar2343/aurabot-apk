@@ -37,6 +37,7 @@ SUPPORTED_RUNTIMES = {"native", "react"}
 SUPPORTED_CODE_APIS = {"records"}
 MAX_APP_JSX_CHARS = 30000
 MAX_CSS_CHARS = 16000
+MAX_COMPILED_JS_CHARS = 1_500_000
 BLOCKED_CODE_PATTERNS = (
     "addEventListener('message'",
     'addEventListener("message"',
@@ -54,6 +55,10 @@ BLOCKED_CODE_PATTERNS = (
     "import ",
     "<script",
     "</script",
+    "<iframe",
+    "window.open",
+    "document.write",
+    "location.href",
 )
 
 
@@ -267,6 +272,8 @@ def compile_mini_app_bundle(bundle: MiniAppBundle) -> MiniAppBundle:
             message = (result.stderr or result.stdout or "React compiler failed").strip()
             raise HTTPException(status_code=422, detail=f"React compile failed: {message[:300]}")
         compiled = outfile.read_text(encoding="utf-8")
+    if len(compiled) > MAX_COMPILED_JS_CHARS:
+        raise HTTPException(status_code=422, detail="Compiled React mini app is too large")
     bundle.codeBundle.compiledJs = compiled
     return bundle
 
