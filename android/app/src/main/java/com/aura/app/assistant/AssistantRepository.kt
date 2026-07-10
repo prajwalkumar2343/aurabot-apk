@@ -1,6 +1,6 @@
 package com.aura.app.assistant
 
-import com.aura.app.session.SessionStore
+import com.aura.app.session.AuthTokenStore
 import com.aura.app.apps.AppInfo
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
@@ -8,7 +8,6 @@ import com.aura.app.miniapps.MiniAppInstall
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -17,51 +16,60 @@ import java.util.concurrent.TimeUnit
 
 class GuestFeatureException(feature: String) : IllegalStateException("$feature requires login")
 
-class AssistantRepository(
-    baseUrl: String,
-    private val sessionStore: SessionStore,
-    private val localAssistantStore: LocalAssistantStore,
-    private val llmSettingsStore: LlmSettingsStore
+class AssistantRepository internal constructor(
+    private val api: AuraApi,
+    private val sessionStore: AuthTokenStore,
+    private val localAssistantStore: AssistantLocalStore,
+    private val llmSettingsStore: AssistantLlmSettingsStore
 ) {
-    private val api: AuraApi
-
-    init {
-        val normalizedBaseUrl = baseUrl.trimEnd('/') + "/api/"
-        val authInterceptor = Interceptor { chain ->
-            val token = kotlinx.coroutines.runBlocking { sessionStore.accessToken() }
-            val request = if (token.isNullOrBlank()) {
-                chain.request()
-            } else {
-                chain.request().newBuilder()
-                    .header("Authorization", "Bearer $token")
-                    .build()
-            }
-            chain.proceed(request)
-        }
-        val client = OkHttpClient.Builder()
-            .addInterceptor(authInterceptor)
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .build()
-
-        api = Retrofit.Builder()
-            .baseUrl(normalizedBaseUrl)
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(AuraApi::class.java)
-    }
+    constructor(
+        baseUrl: String,
+        sessionStore: AuthTokenStore,
+        localAssistantStore: LocalAssistantStore,
+        llmSettingsStore: LlmSettingsStore
+    ) : this(
+        api = createApi(baseUrl, sessionStore),
+        sessionStore = sessionStore,
+        localAssistantStore = localAssistantStore,
+        llmSettingsStore = llmSettingsStore
+    )
 
     suspend fun register(email: String, password: String, name: String?): UserResponse = withContext(Dispatchers.IO) {
-        val user = api.register(RegisterRequest(email = email, password = password, name = name?.takeIf { it.isNotBlank() }))
-        login(email, password)
-        user
+        val response = api.register(RegisterRequest(email = email, password = password, name = name?.takeIf { it.isNotBlank() }))
+        sessionStore.setTokens(response.access_token, response.refresh_token)
+        UserResponse(response.id, response.email, response.name, response.role)
     }
 
     suspend fun login(email: String, password: String): UserResponse = withContext(Dispatchers.IO) {
         val response = api.login(LoginRequest(email = email, password = password))
-        sessionStore.setToken(response.access_token)
+        sessionStore.setTokens(response.access_token, response.refresh_token)
         UserResponse(response.id, response.email, response.name, response.role)
+    }
+
+    companion object {
+        private fun createApi(baseUrl: String, sessionStore: AuthTokenStore): AuraApi {
+            val normalizedBaseUrl = baseUrl.trimEnd('/') + "/api/"
+            val client = OkHttpClient.Builder()
+                .addInterceptor(AuthSessionInterceptor(sessionStore))
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .build()
+
+            return Retrofit.Builder()
+                .baseUrl(normalizedBaseUrl)
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(AuraApi::class.java)
+        }
+    }
+
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        val refreshToken = sessionStore.refreshToken()
+        if (!refreshToken.isNullOrBlank()) {
+            runCatching { api.logout(RefreshRequest(refreshToken)) }
+        }
+        sessionStore.clearTokens()
     }
 
     suspend fun me(): UserResponse = requireLogin("Account") { api.me() }

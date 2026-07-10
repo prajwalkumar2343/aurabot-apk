@@ -53,7 +53,18 @@ data class LlmSettingsState(
         }.trim()
 }
 
-class LlmSettingsStore(private val context: Context) {
+internal interface AssistantLlmSettingsStore {
+    val state: Flow<LlmSettingsState>
+    suspend fun setProvider(provider: LlmProvider)
+    suspend fun setGoogleApiKey(value: String)
+    suspend fun setGoogleModel(value: String)
+    suspend fun setOpenAiApiKey(value: String)
+    suspend fun setOpenAiModel(value: String)
+    suspend fun setOpenRouterApiKey(value: String)
+    suspend fun setOpenRouterModel(value: String)
+}
+
+class LlmSettingsStore(private val context: Context) : AssistantLlmSettingsStore {
     private val secretCodec = AndroidKeystoreSecretCodec()
     private val providerKey = stringPreferencesKey("provider")
     private val googleApiKeyKey = stringPreferencesKey("google_api_key")
@@ -63,7 +74,7 @@ class LlmSettingsStore(private val context: Context) {
     private val openRouterApiKeyKey = stringPreferencesKey("openrouter_api_key")
     private val openRouterModelKey = stringPreferencesKey("openrouter_model")
 
-    val state: Flow<LlmSettingsState> = context.llmSettingsDataStore.data.map { prefs ->
+    override val state: Flow<LlmSettingsState> = context.llmSettingsDataStore.data.map { prefs ->
         val googleApiKey = secretCodec.decode(prefs[googleApiKeyKey] ?: "")
         val openAiApiKey = secretCodec.decode(prefs[openAiApiKeyKey] ?: "")
         val openRouterApiKey = secretCodec.decode(prefs[openRouterApiKeyKey] ?: "")
@@ -81,23 +92,23 @@ class LlmSettingsStore(private val context: Context) {
         )
     }
 
-    suspend fun setProvider(provider: LlmProvider) {
+    override suspend fun setProvider(provider: LlmProvider) {
         context.llmSettingsDataStore.edit { prefs ->
             prefs[providerKey] = provider.wireValue
         }
     }
 
-    suspend fun setGoogleApiKey(value: String) = setSecretString(googleApiKeyKey, value)
+    override suspend fun setGoogleApiKey(value: String) = setSecretString(googleApiKeyKey, value)
 
-    suspend fun setGoogleModel(value: String) = setString(googleModelKey, value)
+    override suspend fun setGoogleModel(value: String) = setString(googleModelKey, value)
 
-    suspend fun setOpenAiApiKey(value: String) = setSecretString(openAiApiKeyKey, value)
+    override suspend fun setOpenAiApiKey(value: String) = setSecretString(openAiApiKeyKey, value)
 
-    suspend fun setOpenAiModel(value: String) = setString(openAiModelKey, value)
+    override suspend fun setOpenAiModel(value: String) = setString(openAiModelKey, value)
 
-    suspend fun setOpenRouterApiKey(value: String) = setSecretString(openRouterApiKeyKey, value)
+    override suspend fun setOpenRouterApiKey(value: String) = setSecretString(openRouterApiKeyKey, value)
 
-    suspend fun setOpenRouterModel(value: String) = setString(openRouterModelKey, value)
+    override suspend fun setOpenRouterModel(value: String) = setString(openRouterModelKey, value)
 
     private suspend fun setString(key: androidx.datastore.preferences.core.Preferences.Key<String>, value: String) {
         context.llmSettingsDataStore.edit { prefs ->
@@ -121,7 +132,7 @@ internal data class DecodedSecret(val value: String, val readable: Boolean) {
         if (readable) null else "Stored $providerLabel API key could not be read. Re-enter it in Settings."
 }
 
-internal class AndroidKeystoreSecretCodec {
+internal class AndroidKeystoreSecretCodec(private val keyAlias: String = DefaultKeyAlias) {
     fun encode(value: String): String {
         val cipher = Cipher.getInstance(Transformation)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey(createIfMissing = true))
@@ -148,13 +159,13 @@ internal class AndroidKeystoreSecretCodec {
 
     private fun secretKey(createIfMissing: Boolean): SecretKey {
         val keyStore = KeyStore.getInstance(AndroidKeyStore).apply { load(null) }
-        (keyStore.getEntry(KeyAlias, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
+        (keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let { return it }
         check(createIfMissing) { "Android Keystore entry is unavailable" }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, AndroidKeyStore)
         keyGenerator.init(
             KeyGenParameterSpec.Builder(
-                KeyAlias,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -168,7 +179,7 @@ internal class AndroidKeystoreSecretCodec {
     private companion object {
         const val Prefix = "keystore:v1:"
         const val AndroidKeyStore = "AndroidKeyStore"
-        const val KeyAlias = "aura_llm_settings_api_keys"
+        const val DefaultKeyAlias = "aura_llm_settings_api_keys"
         const val Transformation = "AES/GCM/NoPadding"
         const val GcmIvBytes = 12
         const val GcmTagBits = 128
