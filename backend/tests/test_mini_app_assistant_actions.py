@@ -71,6 +71,8 @@ def test_assistant_tool_registry_exposes_intended_tools():
         "open_mini_app",
         "create_mini_app_record",
         "query_mini_app_records",
+        "present_widget",
+        "delegate_tasks",
     }
     block_app = next(tool for tool in tools if tool["name"] == "block_app")
     assert block_app["parameters"]["required"] == ["duration_minutes"]
@@ -85,6 +87,292 @@ def test_assistant_tool_registry_exposes_intended_tools():
     assert revise_mini_app["parameters"]["required"] == ["revision_instruction"]
     assert "preserving its local records" in revise_mini_app["description"]
     assert "Aura home widget" in revise_mini_app["description"]
+
+    present_widget = next(tool for tool in tools if tool["name"] == "present_widget")
+    widget_schema = present_widget["parameters"]["properties"]["widget"]
+    assert present_widget["parameters"]["required"] == ["widget"]
+    assert set(widget_schema["required"]) == {
+        "kind",
+        "title",
+        "message",
+        "actions",
+        "presentation",
+        "content_format",
+        "risk",
+        "priority",
+        "expires_in_minutes",
+    }
+    assert widget_schema["properties"]["actions"]["maxItems"] == 2
+    assert set(widget_schema["properties"]["risk"]["enum"]) == {"low", "medium", "high"}
+    assert {"report", "meeting_notes"}.issubset(widget_schema["properties"]["kind"]["enum"])
+    assert widget_schema["properties"]["content"]["maxLength"] == 60_000
+    delegate_tasks = next(tool for tool in tools if tool["name"] == "delegate_tasks")
+    calls = delegate_tasks["parameters"]["properties"]["calls"]
+    assert calls["maxItems"] == 3
+    assert set(calls["items"]["properties"]["agent"]["enum"]) == {
+        "researcher",
+        "planner",
+        "reviewer",
+    }
+
+
+def test_parse_present_widget_assistant_action():
+    reply, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "{neutral} Lunch is ready to review.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "food_order",
+                            "title": "Order lunch?",
+                            "message": "Chole bhature from your usual place",
+                            "details": ["₹240", "25–35 min"],
+                            "actions": [
+                                {
+                                    "id": "review-order",
+                                    "label": "Review order",
+                                    "type": "assistant_message",
+                                    "payload": {"message": "Review my lunch order"},
+                                    "requires_confirmation": True,
+                                }
+                            ],
+                            "risk": "high",
+                            "priority": 80,
+                            "expires_in_minutes": 30,
+                            "dedupe_key": "lunch-today",
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+    assert reply == "{neutral} Lunch is ready to review."
+    assert actions[0].type == "present_widget"
+    assert actions[0].widget.kind == "food_order"
+    assert actions[0].widget.actions[0].requires_confirmation is True
+    assert actions[0].widget.dedupe_key == "lunch-today"
+
+
+def test_fullscreen_html_report_is_a_bounded_typed_surface():
+    _, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "The report is ready.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "report",
+                            "title": "Weekly review",
+                            "message": "Open the full report",
+                            "actions": [],
+                            "presentation": "fullscreen",
+                            "content_format": "html",
+                            "content": "<h1>Weekly review</h1><p>Three tasks completed.</p>",
+                            "risk": "low",
+                            "priority": 40,
+                            "expires_in_minutes": 1440,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+    report = actions[0].widget
+    assert report.kind == "report"
+    assert report.presentation == "fullscreen"
+    assert report.content_format == "html"
+
+
+def test_html_is_rejected_outside_fullscreen_reports():
+    reply, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "Notes ready.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "meeting_notes",
+                            "title": "Meeting notes",
+                            "message": "Capture decisions",
+                            "actions": [],
+                            "presentation": "compact",
+                            "content_format": "html",
+                            "content": "<p>Unsafe shape</p>",
+                            "risk": "low",
+                            "priority": 20,
+                            "expires_in_minutes": 60,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+    assert reply == "Notes ready."
+    assert actions == []
+
+
+def test_invalid_or_unknown_widget_actions_are_rejected_without_crashing():
+    reply, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "I made a widget.",
+                "actions": [
+                    {"type": "unknown_widget_tool"},
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "food_order",
+                            "title": "Order lunch?",
+                            "message": "Review this order",
+                            "actions": [
+                                {
+                                    "id": "order",
+                                    "label": "Order",
+                                    "type": "assistant_message",
+                                    "payload": {},
+                                    "requires_confirmation": False,
+                                }
+                            ],
+                            "risk": "high",
+                            "priority": 90,
+                            "expires_in_minutes": 30,
+                        },
+                    },
+                ],
+            }
+        )
+    )
+
+    assert reply == "I made a widget."
+    assert actions == []
+
+
+def test_invalid_provider_widget_call_is_preserved_for_repair():
+    raw = extract_openai_text(
+        {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "I made the widget."}],
+                },
+                {
+                    "type": "function_call",
+                    "name": "present_widget",
+                    "arguments": json.dumps({"widget": {"kind": "food_order"}}),
+                },
+            ]
+        }
+    )
+
+    reply, actions = parse_tool_response(raw)
+
+    assert reply == "I made the widget."
+    assert actions == []
+    assert '"type": "present_widget"' in raw
+
+
+def test_medium_risk_widget_confirmation_is_enforced_by_the_backend_contract():
+    _, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "Review this.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "confirmation",
+                            "title": "Send update?",
+                            "message": "Ask Aura to prepare the update",
+                            "actions": [
+                                {
+                                    "id": "prepare",
+                                    "label": "Prepare",
+                                    "type": "assistant_message",
+                                    "payload": {"message": "Prepare my project update"},
+                                    "requires_confirmation": False,
+                                }
+                            ],
+                            "risk": "medium",
+                            "priority": 50,
+                            "expires_in_minutes": 20,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+    assert actions[0].widget.actions[0].requires_confirmation is True
+
+
+def test_model_authored_assistant_message_always_requires_confirmation():
+    _, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "Open the details.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "itinerary",
+                            "title": "Day plan",
+                            "message": "Three stops",
+                            "actions": [
+                                {
+                                    "id": "details",
+                                    "label": "See details",
+                                    "type": "assistant_message",
+                                    "payload": {"message": "Show my detailed itinerary"},
+                                    "requires_confirmation": False,
+                                }
+                            ],
+                            "risk": "low",
+                            "priority": 20,
+                            "expires_in_minutes": 60,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+    assert actions[0].widget.actions[0].requires_confirmation is True
+
+
+def test_widget_actions_per_response_are_bounded():
+    reply, actions = parse_tool_response(
+        json.dumps(
+            {
+                "reply": "Here are the widgets.",
+                "actions": [
+                    {
+                        "type": "present_widget",
+                        "widget": {
+                            "kind": "message",
+                            "title": f"Widget {index}",
+                            "message": "Bounded widget",
+                            "actions": [],
+                            "risk": "low",
+                            "priority": index,
+                            "expires_in_minutes": 30,
+                        },
+                    }
+                    for index in range(8)
+                ],
+            }
+        )
+    )
+
+    assert reply == "Here are the widgets."
+    assert len(actions) == 4
+    assert all(action.widget.dedupe_key.startswith("auto:") for action in actions)
 
 
 def test_parse_create_mini_app_assistant_action():

@@ -140,3 +140,12 @@ def test_repair_needed_detects_mini_app_creation_without_tool_call():
     reason = repair_needed("Done, created it.", "Done, created it.", [], chat)
 
     assert reason == "reply claimed a local action without calling the matching tool"
+
+
+def test_repair_needed_detects_invalid_structured_action():
+    chat = ChatIn(message="make a lunch widget", api_key="key", model="model")
+    raw = '{"reply":"Done.","actions":[{"type":"present_widget","widget":{"kind":"food_order"}}]}'
+
+    reason = repair_needed(raw, "Done.", [], chat)
+
+    assert reason == "response contained an unsupported or invalid action structure"
