@@ -3,8 +3,16 @@ import re
 import logging
 import requests
 from fastapi import HTTPException
+from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Tuple
-from app.models.chat import ChatIn, ChatActionOut
+from pydantic import ValidationError
+
+from app.models.chat import (
+    AURA_EMOTION_NAMES,
+    DEFAULT_AURA_EMOTION,
+    ChatActionOut,
+    ChatIn,
+)
 from app.services.prompt_harness import (
     PromptHarness,
     build_prompt_harness,
@@ -24,31 +32,32 @@ ASSISTANT_TOOL_NAMES = {
     "open_mini_app",
     "create_mini_app_record",
     "query_mini_app_records",
+    "present_widget",
+    "delegate_tasks",
 }
+MAX_ASSISTANT_ACTIONS_PER_RESPONSE = 16
+MAX_WIDGETS_PER_RESPONSE = 4
+EMOTION_VALUES_TEXT = ", ".join(AURA_EMOTION_NAMES)
+
+
+@dataclass(frozen=True)
+class ParsedAssistantResponse:
+    """Validated model response used at the harness boundary.
+
+    ``parse_tool_response`` below remains as a two-value compatibility wrapper
+    for existing callers; new harness paths should keep the emotion value.
+    """
+
+    reply: str
+    actions: list[ChatActionOut]
+    emotion: str = DEFAULT_AURA_EMOTION
+    created_emotion: Optional[str] = None
 
 AUTOMATION_ACTION_TYPES = [
     "notify",
     "draft_message",
     "eta_message",
     "direct_sms",
-    "open_app",
-    "wait_for_app",
-    "tap_text",
-    "tap_bounds",
-    "type_text",
-    "wait_for_text",
-    "wait_for_target",
-    "wait_until_gone",
-    "wait_for_idle",
-    "tap_target",
-    "long_press_target",
-    "clear_text",
-    "scroll",
-    "scroll_until_target",
-    "swipe",
-    "inspect_screen",
-    "press_back",
-    "press_home",
 ]
 
 AUTOMATION_FLOW_STEP_TYPES = ["action", "condition", "wait", "checkpoint"]
@@ -97,16 +106,21 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
     return (
         "You are Aura, a calm launcher assistant inside an Android home app. "
         "Your responses will be read aloud by a Text-to-Speech (TTS) synthesizer. "
-        "Always start your reply with one expression tag from this set: "
-        "{happy}, {sad}, {excited}, {thinking}, {angry}, {neutral}. "
-        "Keep replies short, natural, plain text, and suitable for speech. "
+        "Return one JSON object with a short speech-ready reply, an emotion, and an actions array. "
+        f"The emotion must be exactly one of: {EMOTION_VALUES_TEXT}. "
+        "Choose the emotion that matches the feeling conveyed by your reply, not merely the user's wording. "
+        "If none of those emotions fits, add a bounded field named created_emotion whose value starts exactly with "
+        "create followed by one to six descriptive words, for example create dreamily curious or create tiny villain. "
+        "Use created_emotion only for a new one-off eye feeling; never put create directives in actions. "
+        "Do not put the emotion name in the spoken reply. Keep replies short, natural, plain text, and suitable for speech. "
         "Use the available tools when the user asks for an action Aura can perform locally. "
+        "Use delegate_tasks only when independent specialist research, planning, or review will materially improve a multi-step request. Delegate at most three focused tasks. Subagents are reasoning-only and cannot perform device actions. Prefer fresh context; use fork only when the child needs the loaded project context, and use a stable session name only for work that should continue later. "
         "Do not claim an action has completed unless you request the matching tool. "
+        "Use present_widget when a choice, reminder, itinerary, suggested order, progress update, meeting-notes control, approval, or report should remain visible on the Aura home canvas. Use compact or expanded presentation for glanceable tools. For a rich report, use kind report, presentation fullscreen, content_format html, and self-contained static HTML; scripts, remote assets, forms, and external navigation will be blocked by the phone. Widgets are proposals, not proof that an external action completed. Use assistant_message actions to continue through the normal assistant tool and permission flow, and always mark those actions as requiring confirmation because their message is model-authored. Mark payments, purchases, sends, deletes, and other consequential actions high risk and require confirmation. "
         "Use app blocking only when the user asks to block, restrict, pause, or limit an app. "
         "Use mini app tools when the user asks to create/build/generate an Aura mini app, revise/upgrade/change an installed Aura mini app, open an Aura mini app, log or check in a mini app item, show a streak, or query mini app records. "
-        "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. "
-        "For multi-step automations, prefer automation_spec.flow.steps with clear step ids and names. Use action steps for device actions, condition steps for event/context checks, checkpoint steps when the flow should pause for a later resume/confirmation, and wait steps only when a real delay is required. Keep each step shape exclusive: action steps include action only, condition steps include condition only, wait steps include waitMillis only, and checkpoint steps include only checkpoint metadata. Use at most 5 retry attempts with backoffMillis no greater than 30000 for transient cross-app UI steps. Always use maxAttempts=1 for unconfirmed direct_sms and high-impact gestures because irreversible side effects must not be retried. Keep waitMillis at or below 604800000 (7 days); use a schedule trigger for longer delays. Keep the legacy actions array as a simple summary/fallback when possible. "
-        "For cross-app automations, use open_app, wait_for_app, inspect_screen, wait_for_idle, wait_for_target, wait_for_text, wait_until_gone, scroll_until_target, tap_target, tap_text, tap_bounds, type_text, clear_text, scroll, swipe, press_back, and press_home steps. Prefer open_app with packageName from the installed apps list; open_app waits for the package when accessibility is enabled, and wait_for_app can explicitly guard later transitions. Then use inspect_screen for unknown screens, wait_for_idle after broad app/screen transitions, wait_for_target for stable viewId/contentDescription/className selectors, wait_for_text for simple visible text, and wait_until_gone for loading indicators or transient dialogs before tap/type steps. Use scroll_until_target with maxScrolls when the target may be lower in a list or settings screen. Prefer stable selectors from screen inspection in this order: viewId, contentDescription, exact text, className plus occurrence. Add timeoutMillis for slow screens, maxNodes for bounded inspections, stableSamples for idle detection, diagnosticMaxNodes for failure snapshots, and settleMillis after app transitions. Cross-app UI control requires the user to enable Aura's Accessibility Service. Direct sends, purchases, deletes, posts, payments, or irreversible actions must be in flow.steps with a checkpoint before the high-impact action; set metadata.riskLevel=high when a selector is risky even if the label is ambiguous. "
+        "Use create_automation when the user asks Aura to do something later, repeatedly, on a schedule, when a place is entered/left, or from device context. The phone always stores model-authored automations as new disabled drafts with a fresh local id; never claim the rule is armed or that an existing rule was changed. Tell the user to review permissions and explicitly enable the draft. "
+        "For multi-step automations, prefer automation_spec.flow.steps with clear step ids and names. Use action steps for supported device actions, condition steps for event/context checks, checkpoint steps when the flow should pause for a later resume/confirmation, and wait steps only when a real delay is required. Keep each step shape exclusive: action steps include action only, condition steps include condition only, wait steps include waitMillis only, and checkpoint steps include only checkpoint metadata. Always use maxAttempts=1 for unconfirmed direct_sms because irreversible side effects must not be retried. Keep waitMillis at or below 604800000 (7 days); use a schedule trigger for longer delays. Keep the legacy actions array as a simple summary/fallback when possible. "
         "Automation actions must be permission-aware and user-safe: for messaging, prefer draft_message or eta_message with requireConfirmation true unless the user explicitly asks for direct SMS and provides the recipient address; then use direct_sms with requireConfirmation false. "
         "For a request like messaging a spouse when leaving work, create a geofence automation with transition exit, a reasonable radius, cooldownMillis near 18 hours for daily behavior, and an eta_message or direct_sms action whose template can use {{placeName}}, {{etaMinutes}}, {{etaDistanceKm}}, {{etaProvider}}, and {{etaConfidence}}. Include destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true metadata when the user has provided enough home/destination context. If exact coordinates or recipient address are missing, explain what is needed instead of inventing private details. "
         "When creating a mini app from chat, call create_mini_app with a professional mini_app_prompt that asks for runtime react unless the user explicitly requested native/declarative output, and captures the user's workflow, data model, local records, polished React UI, actions, assistant intents, and a required Aura home widget representing the app's main purpose. The widget must open the full mini app when tapped. "
@@ -117,7 +131,7 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
         "When planning mode is plan, include a concise user-visible plan in the reply before the final action summary. "
         f"Model routing: {harness.route_reason}. "
         "If a provider cannot use tools, return ONLY JSON with this shape: "
-        '{"reply":"{neutral} short reply","actions":[{"type":"block_app","package_name":"exact.package","app_query":"fallback app name","duration_minutes":30},{"type":"create_automation","automation_spec":{"id":"","name":"Leave work ETA","description":"Drafts an ETA message when leaving work.","enabled":true,"trigger":{"type":"geofence","geofence":{"placeName":"Work","latitude":0.0,"longitude":0.0,"radiusMeters":150.0,"transition":"exit"}},"conditions":[],"actions":[{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}}],"flow":{"concurrencyPolicy":"skip_if_running","steps":[{"id":"send-eta","name":"Draft ETA","type":"action","action":{"type":"eta_message","title":"Send ETA","messageTemplate":"I just left {{placeName}}. My ETA is {{etaMinutes}} minutes.","recipientName":"Spouse","recipientAddress":"","requireConfirmation":true,"metadata":{}},"retryPolicy":{"maxAttempts":1,"backoffMillis":0},"continueOnFailure":false,"metadata":{}}]},"cooldownMillis":64800000,"createdBy":"assistant"}},{"type":"create_mini_app","mini_app_prompt":"professional app request","open_after_create":true},{"type":"revise_mini_app","mini_app_id":"id","mini_app_query":"name","revision_instruction":"specific requested app change"},{"type":"open_mini_app","mini_app_id":"id","mini_app_query":"name"},{"type":"create_mini_app_record","mini_app_id":"id","action_id":"action","record_type":"record","values":{"field":"value"}},{"type":"query_mini_app_records","mini_app_id":"id"}]}. '
+        '{"reply":"Short speech-ready reply","emotion":"encouraging","created_emotion":null,"actions":[]}. '
         "No markdown, no emoji.\n\n"
         f"Local memories:\n{memories}\n\n"
         f"Local tasks:\n{todos}\n\n"
@@ -133,8 +147,130 @@ def build_system_message(data: ChatIn, harness: Optional[PromptHarness] = None) 
 def assistant_tool_definitions() -> list[dict[str, Any]]:
     tools = [
         {
+            "name": "delegate_tasks",
+            "description": "Delegate up to three independent reasoning tasks to bounded Aura specialists. Subagents have no device or external-action tools.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calls": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "agent": {
+                                    "type": "string",
+                                    "enum": ["researcher", "planner", "reviewer"],
+                                },
+                                "task": {"type": "string", "minLength": 1, "maxLength": 4000},
+                                "context": {"type": "string", "enum": ["fresh", "fork"]},
+                                "session": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "pattern": "^[a-zA-Z0-9_.:-]+$",
+                                },
+                            },
+                            "required": ["agent", "task"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["calls"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "present_widget",
+            "description": "Present one temporary, typed surface on Aura's home canvas. Surfaces can be compact tools, expanded cards, or full-screen static HTML reports. This creates a durable user-visible proposal; it never proves an external action completed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "widget": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["message", "confirmation", "itinerary", "food_order", "reminder", "progress", "report", "meeting_notes"],
+                            },
+                            "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                            "message": {"type": "string", "minLength": 1, "maxLength": 280},
+                            "details": {
+                                "type": "array",
+                                "maxItems": 6,
+                                "items": {"type": "string", "maxLength": 120},
+                            },
+                            "actions": {
+                                "type": "array",
+                                "maxItems": 2,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 64,
+                                            "pattern": "^[a-z0-9_-]+$",
+                                        },
+                                        "label": {"type": "string", "minLength": 1, "maxLength": 40},
+                                        "type": {
+                                            "type": "string",
+                                            "enum": ["assistant_message", "open_app", "dismiss"],
+                                        },
+                                        "payload": {
+                                            "type": "object",
+                                            "maxProperties": 8,
+                                            "additionalProperties": {"type": "string", "maxLength": 500},
+                                        },
+                                        "requires_confirmation": {"type": "boolean"},
+                                    },
+                                    "required": ["id", "label", "type", "requires_confirmation"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "presentation": {
+                                "type": "string",
+                                "enum": ["compact", "expanded", "fullscreen"],
+                            },
+                            "content_format": {
+                                "type": "string",
+                                "enum": ["plain_text", "html"],
+                            },
+                            "content": {
+                                "type": "string",
+                                "maxLength": 60000,
+                                "description": "Required for fullscreen surfaces. HTML must be static and self-contained.",
+                            },
+                            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+                            "priority": {"type": "integer", "minimum": 0, "maximum": 100},
+                            "expires_in_minutes": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10_080,
+                            },
+                            "dedupe_key": {"type": "string", "maxLength": 120},
+                        },
+                        "required": [
+                            "kind",
+                            "title",
+                            "message",
+                            "actions",
+                            "presentation",
+                            "content_format",
+                            "risk",
+                            "priority",
+                            "expires_in_minutes",
+                        ],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["widget"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "create_automation",
-            "description": "Create a durable local Aura automation from a user request. The phone runtime validates permissions, stores it, restores triggers after reboot, and executes actions.",
+            "description": "Author a complete deterministic Aura automation draft from a user request. The phone assigns a fresh id, validates it, stores it disabled, and requires explicit user review before arming triggers.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -145,7 +281,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                             "id": {
                                 "type": "string",
                                 "maxLength": AUTOMATION_MAX_ID_LENGTH,
-                                "description": "Leave blank for a new automation.",
+                                "description": "Always leave blank. The phone assigns a fresh local id and never overwrites an existing automation through this tool.",
                             },
                             "name": {"type": "string", "minLength": 1, "maxLength": AUTOMATION_MAX_NAME_LENGTH},
                             "description": {"type": "string", "maxLength": AUTOMATION_MAX_DESCRIPTION_LENGTH},
@@ -228,7 +364,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                         "metadata": {
                                             "type": "object",
                                             "maxProperties": AUTOMATION_MAX_METADATA_ENTRIES,
-                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
+                                            "description": "String metadata for executors. ETA actions can use destinationLatitude, destinationLongitude, travelMode, averageSpeedKph, and needsEta=true.",
                                             "additionalProperties": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                         },
                                     },
@@ -271,7 +407,7 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
                                                         "metadata": {
                                                             "type": "object",
                                                             "maxProperties": AUTOMATION_MAX_METADATA_ENTRIES,
-                                                            "description": "String metadata. Cross-app actions use packageName/appQuery, text, targetText, contentDescription, viewId, className, occurrence, partialMatch, timeoutMillis, settleMillis, maxNodes, maxScrolls, stableSamples, includeDiagnostics, diagnosticMaxNodes, riskLevel, direction, or gesture bounds/points.",
+                                                            "description": "String metadata for supported executors and ETA calculations.",
                                                             "additionalProperties": {"type": "string", "maxLength": AUTOMATION_MAX_TEXT_LENGTH},
                                                         },
                                                     },
@@ -443,6 +579,8 @@ def assistant_tool_definitions() -> list[dict[str, Any]]:
         "open_mini_app": 4,
         "create_mini_app_record": 5,
         "query_mini_app_records": 6,
+        "present_widget": 7,
+        "delegate_tasks": 8,
     }
     return sorted(tools, key=lambda tool: preferred_order.get(tool["name"], 99))
 
@@ -517,84 +655,205 @@ def _action_from_tool_call(name: str, args: Any) -> Optional[ChatActionOut]:
             args = {}
     if not isinstance(args, dict):
         args = {}
-    return ChatActionOut(
-        type=name,
-        package_name=args.get("package_name"),
-        app_query=args.get("app_query"),
-        duration_minutes=args.get("duration_minutes"),
-        mini_app_id=args.get("mini_app_id"),
-        mini_app_query=args.get("mini_app_query"),
-        mini_app_prompt=args.get("mini_app_prompt"),
-        revision_instruction=args.get("revision_instruction"),
-        open_after_create=args.get("open_after_create"),
-        action_id=args.get("action_id"),
-        record_type=args.get("record_type"),
-        values=_coerce_values(args.get("values")),
-        automation_spec=args.get("automation_spec") if isinstance(args.get("automation_spec"), dict) else None,
+    if name == "present_widget" and not isinstance(args.get("widget"), dict):
+        return None
+    try:
+        return ChatActionOut(
+            type=name,
+            package_name=args.get("package_name"),
+            app_query=args.get("app_query"),
+            duration_minutes=args.get("duration_minutes"),
+            mini_app_id=args.get("mini_app_id"),
+            mini_app_query=args.get("mini_app_query"),
+            mini_app_prompt=args.get("mini_app_prompt"),
+            revision_instruction=args.get("revision_instruction"),
+            open_after_create=args.get("open_after_create"),
+            action_id=args.get("action_id"),
+            record_type=args.get("record_type"),
+            values=_coerce_values(args.get("values")),
+            automation_spec=args.get("automation_spec") if isinstance(args.get("automation_spec"), dict) else None,
+            widget=args.get("widget") if isinstance(args.get("widget"), dict) else None,
+            calls=args.get("calls") if isinstance(args.get("calls"), list) else None,
+        )
+    except ValidationError:
+        logger.warning("Rejected invalid assistant tool call", extra={"tool_name": name})
+        return None
+
+
+def normalize_emotion(value: Any, reply: str = "") -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate in AURA_EMOTION_NAMES:
+        return candidate
+    tag = re.search(r"\{([a-zA-Z0-9_-]+)\}", reply)
+    tagged = tag.group(1).lower() if tag else ""
+    return tagged if tagged in AURA_EMOTION_NAMES else DEFAULT_AURA_EMOTION
+
+
+CREATED_EMOTION_PATTERN = re.compile(
+    r"(?im)(?:^|\n)\s*create\s+([a-z][a-z0-9 _-]{1,63})\s*(?=\n|$)"
+)
+
+
+def normalize_created_emotion(
+    value: Any = None, reply: str = ""
+) -> tuple[str, Optional[str]]:
+    """Extract a bounded ``create <emotion>`` directive and remove it from speech."""
+
+    candidates = []
+    if value is not None and str(value).strip().lower().startswith("create "):
+        candidates.append(str(value).strip())
+    match = CREATED_EMOTION_PATTERN.search(reply)
+    if match:
+        candidates.append(f"create {match.group(1).strip()}")
+    for candidate in candidates:
+        if candidate.lower().startswith("create "):
+            candidate = candidate[7:].strip()
+        words = re.findall(r"[a-zA-Z0-9_-]+", candidate.lower())
+        if not words or len(words) > 6:
+            continue
+        label = " ".join(words).strip()
+        if len(label) < 2 or len(label) > 64:
+            continue
+        cleaned_reply = CREATED_EMOTION_PATTERN.sub("", reply).strip()
+        cleaned_reply = re.sub(r"\n{3,}", "\n\n", cleaned_reply)
+        return cleaned_reply, f"create {label}"
+    return reply.strip(), None
+
+
+def _tool_response(
+    reply: str, actions: list[ChatActionOut], emotion: Any = None
+) -> str:
+    actions = _bounded_actions(actions)
+    structured = _json_payload(reply)
+    normalized_reply = (
+        str(structured.get("reply") or "").strip()
+        if structured is not None
+        else reply.strip()
+    ) or "{neutral} Done."
+    resolved_emotion = emotion
+    created_value = None
+    if resolved_emotion is None and structured is not None:
+        resolved_emotion = structured.get("emotion")
+        created_value = structured.get("created_emotion") or structured.get("create_emotion")
+        if created_value is None and str(resolved_emotion or "").lower().startswith("create "):
+            created_value = resolved_emotion
+    normalized_reply, created_value = normalize_created_emotion(
+        created_value, normalized_reply
     )
-
-
-def _tool_response(reply: str, actions: list[ChatActionOut]) -> str:
     return json.dumps(
         {
-            "reply": reply.strip() or "{neutral} Done.",
+            "reply": normalized_reply,
+            "emotion": normalize_emotion(resolved_emotion, normalized_reply),
+            "created_emotion": created_value,
             "actions": [action.model_dump(exclude_none=True) for action in actions],
         }
     )
 
 
-def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
+def _bounded_actions(actions: list[ChatActionOut]) -> list[ChatActionOut]:
+    bounded: list[ChatActionOut] = []
+    widget_count = 0
+    for action in actions:
+        if len(bounded) >= MAX_ASSISTANT_ACTIONS_PER_RESPONSE:
+            break
+        if action.type == "present_widget":
+            if widget_count >= MAX_WIDGETS_PER_RESPONSE:
+                continue
+            widget_count += 1
+        bounded.append(action)
+    return bounded
+
+
+def _invalid_tool_response(reply: str, tool_names: list[str]) -> str:
+    normalized_reply = reply.strip() or "{neutral} I need to correct that action."
+    return json.dumps(
+        {
+            "reply": normalized_reply,
+            "emotion": normalize_emotion(None, normalized_reply),
+            "actions": [
+                {"type": name}
+                for name in tool_names[:MAX_ASSISTANT_ACTIONS_PER_RESPONSE]
+            ],
+        }
+    )
+
+
+def _json_payload(raw: str) -> Optional[dict[str, Any]]:
     text = raw.strip()
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not match:
-            return text, []
+            return None
         try:
             payload = json.loads(match.group(0))
         except json.JSONDecodeError:
-            return text, []
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def parse_assistant_response(raw: str) -> ParsedAssistantResponse:
+    text = raw.strip()
+    payload = _json_payload(text)
+    if payload is None:
+        reply, created_emotion = normalize_created_emotion(None, text)
+        return ParsedAssistantResponse(
+            reply=reply,
+            actions=[],
+            emotion=normalize_emotion(None, reply),
+            created_emotion=created_emotion,
+        )
 
     reply = str(payload.get("reply") or "").strip() or "Done."
-    actions = []
+    created_value = payload.get("created_emotion") or payload.get("create_emotion")
+    if created_value is None and str(payload.get("emotion") or "").lower().startswith("create "):
+        created_value = payload.get("emotion")
+    reply, created_emotion = normalize_created_emotion(created_value, reply)
+    actions: list[ChatActionOut] = []
     for item in payload.get("actions") or []:
         if not isinstance(item, dict):
             continue
-        actions.append(
-            ChatActionOut(
-                type=str(item.get("type") or "").strip(),
-                package_name=item.get("package_name"),
-                app_query=item.get("app_query"),
-                duration_minutes=item.get("duration_minutes"),
-                mini_app_id=item.get("mini_app_id"),
-                mini_app_query=item.get("mini_app_query"),
-                mini_app_prompt=item.get("mini_app_prompt"),
-                revision_instruction=item.get("revision_instruction"),
-                open_after_create=item.get("open_after_create"),
-                action_id=item.get("action_id"),
-                record_type=item.get("record_type"),
-                values=item.get("values") if isinstance(item.get("values"), dict) else None,
-                automation_spec=item.get("automation_spec") if isinstance(item.get("automation_spec"), dict) else None,
-            )
-        )
-    return reply, [action for action in actions if action.type]
+        action = _action_from_tool_call(str(item.get("type") or "").strip(), item)
+        if action is not None:
+            actions.append(action)
+    return ParsedAssistantResponse(
+        reply=reply,
+        actions=_bounded_actions(actions),
+        emotion=normalize_emotion(payload.get("emotion"), reply),
+        created_emotion=created_emotion,
+    )
+
+
+def parse_tool_response(raw: str) -> Tuple[str, List[ChatActionOut]]:
+    """Compatibility parser for existing callers that do not need emotion."""
+
+    parsed = parse_assistant_response(raw)
+    return parsed.reply, parsed.actions
 
 def extract_openai_text(payload: dict) -> str:
     output = payload.get("output", [])
     text_parts: List[str] = []
     actions: list[ChatActionOut] = []
+    invalid_tool_names: list[str] = []
     for item in output:
         if item.get("type") == "function_call":
-            action = _action_from_tool_call(item.get("name", ""), item.get("arguments"))
+            tool_name = item.get("name", "")
+            action = _action_from_tool_call(tool_name, item.get("arguments"))
             if action:
                 actions.append(action)
+            elif tool_name in ASSISTANT_TOOL_NAMES:
+                invalid_tool_names.append(tool_name)
         for content in item.get("content", []):
             if content.get("type") == "output_text" and content.get("text"):
                 text_parts.append(content["text"])
     if text_parts:
         text = "\n".join(text_parts).strip()
+        if invalid_tool_names:
+            return _invalid_tool_response(text, invalid_tool_names)
         return _tool_response(text, actions) if actions else text
+    if invalid_tool_names:
+        return _invalid_tool_response("", invalid_tool_names)
     if actions:
         return _tool_response("{neutral} Done.", actions)
     raise HTTPException(status_code=502, detail="OpenAI response did not include text output")
@@ -604,17 +863,25 @@ def _extract_gemini_text(payload: dict) -> str:
     parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
     text_parts: list[str] = []
     actions: list[ChatActionOut] = []
+    invalid_tool_names: list[str] = []
     for part in parts:
         if part.get("text"):
             text_parts.append(part["text"])
         function_call = part.get("functionCall") or part.get("function_call")
         if function_call:
-            action = _action_from_tool_call(function_call.get("name", ""), function_call.get("args", {}))
+            tool_name = function_call.get("name", "")
+            action = _action_from_tool_call(tool_name, function_call.get("args", {}))
             if action:
                 actions.append(action)
+            elif tool_name in ASSISTANT_TOOL_NAMES:
+                invalid_tool_names.append(tool_name)
     text = "".join(text_parts).strip()
     if text:
+        if invalid_tool_names:
+            return _invalid_tool_response(text, invalid_tool_names)
         return _tool_response(text, actions) if actions else text
+    if invalid_tool_names:
+        return _invalid_tool_response("", invalid_tool_names)
     if actions:
         return _tool_response("{neutral} Done.", actions)
     raise HTTPException(status_code=502, detail="Gemini response did not include text")
@@ -765,11 +1032,17 @@ def call_openrouter(data: ChatIn, system_message: str, use_assistant_tools: bool
     message = choices[0].get("message", {}) if choices else {}
     text = (message.get("content") or "").strip()
     actions: list[ChatActionOut] = []
+    invalid_tool_names: list[str] = []
     for tool_call in message.get("tool_calls") or []:
         function = tool_call.get("function", {})
-        action = _action_from_tool_call(function.get("name", ""), function.get("arguments"))
+        tool_name = function.get("name", "")
+        action = _action_from_tool_call(tool_name, function.get("arguments"))
         if action:
             actions.append(action)
+        elif tool_name in ASSISTANT_TOOL_NAMES:
+            invalid_tool_names.append(tool_name)
+    if invalid_tool_names:
+        return _invalid_tool_response(text, invalid_tool_names)
     if actions:
         return _tool_response(text or "{neutral} Done.", actions)
     if not text:
