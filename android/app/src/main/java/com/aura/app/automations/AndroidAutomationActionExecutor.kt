@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import com.aura.app.BuildConfig
 import com.aura.app.LauncherActivity
 import com.aura.app.R
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class AndroidAutomationActionExecutor(
     private val context: Context,
     private val renderer: AutomationTemplateRenderer = AutomationTemplateRenderer(),
-    private val crossAppController: CrossAppAutomationController = CrossAppAutomationController(context),
     private val smsDispatcher: AutomationSmsDispatcher = AndroidAutomationSmsDispatcher(context)
 ) : AutomationActionExecutor {
     override suspend fun execute(action: AutomationAction, event: AutomationEvent): AutomationActionResult =
@@ -33,9 +33,12 @@ class AndroidAutomationActionExecutor(
                 AutomationActionTypes.DraftMessage,
                 AutomationActionTypes.EtaMessage -> draftMessage(action, event)
                 AutomationActionTypes.DirectSms -> {
-                    if (action.sendsDirectSms()) sendDirectSms(action, event) else draftMessage(action, event)
+                    if (BuildConfig.DIRECT_SMS_AVAILABLE && action.sendsDirectSms()) {
+                        sendDirectSms(action, event)
+                    } else {
+                        draftMessage(action, event)
+                    }
                 }
-                in AutomationActionTypeSets.CrossApp -> crossAppController.execute(action, event)
                 else -> AutomationActionResult(action.type, AutomationRunStatus.Skipped, "Unsupported action type")
             }
         }

@@ -19,7 +19,7 @@ class DefaultAutomationContextEnricher(
     }
 
     private suspend fun estimateEta(spec: AutomationSpec, values: Map<String, String>): EtaEstimate? {
-        val metadata = spec.actions.firstOrNull { action ->
+        val metadata = (spec.actions + spec.flow?.steps.orEmpty().mapNotNull { it.action }).firstOrNull { action ->
             action.type == AutomationActionTypes.EtaMessage ||
                 action.type == AutomationActionTypes.DirectSms ||
                 action.metadata["needsEta"] == "true"
