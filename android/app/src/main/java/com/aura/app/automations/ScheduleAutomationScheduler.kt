@@ -33,7 +33,7 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
         val trigger = spec.trigger.schedule ?: return
         val nextAt = nextTriggerAt(trigger) ?: return
         cancelLegacyPendingIntent(spec.id)
-        val pendingIntent = createPendingIntent(spec.id)
+        val pendingIntent = createPendingIntent(spec.id, nextAt)
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextAt, pendingIntent)
     }
 
@@ -46,12 +46,12 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
         return nextTriggerAt(trigger, ZonedDateTime.now(ZoneId.systemDefault()))
     }
 
-    private fun createPendingIntent(automationId: String): PendingIntent {
+    private fun createPendingIntent(automationId: String, triggerAt: Long): PendingIntent {
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         return PendingIntent.getBroadcast(
             context,
             automationId.hashCode(),
-            intent(automationId, includeIdentity = true),
+            intent(automationId, includeIdentity = true, triggerAt = triggerAt),
             flags
         )
     }
@@ -80,14 +80,16 @@ class ScheduleAutomationScheduler(private val context: Context) : AutomationSche
         pendingIntent.cancel()
     }
 
-    private fun intent(automationId: String, includeIdentity: Boolean): Intent =
+    private fun intent(automationId: String, includeIdentity: Boolean, triggerAt: Long? = null): Intent =
         Intent(context, ScheduleAutomationReceiver::class.java).apply {
             if (includeIdentity) action = alarmAction(automationId)
             putExtra(EXTRA_AUTOMATION_ID, automationId)
+            triggerAt?.let { putExtra(EXTRA_TRIGGER_AT, it) }
         }
 
     companion object {
         const val EXTRA_AUTOMATION_ID = "automation_id"
+        const val EXTRA_TRIGGER_AT = "automation_trigger_at"
         private const val ACTION_PREFIX = "com.aura.app.automation.schedule."
 
         internal fun alarmAction(automationId: String): String = ACTION_PREFIX + automationId

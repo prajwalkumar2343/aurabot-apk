@@ -1,0 +1,10 @@
+<manifest
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+
+  <!-- Direct SMS is omitted from the sideload build. Message automations open
+       a user-reviewable draft instead. Cross-app UI automation is not available. -->
+  <uses-permission
+    android:name="android.permission.SEND_SMS"
+    tools:node="remove" />
+</manifest>

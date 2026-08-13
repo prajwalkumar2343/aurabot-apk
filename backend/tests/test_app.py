@@ -7,36 +7,45 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+from pymongo.errors import DuplicateKeyError
 
 from app.main import app, startup
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+)
 from app.services.auth_sessions import refresh_token_fingerprint
+
 
 def wav_payload(duration_ms=400):
     sample_rate = 16_000
     pcm = b"\x01\x00" * int(sample_rate * duration_ms / 1000)
     data_len = len(pcm)
     header = (
-        b"RIFF" +
-        (36 + data_len).to_bytes(4, "little") +
-        b"WAVEfmt " +
-        (16).to_bytes(4, "little") +
-        (1).to_bytes(2, "little") +
-        (1).to_bytes(2, "little") +
-        sample_rate.to_bytes(4, "little") +
-        (sample_rate * 2).to_bytes(4, "little") +
-        (2).to_bytes(2, "little") +
-        (16).to_bytes(2, "little") +
-        b"data" +
-        data_len.to_bytes(4, "little")
+        b"RIFF"
+        + (36 + data_len).to_bytes(4, "little")
+        + b"WAVEfmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + (1).to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + (sample_rate * 2).to_bytes(4, "little")
+        + (2).to_bytes(2, "little")
+        + (16).to_bytes(2, "little")
+        + b"data"
+        + data_len.to_bytes(4, "little")
     )
     return base64.b64encode(header + pcm).decode("utf-8")
+
 
 # ==============================================================================
 # Mock In-Memory MongoDB Implementation
 # ==============================================================================
+
 
 class MockCursor:
     def __init__(self, data):
@@ -52,8 +61,11 @@ class MockCursor:
     async def to_list(self, limit=1000):
         res = list(self.data)
         if self.sort_key:
-            res.sort(key=lambda x: x.get(self.sort_key, ""), reverse=(self.sort_dir == -1))
+            res.sort(
+                key=lambda x: x.get(self.sort_key, ""), reverse=(self.sort_dir == -1)
+            )
         return res[:limit]
+
 
 class MockCollection:
     def __init__(self, name):
@@ -62,6 +74,12 @@ class MockCollection:
 
     def _matches(self, doc, query):
         for k, v in query.items():
+            if isinstance(v, dict):
+                if "$exists" in v and (k in doc) != v["$exists"]:
+                    return False
+                if "$gt" in v and not (doc.get(k) is not None and doc[k] > v["$gt"]):
+                    return False
+                continue
             if doc.get(k) != v:
                 return False
         return True
@@ -81,20 +99,31 @@ class MockCollection:
         return None
 
     async def insert_one(self, doc):
+        if self.name == "google_auth_challenges" and any(
+            item.get("nonce_hash") == doc.get("nonce_hash") for item in self.store
+        ):
+            raise DuplicateKeyError("duplicate nonce")
         self.store.append(doc)
         return doc
 
     async def delete_one(self, query):
         initial_len = len(self.store)
-        self.store = [item for item in self.store if not all(item.get(k) == v for k, v in query.items())]
+        self.store = [
+            item
+            for item in self.store
+            if not all(item.get(k) == v for k, v in query.items())
+        ]
         deleted_count = initial_len - len(self.store)
-        
+
         class DeleteResult:
             def __init__(self, count):
                 self.deleted_count = count
+
         return DeleteResult(deleted_count)
 
-    async def find_one_and_update(self, query, update, upsert=False, return_document=True, projection=None):
+    async def find_one_and_update(
+        self, query, update, upsert=False, return_document=True, projection=None
+    ):
         for item in self.store:
             if self._matches(item, query):
                 self._apply_update(item, update)
@@ -128,8 +157,9 @@ class MockCollection:
                 matched.append(doc)
         return MockCursor(matched)
 
-    async def create_index(self, keys, unique=False):
+    async def create_index(self, keys, unique=False, **kwargs):
         pass
+
 
 class MockDatabase:
     def __init__(self):
@@ -139,23 +169,33 @@ class MockDatabase:
         self.mini_app_records = MockCollection("mini_app_records")
         self.login_attempts = MockCollection("login_attempts")
         self.refresh_sessions = MockCollection("refresh_sessions")
-        
+        self.google_auth_challenges = MockCollection("google_auth_challenges")
+        self.agent_runs = MockCollection("agent_runs")
+        self.agent_run_events = MockCollection("agent_run_events")
+
         # Monkey patch delete_one specifically for login_attempts
         async def mock_delete_attempts(query):
             self.login_attempts.store = [
-                item for item in self.login_attempts.store 
+                item
+                for item in self.login_attempts.store
                 if not (item.get("identifier") == query.get("identifier"))
             ]
+
             class DelRes:
                 deleted_count = 1
+
             return DelRes()
+
         self.login_attempts.delete_one = mock_delete_attempts
+
 
 # Instantiate a fresh mock database
 mock_db = MockDatabase()
 
+
 def get_mock_db():
     return mock_db
+
 
 # Override the database dependency in the FastAPI application
 app.dependency_overrides[get_db] = get_mock_db
@@ -163,6 +203,7 @@ app.dependency_overrides[get_db] = get_mock_db
 # ==============================================================================
 # Pytest Fixtures
 # ==============================================================================
+
 
 @pytest.fixture(autouse=True)
 def clean_mock_db():
@@ -172,80 +213,196 @@ def clean_mock_db():
     mock_db.todos.store.clear()
     mock_db.mini_app_records.store.clear()
     mock_db.login_attempts.store.clear()
+    mock_db.google_auth_challenges.store.clear()
     mock_db.refresh_sessions.store.clear()
-    
+    mock_db.agent_runs.store.clear()
+    mock_db.agent_run_events.store.clear()
+
     # Pre-seed the admin user to match the app startup seed behavior
-    mock_db.users.store.append({
-        "id": "admin_uuid",
-        "email": settings.ADMIN_EMAIL.lower().strip(),
-        "name": "Admin",
-        "role": "admin",
-        "password_hash": hash_password(settings.ADMIN_PASSWORD),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    mock_db.users.store.append(
+        {
+            "id": "admin_uuid",
+            "email": settings.ADMIN_EMAIL.lower().strip(),
+            "name": "Admin",
+            "role": "admin",
+            "password_hash": hash_password(settings.ADMIN_PASSWORD),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     yield
+
 
 @pytest.fixture
 def client():
     """FastAPI TestClient with propagated exceptions caught by FastAPI."""
     return TestClient(app, raise_server_exceptions=False)
 
+
 @pytest.fixture
 def test_user_token():
     """Generates an access token and seeds a mock user in the db."""
     user_id = str(uuid.uuid4())
     email = "testuser@aura.app"
-    mock_db.users.store.append({
-        "id": user_id,
-        "email": email,
-        "name": "Test User",
-        "role": "user",
-        "password_hash": hash_password("password123"),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    mock_db.users.store.append(
+        {
+            "id": user_id,
+            "email": email,
+            "name": "Test User",
+            "role": "user",
+            "password_hash": hash_password("password123"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     return create_access_token(user_id, email)
+
 
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
+
+def test_google_login_uses_one_time_challenge_and_provisions_managed_account(client):
+    with patch.object(settings, "GOOGLE_WEB_CLIENT_ID", "web-client-id"):
+        challenge_response = client.post("/api/auth/google/challenge")
+    assert challenge_response.status_code == 200
+    nonce = challenge_response.json()["nonce"]
+
+    claims = {
+        "sub": "google-subject-1",
+        "email": "person@example.com",
+        "email_verified": True,
+        "name": "Person",
+        "nonce": nonce,
+    }
+    with patch("app.api.auth.verify_google_id_token", return_value=claims) as verify:
+        response = client.post(
+            "/api/auth/google",
+            json={"id_token": "signed-google-token", "nonce": nonce},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["service_mode"] == "managed"
+    assert response.json()["email"] == "person@example.com"
+    assert mock_db.users.store[-1]["google_subject"] == "google-subject-1"
+    verify.assert_called_once_with("signed-google-token", nonce)
+
+    replay = client.post(
+        "/api/auth/google",
+        json={"id_token": "signed-google-token", "nonce": nonce},
+    )
+    assert replay.status_code == 401
+    assert "challenge" in replay.json()["detail"].lower()
+
+
+def test_google_login_does_not_auto_link_existing_password_account(client):
+    client.post(
+        "/api/auth/register",
+        json={"email": "existing@example.com", "password": "password123"},
+    )
+    with patch.object(settings, "GOOGLE_WEB_CLIENT_ID", "web-client-id"):
+        challenge = client.post("/api/auth/google/challenge").json()["nonce"]
+    claims = {
+        "sub": "google-subject-2",
+        "email": "existing@example.com",
+        "email_verified": True,
+        "nonce": challenge,
+    }
+    with patch("app.api.auth.verify_google_id_token", return_value=claims):
+        response = client.post(
+            "/api/auth/google",
+            json={"id_token": "signed-google-token", "nonce": challenge},
+        )
+    assert response.status_code == 409
+
+
+def test_google_login_keeps_challenge_retryable_when_verifier_is_unavailable(client):
+    with patch.object(settings, "GOOGLE_WEB_CLIENT_ID", "web-client-id"):
+        nonce = client.post("/api/auth/google/challenge").json()["nonce"]
+
+    from app.services.google_identity import GoogleIdentityUnavailableError
+
+    with patch(
+        "app.api.auth.verify_google_id_token",
+        side_effect=GoogleIdentityUnavailableError(
+            "Google identity verification is unavailable"
+        ),
+    ):
+        unavailable = client.post(
+            "/api/auth/google",
+            json={"id_token": "signed-google-token", "nonce": nonce},
+        )
+
+    assert unavailable.status_code == 503
+    assert mock_db.google_auth_challenges.store == []
+
+    claims = {
+        "sub": "google-subject-retry",
+        "email": "retry@example.com",
+        "email_verified": True,
+        "name": "Retry User",
+        "nonce": nonce,
+    }
+    with patch("app.api.auth.verify_google_id_token", return_value=claims):
+        retried = client.post(
+            "/api/auth/google",
+            json={"id_token": "signed-google-token", "nonce": nonce},
+        )
+
+    assert retried.status_code == 200
+    assert retried.json()["service_mode"] == "managed"
+
+
 def seed_refresh_session(user_id: str, jti: str) -> None:
-    mock_db.refresh_sessions.store.append({
-        "jti_hash": refresh_token_fingerprint(jti),
-        "user_id": user_id,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_DAYS)).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    mock_db.refresh_sessions.store.append(
+        {
+            "jti_hash": refresh_token_fingerprint(jti),
+            "user_id": user_id,
+            "expires_at": datetime.now(timezone.utc)
+            + timedelta(days=settings.REFRESH_DAYS),
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+
 
 def test_startup_fails_when_required_index_creation_fails():
     """Startup fails closed if database indexes cannot be verified."""
+
     class BrokenIndexCollection(MockCollection):
         async def create_index(self, keys, unique=False):
             raise RuntimeError("index failure")
 
     broken_db = MockDatabase()
     broken_db.users = BrokenIndexCollection("users")
-    with patch("app.main.db_manager.connect"), patch("app.main.get_db", return_value=broken_db):
+    with patch("app.main.db_manager.connect"), patch(
+        "app.main.get_db", return_value=broken_db
+    ):
         with pytest.raises(RuntimeError, match="index failure"):
             asyncio.run(startup())
 
-def test_startup_fails_when_admin_seed_cannot_be_verified():
-    """Startup fails closed if the admin account cannot be seeded or verified."""
+
+def test_startup_does_not_rotate_an_existing_admin_password():
+    """Startup never mutates an existing admin account without an explicit reset flow."""
     broken_db = MockDatabase()
-    broken_db.users.store.append({
-        "id": "admin_uuid",
-        "email": settings.ADMIN_EMAIL.lower().strip(),
-        "name": "Admin",
-        "role": "admin",
-        "password_hash": "not-a-bcrypt-hash",
-        "created_at": "date",
-    })
-    with patch("app.main.db_manager.connect"), patch("app.main.get_db", return_value=broken_db):
-        with pytest.raises(ValueError):
-            asyncio.run(startup())
+    broken_db.users.store.append(
+        {
+            "id": "admin_uuid",
+            "email": settings.ADMIN_EMAIL.lower().strip(),
+            "name": "Admin",
+            "role": "admin",
+            "password_hash": "not-a-bcrypt-hash",
+            "created_at": "date",
+        }
+    )
+    with patch("app.main.db_manager.connect"), patch(
+        "app.main.get_db", return_value=broken_db
+    ):
+        asyncio.run(startup())
+    assert broken_db.users.store[0]["password_hash"] == "not-a-bcrypt-hash"
+
 
 # ==============================================================================
 # TEST CASE GROUP 1: Health, system checks & CORS (8 Tests)
 # ==============================================================================
+
 
 def test_1_root_endpoint(client):
     """1. GET /api/ returns 200 and expected status fields."""
@@ -255,6 +412,7 @@ def test_1_root_endpoint(client):
     assert data["status"] == "ok"
     assert data["service"] == "aura-assistant"
 
+
 def test_2_health_endpoint(client):
     """2. GET /api/health returns status and current active model."""
     response = client.get("/api/health")
@@ -263,95 +421,213 @@ def test_2_health_endpoint(client):
     assert data["status"] == "healthy"
     assert data["model"] == settings.GEMINI_MODEL
 
+
 def test_3_cors_preflight_headers(client):
     """3. CORS preflight OPTIONS requests return local active origin."""
-    response = client.options("/api/health", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "GET",
-        "Access-Control-Request-Headers": "Authorization"
-    })
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization",
+        },
+    )
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    assert (
+        response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    )
+
 
 def test_4_health_not_found(client):
     """4. Accessing invalid endpoint paths returns a clean 404 response."""
     response = client.get("/api/invalid_path_xyz")
     assert response.status_code == 404
 
+
 def test_5_global_exception_middleware_trigger(client):
     """5. Simulates an internal DB exception to verify global 500 handler is invoked."""
-    with patch.object(mock_db.users, "find_one", side_effect=Exception("Database crashed!")):
-        response = client.post("/api/auth/login", json={"email": "admin@aura.app", "password": "any"})
+    with patch.object(
+        mock_db.users, "find_one", side_effect=Exception("Database crashed!")
+    ):
+        response = client.post(
+            "/api/auth/login", json={"email": "admin@aura.app", "password": "any"}
+        )
         assert response.status_code == 500
         assert "internal server error" in response.json()["detail"].lower()
 
+
 def test_6_cors_preflight_missing_origin(client):
     """6. Preflight options requests without an origin are processed without origin CORS mapping."""
-    response = client.options("/api/health", headers={
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/api/health", headers={"Access-Control-Request-Method": "GET"}
+    )
     assert response.status_code == 405
     assert "access-control-allow-origin" not in response.headers
 
+
 def test_7_cors_preflight_unsupported_method(client):
     """7. Preflight request with non-standard method headers."""
-    response = client.options("/api/health", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "PURGE"
-    })
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "PURGE",
+        },
+    )
     assert response.status_code == 400
+
 
 def test_8_cors_preflight_lowercase_origin(client):
     """8. CORS OPTIONS requests handle lowercase allowed origins correctly."""
-    response = client.options("/api/health", headers={
-        "origin": "http://127.0.0.1:3000",
-        "Access-Control-Request-Method": "POST"
-    })
+    response = client.options(
+        "/api/health",
+        headers={
+            "origin": "http://127.0.0.1:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+    assert (
+        response.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+    )
+
 
 def test_8b_cors_preflight_rejects_unlisted_credentialed_origin(client):
     """8b. Credentialed CORS does not reflect arbitrary origins."""
-    response = client.options("/api/health", headers={
-        "Origin": "http://untrusted.example.com",
-        "Access-Control-Request-Method": "POST"
-    })
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://untrusted.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
 
 # ==============================================================================
 # TEST CASE GROUP 2: Registration edge cases & constraints (13 Tests)
 # ==============================================================================
 
+
 def test_9_register_user_success(client):
-    """9. Successful user registration generates correct schemas and cookies."""
-    response = client.post("/api/auth/register", json={
-        "email": "newuser@aura.app",
-        "password": "validpassword",
-        "name": "New User"
-    })
+    """9. Successful user registration generates correct auth schema and cookies."""
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "newuser@aura.app",
+            "password": "validpassword",
+            "name": "New User",
+        },
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "newuser@aura.app"
     assert data["name"] == "New User"
     assert "id" in data
+    assert data["access_token"]
+    assert data["refresh_token"]
     assert "x-access-token" in response.headers
+
+
+def test_9a_register_tokens_authenticate_new_user_without_login(client):
+    """9a. A new Android signup can use the register token body immediately."""
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "token-signup@aura.app",
+            "password": "validpassword",
+            "name": "Token Signup",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    me = client.get("/api/auth/me", headers=auth_headers(data["access_token"]))
+    assert me.status_code == 200
+    assert me.json()["email"] == "token-signup@aura.app"
+
+    memory = client.post(
+        "/api/memories",
+        json={"title": "First auth call", "content": "Created right after signup"},
+        headers=auth_headers(data["access_token"]),
+    )
+    assert memory.status_code == 200
+    assert memory.json()["title"] == "First auth call"
+    assert len(mock_db.login_attempts.store) == 0
+
+
+def test_google_login_provisions_managed_account(client, monkeypatch):
+    monkeypatch.setattr(settings, "GOOGLE_WEB_CLIENT_ID", "test-web-client")
+    monkeypatch.setattr(
+        "app.api.auth.verify_google_id_token",
+        lambda token, nonce: {
+            "sub": "google-subject-1",
+            "email": "managed@example.com",
+            "email_verified": True,
+            "name": "Managed User",
+        },
+    )
+
+    nonce = client.post("/api/auth/google/challenge").json()["nonce"]
+    response = client.post(
+        "/api/auth/google",
+        json={"id_token": "verified-token", "nonce": nonce},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["email"] == "managed@example.com"
+    assert payload["service_mode"] == "managed"
+    stored = next(
+        user for user in mock_db.users.store if user["email"] == payload["email"]
+    )
+    assert stored["google_subject"] == "google-subject-1"
+    assert "password_hash" not in stored
+
+
+def test_google_login_rejects_existing_password_account(
+    client, monkeypatch, test_user_token
+):
+    monkeypatch.setattr(settings, "GOOGLE_WEB_CLIENT_ID", "test-web-client")
+    monkeypatch.setattr(
+        "app.api.auth.verify_google_id_token",
+        lambda token, nonce: {
+            "sub": "different-google-subject",
+            "email": "testuser@aura.app",
+            "email_verified": True,
+            "name": "Normal User",
+        },
+    )
+
+    nonce = client.post("/api/auth/google/challenge").json()["nonce"]
+    response = client.post(
+        "/api/auth/google",
+        json={"id_token": "verified-token", "nonce": nonce},
+    )
+
+    assert response.status_code == 409
+
 
 def test_9b_register_cookie_secure_flag_follows_runtime_setting(client):
     """9b. Cookie security can be forced for production-like runtime settings."""
     original_secure = settings.COOKIE_SECURE
     settings.COOKIE_SECURE = True
     try:
-        response = client.post("/api/auth/register", json={
-            "email": "securecookie@aura.app",
-            "password": "validpassword",
-        })
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "securecookie@aura.app",
+                "password": "validpassword",
+            },
+        )
     finally:
         settings.COOKIE_SECURE = original_secure
 
     assert response.status_code == 200
     set_cookie = response.headers.get("set-cookie", "")
     assert "Secure" in set_cookie
+
 
 def test_9c_production_runtime_rejects_insecure_defaults():
     """9c. Production mode fails fast on default secrets or wildcard CORS."""
@@ -384,199 +660,282 @@ def test_9c_production_runtime_rejects_insecure_defaults():
             settings.CORS_ORIGINS,
         ) = original_values
 
+
 def test_10_register_duplicate_email(client):
     """10. Duplicate email registrations are rejected with 400."""
-    client.post("/api/auth/register", json={"email": "dup@aura.app", "password": "password"})
-    response = client.post("/api/auth/register", json={"email": "dup@aura.app", "password": "differentpassword"})
+    client.post(
+        "/api/auth/register", json={"email": "dup@aura.app", "password": "password"}
+    )
+    response = client.post(
+        "/api/auth/register",
+        json={"email": "dup@aura.app", "password": "differentpassword"},
+    )
     assert response.status_code == 400
     assert "already registered" in response.json()["detail"].lower()
 
+
 def test_11_register_password_too_short(client):
     """11. Passwords under 6 characters are rejected with Pydantic 422 error."""
-    response = client.post("/api/auth/register", json={"email": "short@aura.app", "password": "12345"})
+    response = client.post(
+        "/api/auth/register", json={"email": "short@aura.app", "password": "12345"}
+    )
     assert response.status_code == 422
+
 
 def test_12_register_invalid_email_format(client):
     """12. Non-standard email formats are rejected with Pydantic 422 error."""
-    response = client.post("/api/auth/register", json={"email": "invalid_email_no_domain", "password": "password"})
+    response = client.post(
+        "/api/auth/register",
+        json={"email": "invalid_email_no_domain", "password": "password"},
+    )
     assert response.status_code == 422
+
 
 def test_13_register_empty_name_defaults_to_email_prefix(client):
     """13. Empty user names default automatically to the email prefix."""
-    response = client.post("/api/auth/register", json={"email": "johndoe@aura.app", "password": "password123"})
+    response = client.post(
+        "/api/auth/register",
+        json={"email": "johndoe@aura.app", "password": "password123"},
+    )
     assert response.status_code == 200
     assert response.json()["name"] == "johndoe"
+
 
 def test_14_security_input_injection_handling(client):
     """14. Input validation handles SQL/NoSQL injections safety strings by failing parsing."""
     special_email = "' OR 1=1 -- @aura.app"
-    response = client.post("/api/auth/register", json={"email": special_email, "password": "password123"})
+    response = client.post(
+        "/api/auth/register", json={"email": special_email, "password": "password123"}
+    )
     assert response.status_code == 422
+
 
 def test_15_register_mixed_case_email_stripped(client):
     """15. Mixing uppercase letters and padding spaces in emails during register is normalized."""
-    response = client.post("/api/auth/register", json={
-        "email": "   TeStUsEr@AuRa.ApP   ",
-        "password": "validpassword"
-    })
+    response = client.post(
+        "/api/auth/register",
+        json={"email": "   TeStUsEr@AuRa.ApP   ", "password": "validpassword"},
+    )
     assert response.status_code == 200
     assert response.json()["email"] == "testuser@aura.app"
 
+
 def test_16_register_duplicate_email_mixed_case_blocked(client):
     """16. Checks duplicate uppercase/spaced registers are successfully blocked."""
-    client.post("/api/auth/register", json={"email": "test@aura.app", "password": "password"})
-    response = client.post("/api/auth/register", json={"email": "  TEST@AURA.APP ", "password": "password"})
+    client.post(
+        "/api/auth/register", json={"email": "test@aura.app", "password": "password"}
+    )
+    response = client.post(
+        "/api/auth/register", json={"email": "  TEST@AURA.APP ", "password": "password"}
+    )
     assert response.status_code == 400
+
 
 def test_17_register_extremely_long_username(client):
     """17. Handles boundary check: registering with exceptionally long names."""
     long_name = "A" * 1000
-    response = client.post("/api/auth/register", json={
-        "email": "longname@aura.app",
-        "password": "password123",
-        "name": long_name
-    })
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "longname@aura.app",
+            "password": "password123",
+            "name": long_name,
+        },
+    )
     assert response.status_code == 200
     assert response.json()["name"] == long_name
 
+
 def test_18_register_unicode_emojis_username(client):
     """18. Register accepts and preserves unicode characters and emojis in name."""
-    response = client.post("/api/auth/register", json={
-        "email": "emoji@aura.app",
-        "password": "password123",
-        "name": "✨ Aura Admin 💫"
-    })
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "emoji@aura.app",
+            "password": "password123",
+            "name": "✨ Aura Admin 💫",
+        },
+    )
     assert response.status_code == 200
     assert response.json()["name"] == "✨ Aura Admin 💫"
 
+
 def test_19_register_boundary_password_length(client):
     """19. Tests that passwords of exactly 6 characters are allowed."""
-    response = client.post("/api/auth/register", json={"email": "sixchar@aura.app", "password": "abcdef"})
+    response = client.post(
+        "/api/auth/register", json={"email": "sixchar@aura.app", "password": "abcdef"}
+    )
     assert response.status_code == 200
+
 
 def test_20_register_extremely_long_password(client):
     """20. Handles boundary password lengths (e.g. 500 characters)."""
     long_pw = "B" * 500
-    response = client.post("/api/auth/register", json={"email": "longpw@aura.app", "password": long_pw})
+    response = client.post(
+        "/api/auth/register", json={"email": "longpw@aura.app", "password": long_pw}
+    )
     assert response.status_code == 200
+
 
 def test_21_register_client_cannot_inject_admin_role(client):
     """21. Ensures role cannot be overridden in post body parameters, defaults to user."""
-    response = client.post("/api/auth/register", json={
-        "email": "hackadmin@aura.app",
-        "password": "password123",
-        "role": "admin"
-    })
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "hackadmin@aura.app",
+            "password": "password123",
+            "role": "admin",
+        },
+    )
     assert response.status_code == 200
     assert response.json()["role"] == "user"
+
 
 # ==============================================================================
 # TEST CASE GROUP 3: Login, lockouts & time-window boundaries (11 Tests)
 # ==============================================================================
 
+
 def test_22_login_admin_success(client):
     """22. Valid admin authentication succeeds and yields correct token payload."""
-    response = client.post("/api/auth/login", json={
-        "email": settings.ADMIN_EMAIL,
-        "password": settings.ADMIN_PASSWORD
-    })
+    response = client.post(
+        "/api/auth/login",
+        json={"email": settings.ADMIN_EMAIL, "password": settings.ADMIN_PASSWORD},
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["role"] == "admin"
     assert "access_token" in data
+    assert "refresh_token" in data
+
 
 def test_23_login_user_success(client, test_user_token):
     """23. Valid seeded user logs in successfully."""
-    response = client.post("/api/auth/login", json={
-        "email": "testuser@aura.app",
-        "password": "password123"
-    })
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "testuser@aura.app", "password": "password123"},
+    )
     assert response.status_code == 200
     assert response.json()["email"] == "testuser@aura.app"
 
+
 def test_24_login_invalid_password(client):
     """24. Logging in with incorrect password returns 401 Unauthorized."""
-    response = client.post("/api/auth/login", json={
-        "email": settings.ADMIN_EMAIL,
-        "password": "incorrect_password"
-    })
+    response = client.post(
+        "/api/auth/login",
+        json={"email": settings.ADMIN_EMAIL, "password": "incorrect_password"},
+    )
     assert response.status_code == 401
     assert "invalid" in response.json()["detail"].lower()
 
+
 def test_25_login_nonexistent_user(client):
     """25. Rejects non-existent email accounts with 401."""
-    response = client.post("/api/auth/login", json={
-        "email": "nonexistent@aura.app",
-        "password": "password"
-    })
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "nonexistent@aura.app", "password": "password"},
+    )
     assert response.status_code == 401
+
 
 def test_26_brute_force_lockout_mechanism(client):
     """26. Confirms brute-force defense returns 429 as soon as the threshold is hit."""
     email = "targetuser@aura.app"
     client.post("/api/auth/register", json={"email": email, "password": "password123"})
-    
+
     for _ in range(4):
-        response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
+        response = client.post(
+            "/api/auth/login", json={"email": email, "password": "wrongpassword"}
+        )
         assert response.status_code == 401
 
-    response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": "wrongpassword"}
+    )
     assert response.status_code == 429
     assert "too many attempts" in response.json()["detail"].lower()
 
-    response = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": "wrongpassword"}
+    )
     assert response.status_code == 429
 
-    response = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": "password123"}
+    )
     assert response.status_code == 429
+
 
 def test_27_brute_force_reset_on_success(client):
     """27. Successful login clears previous failed attempts counter."""
     email = "resettable@aura.app"
     client.post("/api/auth/register", json={"email": email, "password": "password123"})
-    
+
     for _ in range(3):
-        client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
-        
-    response = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+        client.post(
+            "/api/auth/login", json={"email": email, "password": "wrongpassword"}
+        )
+
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": "password123"}
+    )
     assert response.status_code == 200
-    attempt = next((a for a in mock_db.login_attempts.store if email in a["identifier"]), None)
+    attempt = next(
+        (a for a in mock_db.login_attempts.store if email in a["identifier"]), None
+    )
     assert attempt is None
+
 
 def test_28_login_empty_password_rejected(client):
     """28. Empty passwords are rejected inside logins."""
-    response = client.post("/api/auth/login", json={"email": "some@aura.app", "password": ""})
+    response = client.post(
+        "/api/auth/login", json={"email": "some@aura.app", "password": ""}
+    )
     assert response.status_code == 401
+
 
 def test_29_login_mixed_case_email_stripped(client):
     """29. mixed email cases are normalized during login operations."""
     email = "NormalUser@aura.app"
     client.post("/api/auth/register", json={"email": email, "password": "password123"})
-    response = client.post("/api/auth/login", json={"email": " NORMALUSER@AURA.APP ", "password": "password123"})
+    response = client.post(
+        "/api/auth/login",
+        json={"email": " NORMALUSER@AURA.APP ", "password": "password123"},
+    )
     assert response.status_code == 200
+
 
 def test_30_brute_force_lockout_expiration_simulation(client):
     """30. Lockout checks reset and allow logins if simulated locked_until time has expired."""
     email = "expiringlock@aura.app"
     client.post("/api/auth/register", json={"email": email, "password": "password123"})
-    
+
     for _ in range(5):
-        client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"})
-        
+        client.post(
+            "/api/auth/login", json={"email": email, "password": "wrongpassword"}
+        )
+
     # Lockout is set. Let's manually set lock duration in mock db to 20 mins ago (expired)
     past_time = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
     for item in mock_db.login_attempts.store:
         if email in item["identifier"]:
             item["locked_until"] = past_time
-            
+
     # Now user should be allowed to attempt log in again
-    response = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": "password123"}
+    )
     assert response.status_code == 200
+
 
 def test_31_login_seeded_admin_mixed_case_email(client):
     """31. Seeded admin accounts can log in using mixed cases."""
-    response = client.post("/api/auth/login", json={"email": " ADMIN@AURA.APP ", "password": settings.ADMIN_PASSWORD})
+    response = client.post(
+        "/api/auth/login",
+        json={"email": " ADMIN@AURA.APP ", "password": settings.ADMIN_PASSWORD},
+    )
     assert response.status_code == 200
+
 
 def test_32_brute_force_isolation_per_account(client):
     """32. Lockouts on user A do not impact attempts or locks on user B."""
@@ -584,17 +943,21 @@ def test_32_brute_force_isolation_per_account(client):
     email_b = "userb@aura.app"
     client.post("/api/auth/register", json={"email": email_a, "password": "password"})
     client.post("/api/auth/register", json={"email": email_b, "password": "password"})
-    
+
     for _ in range(5):
         client.post("/api/auth/login", json={"email": email_a, "password": "wrong"})
-        
+
     # User B should still be able to login successfully
-    response = client.post("/api/auth/login", json={"email": email_b, "password": "password"})
+    response = client.post(
+        "/api/auth/login", json={"email": email_b, "password": "password"}
+    )
     assert response.status_code == 200
+
 
 # ==============================================================================
 # TEST CASE GROUP 4: JWT Verification, security algorithms & precedence (14 Tests)
 # ==============================================================================
+
 
 def test_33_auth_me_no_token(client):
     """33. Secured endpoints fail without a Bearer or Cookie token."""
@@ -602,11 +965,15 @@ def test_33_auth_me_no_token(client):
     assert response.status_code == 401
     assert "not authenticated" in response.json()["detail"].lower()
 
+
 def test_34_auth_me_invalid_bearer_format(client):
     """34. secured endpoints reject malformed Bearer authorizations."""
-    response = client.get("/api/auth/me", headers={"Authorization": "Bearer malformed_token_abc"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": "Bearer malformed_token_abc"}
+    )
     assert response.status_code == 401
     assert "invalid token" in response.json()["detail"].lower()
+
 
 def test_35_auth_me_token_expired(client):
     """35. Expired JWT tokens yield a clear 401 response."""
@@ -614,25 +981,36 @@ def test_35_auth_me_token_expired(client):
         "sub": "user_id_xyz",
         "email": "user@aura.app",
         "exp": datetime.now(timezone.utc) - timedelta(minutes=10),
-        "type": "access"
+        "type": "access",
     }
-    expired_token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
+    expired_token = jwt.encode(
+        payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {expired_token}"}
+    )
     assert response.status_code == 401
     assert "expired" in response.json()["detail"].lower()
+
 
 def test_36_auth_me_invalid_token_type(client):
     """36. Rejects refresh tokens passed as access tokens on secured paths."""
     refresh = create_refresh_token("user_xyz")
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {refresh}"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {refresh}"}
+    )
     assert response.status_code == 401
     assert "invalid token type" in response.json()["detail"].lower()
 
+
 def test_37_auth_me_valid_bearer(client, test_user_token):
     """37. Verifies authentication with valid Bearer token works."""
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {test_user_token}"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert response.json()["email"] == "testuser@aura.app"
+
 
 def test_38_auth_me_user_not_found(client):
     """38. Handles tokens representing deleted/non-existent user accounts."""
@@ -641,63 +1019,102 @@ def test_38_auth_me_user_not_found(client):
     assert response.status_code == 401
     assert "user not found" in response.json()["detail"].lower()
 
+
 def test_39_auth_me_cookie_precedence(client, test_user_token):
     """39. Verified cookies have precedence over bearer headers when both are present."""
     bad_token = create_access_token("ghost_uuid", "ghost@aura.app")
-    
+
     # Valid Bearer Header, but Bad Access Cookie -> Should fail with 401 user not found
     client.cookies.set("access_token", bad_token)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {test_user_token}"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 401
+
 
 def test_40_jwt_signature_failure(client):
     """40. Tampered JWT signature payloads are securely blocked."""
     payload = {"sub": "uid", "email": "a@a.com", "type": "access"}
-    fake_token = jwt.encode(payload, "wrong_secret_key_123_with_enough_length", algorithm="HS256")
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {fake_token}"})
+    fake_token = jwt.encode(
+        payload, "wrong_secret_key_123_with_enough_length", algorithm="HS256"
+    )
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {fake_token}"}
+    )
     assert response.status_code == 401
     assert "invalid token" in response.json()["detail"].lower()
 
+
 def test_41_jwt_missing_sub_claim(client):
     """41. JWT tokens missing the sub (user ID) claim are securely rejected."""
-    payload = {"email": "missing@sub.com", "type": "access", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
-    bad_token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"})
+    payload = {
+        "email": "missing@sub.com",
+        "type": "access",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+    }
+    bad_token = jwt.encode(
+        payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"}
+    )
     assert response.status_code == 401
+
 
 def test_42_jwt_missing_email_claim(client):
     """42. JWT tokens missing standard email claims are rejected."""
-    payload = {"sub": "user_id_abc", "type": "access", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
-    bad_token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"})
+    payload = {
+        "sub": "user_id_abc",
+        "type": "access",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+    }
+    bad_token = jwt.encode(
+        payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"}
+    )
     assert response.status_code == 401
+
 
 def test_43_jwt_invalid_sub_datatype(client):
     """43. Rejects claims with malformed sub datatypes (e.g. lists)."""
     payload = {"sub": [1, 2, 3], "email": "a@a.com", "type": "access"}
-    bad_token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"})
+    bad_token = jwt.encode(
+        payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"}
+    )
     assert response.status_code == 401
+
 
 def test_44_jwt_algorithm_confusion_asymmetric_rejection(client):
     """44. Rejects tokens encoded with asymmetric algorithms if symmetric HS256 is expected."""
     payload = {"sub": "user_id", "email": "a@a.com", "type": "access"}
     # Encodes with HS384 instead of HS256 to simulate algorithm mismatch
     bad_token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS384")
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"}
+    )
     assert response.status_code == 401
+
 
 def test_45_jwt_algorithm_none_rejection(client):
     """45. Secures against 'none' algorithm bypass attacks."""
     payload = {"sub": "user_id", "email": "a@a.com", "type": "access"}
     # python-jwt doesn't allow encoding with "none" easily without special flags, let's mock decode failure
     bad_token = jwt.encode(payload, "", algorithm=None)
-    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"})
+    response = client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {bad_token}"}
+    )
     assert response.status_code == 401
+
 
 # ==============================================================================
 # TEST CASE GROUP 5: Cookies & session lifecycles (7 Tests)
 # ==============================================================================
+
 
 def test_46_auth_refresh_missing_refresh_token(client):
     """46. Refresh API endpoint returns 401 if refresh cookie is missing."""
@@ -705,26 +1122,61 @@ def test_46_auth_refresh_missing_refresh_token(client):
     assert response.status_code == 401
     assert "no refresh token" in response.json()["detail"].lower()
 
+
 def test_47_auth_refresh_valid(client):
-    """47. Successful refresh call issues a new access token."""
+    """47. Successful refresh call issues rotated access and refresh tokens."""
     user_id = "test_user_id"
     jti = "refresh-session-47"
-    mock_db.users.store.append({
-        "id": user_id,
-        "email": "ref@aura.app",
-        "name": "Refresh User",
-        "role": "user",
-        "password_hash": "hash",
-        "created_at": "date"
-    })
+    mock_db.users.store.append(
+        {
+            "id": user_id,
+            "email": "ref@aura.app",
+            "name": "Refresh User",
+            "role": "user",
+            "password_hash": "hash",
+            "created_at": "date",
+        }
+    )
     refresh = create_refresh_token(user_id, jti)
     seed_refresh_session(user_id, jti)
     client.cookies.set("refresh_token", refresh)
     response = client.post("/api/auth/refresh")
     assert response.status_code == 200
     assert "access_token" in response.json()
+    assert "refresh_token" in response.json()
     assert mock_db.refresh_sessions.store[0].get("revoked_at")
     assert len(mock_db.refresh_sessions.store) == 2
+
+
+def test_47b_auth_refresh_body_rotates_and_rejects_old_refresh_token(client):
+    """47b. Android body refresh rotates the server session and revokes reuse."""
+    user_id = "test_user_id"
+    jti = "refresh-session-47b"
+    mock_db.users.store.append(
+        {
+            "id": user_id,
+            "email": "body-ref@aura.app",
+            "name": "Refresh User",
+            "role": "user",
+            "password_hash": "hash",
+            "created_at": "date",
+        }
+    )
+    refresh = create_refresh_token(user_id, jti)
+    seed_refresh_session(user_id, jti)
+
+    response = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["access_token"]
+    assert data["refresh_token"]
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
+    assert len(mock_db.refresh_sessions.store) == 2
+
+    reused = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert reused.status_code == 401
+
 
 def test_48_auth_logout_clears_cookies(client):
     """48. Logging out clears JWT state cookies."""
@@ -738,13 +1190,35 @@ def test_48_auth_logout_clears_cookies(client):
     assert response.json()["ok"] is True
     assert mock_db.refresh_sessions.store[0].get("revoked_at")
 
+
+def test_48b_auth_logout_revokes_body_refresh_token(client):
+    """48b. Android logout can revoke a refresh session without cookies."""
+    user_id = "logout_body_user_id"
+    jti = "refresh-session-48b"
+    refresh = create_refresh_token(user_id, jti)
+    seed_refresh_session(user_id, jti)
+
+    response = client.post("/api/auth/logout", json={"refresh_token": refresh})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert mock_db.refresh_sessions.store[0].get("revoked_at")
+
+
 def test_49_auth_refresh_expired_refresh_token(client):
     """49. Rejects expired refresh tokens in cookies."""
-    payload = {"sub": "uid", "type": "refresh", "exp": datetime.now(timezone.utc) - timedelta(days=2)}
-    expired_refresh = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    payload = {
+        "sub": "uid",
+        "type": "refresh",
+        "exp": datetime.now(timezone.utc) - timedelta(days=2),
+    }
+    expired_refresh = jwt.encode(
+        payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
     client.cookies.set("refresh_token", expired_refresh)
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
+
 
 def test_50_auth_refresh_wrong_token_type(client):
     """50. Rejects access token types passed to refresh cookies."""
@@ -753,13 +1227,17 @@ def test_50_auth_refresh_wrong_token_type(client):
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
 
+
 def test_51_auth_refresh_tampered_token(client):
     """51. Rejects tampered refresh tokens with bad signatures."""
     payload = {"sub": "uid", "type": "refresh"}
-    bad_refresh = jwt.encode(payload, "malicious_secret_xyz_with_enough_length", algorithm="HS256")
+    bad_refresh = jwt.encode(
+        payload, "malicious_secret_xyz_with_enough_length", algorithm="HS256"
+    )
     client.cookies.set("refresh_token", bad_refresh)
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
+
 
 def test_52_auth_refresh_user_not_found(client):
     """52. Handles refresh requests from deleted users safely."""
@@ -770,95 +1248,149 @@ def test_52_auth_refresh_user_not_found(client):
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
 
+
 def test_52b_auth_refresh_requires_server_session(client):
     """52b. Signed refresh tokens are rejected unless the server session exists."""
     user_id = "test_user_id"
-    mock_db.users.store.append({
-        "id": user_id,
-        "email": "ref@aura.app",
-        "name": "Refresh User",
-        "role": "user",
-        "password_hash": "hash",
-        "created_at": "date"
-    })
-    client.cookies.set("refresh_token", create_refresh_token(user_id, "missing-server-session"))
+    mock_db.users.store.append(
+        {
+            "id": user_id,
+            "email": "ref@aura.app",
+            "name": "Refresh User",
+            "role": "user",
+            "password_hash": "hash",
+            "created_at": "date",
+        }
+    )
+    client.cookies.set(
+        "refresh_token", create_refresh_token(user_id, "missing-server-session")
+    )
     response = client.post("/api/auth/refresh")
     assert response.status_code == 401
+
+
+def test_52c_auth_refresh_rejects_expired_server_session(client):
+    """52c. Server-side refresh session expiry is enforced."""
+    user_id = "test_user_id"
+    jti = "expired-server-session"
+    mock_db.users.store.append(
+        {
+            "id": user_id,
+            "email": "ref@aura.app",
+            "name": "Refresh User",
+            "role": "user",
+            "password_hash": "hash",
+            "created_at": "date",
+        }
+    )
+    mock_db.refresh_sessions.store.append(
+        {
+            "jti_hash": refresh_token_fingerprint(jti),
+            "user_id": user_id,
+            "expires_at": (
+                datetime.now(timezone.utc) - timedelta(minutes=1)
+            ).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    client.cookies.set("refresh_token", create_refresh_token(user_id, jti))
+    response = client.post("/api/auth/refresh")
+    assert response.status_code == 401
+
 
 # ==============================================================================
 # TEST CASE GROUP 6: Memories CRUD, boundaries & sanitization (13 Tests)
 # ==============================================================================
+
 
 def test_53_create_memory_success(client, test_user_token):
     """53. User creates a memory successfully."""
     response = client.post(
         "/api/memories",
         json={"title": "Important meeting", "content": "Met John at 4pm"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
     assert data["title"] == "Important meeting"
     assert "id" in data
 
+
 def test_54_list_memories_success(client, test_user_token):
     """54. Retrieves memory objects seeded for authenticating user."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.memories.store.append({
-        "id": "mem_1",
-        "user_id": user_id,
-        "title": "Title 1",
-        "content": "Content 1",
-        "created_at": "2026-05-30"
-    })
-    response = client.get("/api/memories", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.memories.store.append(
+        {
+            "id": "mem_1",
+            "user_id": user_id,
+            "title": "Title 1",
+            "content": "Content 1",
+            "created_at": "2026-05-30",
+        }
+    )
+    response = client.get(
+        "/api/memories", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Title 1"
 
+
 def test_55_delete_memory_success(client, test_user_token):
     """55. User deletes memory successfully."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.memories.store.append({
-        "id": "mem_del",
-        "user_id": user_id,
-        "title": "To delete",
-        "content": "Delete this",
-        "created_at": "2026-05-30"
-    })
-    response = client.delete("/api/memories/mem_del", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.memories.store.append(
+        {
+            "id": "mem_del",
+            "user_id": user_id,
+            "title": "To delete",
+            "content": "Delete this",
+            "created_at": "2026-05-30",
+        }
+    )
+    response = client.delete(
+        "/api/memories/mem_del", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert response.json()["ok"] is True
 
+
 def test_56_delete_memory_not_found(client, test_user_token):
     """56. Deleting non-existent memories returns 404."""
-    response = client.delete("/api/memories/non_existent_mem", headers={"Authorization": f"Bearer {test_user_token}"})
+    response = client.delete(
+        "/api/memories/non_existent_mem",
+        headers={"Authorization": f"Bearer {test_user_token}"},
+    )
     assert response.status_code == 404
+
 
 def test_57_memories_require_auth_guard(client):
     """57. Memories endpoints check authentication guards."""
     response = client.get("/api/memories")
     assert response.status_code == 401
 
+
 def test_57b_search_memories_keyword_fallback(client, test_user_token):
     """57b. Memory search returns ranked keyword snippets for the authenticated user."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.memories.store.extend([
-        {
-            "id": "mem_relevant",
-            "user_id": user_id,
-            "title": "Doctor visit",
-            "content": "Dentist appointment is at 4pm on Friday",
-            "created_at": "2026-05-30",
-        },
-        {
-            "id": "mem_other",
-            "user_id": "other_user",
-            "title": "Doctor visit",
-            "content": "Private note from another account",
-            "created_at": "2026-05-30",
-        },
-    ])
+    mock_db.memories.store.extend(
+        [
+            {
+                "id": "mem_relevant",
+                "user_id": user_id,
+                "title": "Doctor visit",
+                "content": "Dentist appointment is at 4pm on Friday",
+                "created_at": "2026-05-30",
+            },
+            {
+                "id": "mem_other",
+                "user_id": "other_user",
+                "title": "Doctor visit",
+                "content": "Private note from another account",
+                "created_at": "2026-05-30",
+            },
+        ]
+    )
     response = client.post(
         "/api/memories/search",
         json={"query": "dentist Friday", "limit": 5},
@@ -870,8 +1402,11 @@ def test_57b_search_memories_keyword_fallback(client, test_user_token):
     assert data[0]["memory_id"] == "mem_relevant"
     assert data[0]["source_type"] == "keyword"
 
+
 @patch("app.services.memory.requests.post")
-def test_57c_create_memory_uses_supermemory_when_configured(mock_post, client, test_user_token):
+def test_57c_create_memory_uses_supermemory_when_configured(
+    mock_post, client, test_user_token
+):
     """57c. Configured cloud memories are sent to Supermemory and mirrored locally."""
     from app.core.config import settings
 
@@ -881,7 +1416,9 @@ def test_57c_create_memory_uses_supermemory_when_configured(mock_post, client, t
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "documentId": "doc_1",
-        "memories": [{"id": "mem_super", "memory": "Important meeting", "isStatic": False}],
+        "memories": [
+            {"id": "mem_super", "memory": "Important meeting", "isStatic": False}
+        ],
     }
     mock_post.return_value = mock_response
     try:
@@ -899,44 +1436,49 @@ def test_57c_create_memory_uses_supermemory_when_configured(mock_post, client, t
     assert request["json"]["memories"][0]["metadata"]["source"] == "aura_manual_memory"
     assert mock_db.memories.store[-1]["supermemory_id"] == "mem_super"
 
+
 def test_58_create_extremely_long_memory(client, test_user_token):
     """58. Boundary check: handles huge data volumes efficiently."""
     long_content = "X" * 10000
     response = client.post(
         "/api/memories",
         json={"title": "Mega Memo", "content": long_content},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert len(response.json()["content"]) == 10000
+
 
 def test_59_create_memory_empty_content(client, test_user_token):
     """59. Creating a memory with empty content fails validation."""
     response = client.post(
         "/api/memories",
         json={"title": "Title Only", "content": ""},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
-    assert response.status_code == 200 # App accepts empty string contents
+    assert response.status_code == 200  # App accepts empty string contents
+
 
 def test_60_create_memory_empty_title(client, test_user_token):
     """60. Creating a memory with empty title."""
     response = client.post(
         "/api/memories",
         json={"title": "", "content": "Content"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
+
 
 def test_61_create_memory_unicode_emojis(client, test_user_token):
     """61. Memory title successfully accepts complex unicode strings/emojis."""
     response = client.post(
         "/api/memories",
         json={"title": "🚀 Space Memo 🌟", "content": "Travel notes 🧑‍🚀"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["title"] == "🚀 Space Memo 🌟"
+
 
 def test_62_create_memory_xss_sanitization(client, test_user_token):
     """62. Memories store HTML injection script tags safely as plain text."""
@@ -944,37 +1486,48 @@ def test_62_create_memory_xss_sanitization(client, test_user_token):
     response = client.post(
         "/api/memories",
         json=payload,
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["content"] == "<script>alert('hack')</script>"
 
+
 def test_63_delete_memory_non_owned_forbidden(client, test_user_token):
     """63. Ensures users cannot delete other people's memories (data isolation checks)."""
     # Seed user B memory
-    mock_db.memories.store.append({
-        "id": "mem_b_id",
-        "user_id": "different_user_b",
-        "title": "B Memory",
-        "content": "Secret Content",
-        "created_at": "date"
-    })
-    response = client.delete("/api/memories/mem_b_id", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.memories.store.append(
+        {
+            "id": "mem_b_id",
+            "user_id": "different_user_b",
+            "title": "B Memory",
+            "content": "Secret Content",
+            "created_at": "date",
+        }
+    )
+    response = client.delete(
+        "/api/memories/mem_b_id", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     # Since deletion fails to find memory owned by authenticated user, it returns 404
     assert response.status_code == 404
 
+
 def test_64_memories_isolation_between_users(client, test_user_token):
     """64. Ensures users cannot list other people's memories."""
-    mock_db.memories.store.append({
-        "id": "mem_b_id",
-        "user_id": "different_user_b",
-        "title": "B Memory",
-        "content": "Secret",
-        "created_at": "date"
-    })
-    response = client.get("/api/memories", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.memories.store.append(
+        {
+            "id": "mem_b_id",
+            "user_id": "different_user_b",
+            "title": "B Memory",
+            "content": "Secret",
+            "created_at": "date",
+        }
+    )
+    response = client.get(
+        "/api/memories", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert len(response.json()) == 0  # Does not show other user's memories
+
 
 def test_65_create_memory_massive_title_boundary(client, test_user_token):
     """65. Boundary titles of 5000 characters."""
@@ -982,182 +1535,227 @@ def test_65_create_memory_massive_title_boundary(client, test_user_token):
     response = client.post(
         "/api/memories",
         json={"title": long_title, "content": "Content"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["title"] == long_title
 
+
 # ==============================================================================
 # TEST CASE GROUP 7: Todos CRUD boundaries (13 Tests)
 # ==============================================================================
+
 
 def test_66_create_todo_success(client, test_user_token):
     """66. Creates todo successfully."""
     response = client.post(
         "/api/todos",
         json={"title": "Buy groceries"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
     assert data["title"] == "Buy groceries"
     assert data["done"] is False
 
+
 def test_67_list_todos_success(client, test_user_token):
     """67. Lists tasks seeded for user."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.todos.store.append({
-        "id": "todo_1",
-        "user_id": user_id,
-        "title": "Clean house",
-        "done": False,
-        "created_at": "2026-05-30"
-    })
-    response = client.get("/api/todos", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.todos.store.append(
+        {
+            "id": "todo_1",
+            "user_id": user_id,
+            "title": "Clean house",
+            "done": False,
+            "created_at": "2026-05-30",
+        }
+    )
+    response = client.get(
+        "/api/todos", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert len(response.json()) == 1
+
 
 def test_68_update_todo_toggle_done(client, test_user_token):
     """68. Toggles task completion state successfully."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.todos.store.append({
-        "id": "todo_toggle",
-        "user_id": user_id,
-        "title": "Iron shirt",
-        "done": False,
-        "created_at": "2026-05-30"
-    })
+    mock_db.todos.store.append(
+        {
+            "id": "todo_toggle",
+            "user_id": user_id,
+            "title": "Iron shirt",
+            "done": False,
+            "created_at": "2026-05-30",
+        }
+    )
     response = client.patch(
         "/api/todos/todo_toggle",
         json={"done": True},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["done"] is True
 
+
 def test_69_delete_todo_success(client, test_user_token):
     """69. User deletes task successfully."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.todos.store.append({
-        "id": "todo_del",
-        "user_id": user_id,
-        "title": "To delete",
-        "done": False,
-        "created_at": "2026-05-30"
-    })
-    response = client.delete("/api/todos/todo_del", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.todos.store.append(
+        {
+            "id": "todo_del",
+            "user_id": user_id,
+            "title": "To delete",
+            "done": False,
+            "created_at": "2026-05-30",
+        }
+    )
+    response = client.delete(
+        "/api/todos/todo_del", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert response.json()["ok"] is True
 
+
 def test_70_delete_todo_not_found(client, test_user_token):
     """70. Deleting non-existent task returns 404."""
-    response = client.delete("/api/todos/non_existent_todo", headers={"Authorization": f"Bearer {test_user_token}"})
+    response = client.delete(
+        "/api/todos/non_existent_todo",
+        headers={"Authorization": f"Bearer {test_user_token}"},
+    )
     assert response.status_code == 404
+
 
 def test_71_patch_todo_not_found(client, test_user_token):
     """71. Patching non-existent task returns 404."""
     response = client.patch(
         "/api/todos/ghost_todo",
         json={"title": "Ghost"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 404
+
 
 def test_72_create_todo_empty_title(client, test_user_token):
     """72. Todo empty titles."""
     response = client.post(
         "/api/todos",
         json={"title": ""},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
+
 
 def test_73_create_todo_xss_sanitization(client, test_user_token):
     """73. HTML scripting inputs are stored safely inside task titles."""
     response = client.post(
         "/api/todos",
         json={"title": "<h3>Task</h3><script>alert(1)</script>"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["title"] == "<h3>Task</h3><script>alert(1)</script>"
 
+
 def test_74_patch_todo_non_owned_forbidden(client, test_user_token):
     """74. User A is blocked from updating User B's tasks."""
-    mock_db.todos.store.append({
-        "id": "todo_b_id",
-        "user_id": "different_user_b",
-        "title": "B Task",
-        "done": False,
-        "created_at": "date"
-    })
+    mock_db.todos.store.append(
+        {
+            "id": "todo_b_id",
+            "user_id": "different_user_b",
+            "title": "B Task",
+            "done": False,
+            "created_at": "date",
+        }
+    )
     response = client.patch(
         "/api/todos/todo_b_id",
         json={"done": True},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 404
 
+
 def test_75_delete_todo_non_owned_forbidden(client, test_user_token):
     """75. User A is blocked from deleting User B's tasks."""
-    mock_db.todos.store.append({
-        "id": "todo_b_id",
-        "user_id": "different_user_b",
-        "title": "B Task",
-        "done": False,
-        "created_at": "date"
-    })
-    response = client.delete("/api/todos/todo_b_id", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.todos.store.append(
+        {
+            "id": "todo_b_id",
+            "user_id": "different_user_b",
+            "title": "B Task",
+            "done": False,
+            "created_at": "date",
+        }
+    )
+    response = client.delete(
+        "/api/todos/todo_b_id", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 404
+
 
 def test_76_todos_isolation_between_users(client, test_user_token):
     """76. User A listing does not leak user B's tasks."""
-    mock_db.todos.store.append({
-        "id": "todo_b_id",
-        "user_id": "different_user_b",
-        "title": "B Task",
-        "done": False,
-        "created_at": "date"
-    })
-    response = client.get("/api/todos", headers={"Authorization": f"Bearer {test_user_token}"})
+    mock_db.todos.store.append(
+        {
+            "id": "todo_b_id",
+            "user_id": "different_user_b",
+            "title": "B Task",
+            "done": False,
+            "created_at": "date",
+        }
+    )
+    response = client.get(
+        "/api/todos", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert len(response.json()) == 0
+
 
 def test_77_patch_todo_empty_update_rejected(client, test_user_token):
     """77. Issuing updates with no patch fields returns 400."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.todos.store.append({
-        "id": "todo_x",
-        "user_id": user_id,
-        "title": "Task",
-        "done": False,
-        "created_at": "date"
-    })
+    mock_db.todos.store.append(
+        {
+            "id": "todo_x",
+            "user_id": user_id,
+            "title": "Task",
+            "done": False,
+            "created_at": "date",
+        }
+    )
     response = client.patch(
         "/api/todos/todo_x",
         json={},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 400
+
 
 def test_78_todos_boundary_volume_loading(client, test_user_token):
     """78. Verifies bulk loading boundary configurations (loads 100 todos)."""
     user_id = mock_db.users.store[-1]["id"]
     for i in range(100):
-        mock_db.todos.store.append({
-            "id": f"bulk_todo_{i}",
-            "user_id": user_id,
-            "title": f"Task {i}",
-            "done": False,
-            "created_at": "date"
-        })
-    response = client.get("/api/todos", headers={"Authorization": f"Bearer {test_user_token}"})
+        mock_db.todos.store.append(
+            {
+                "id": f"bulk_todo_{i}",
+                "user_id": user_id,
+                "title": f"Task {i}",
+                "done": False,
+                "created_at": "date",
+            }
+        )
+    response = client.get(
+        "/api/todos", headers={"Authorization": f"Bearer {test_user_token}"}
+    )
     assert response.status_code == 200
     assert len(response.json()) == 100
+
 
 # ==============================================================================
 # TEST CASE GROUP 8: Assistant Integration & mock API failures (11 Tests)
 # ==============================================================================
+
 
 @patch("app.services.llm.requests.post")
 def test_79_assistant_chat_gemini(mock_post, client, test_user_token):
@@ -1165,11 +1763,13 @@ def test_79_assistant_chat_gemini(mock_post, client, test_user_token):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": '{"reply":"{happy} Hello there!","actions":[]}'}]
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": '{"reply":"{happy} Hello there!","actions":[]}'}]
+                }
             }
-        }]
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1179,7 +1779,7 @@ def test_79_assistant_chat_gemini(mock_post, client, test_user_token):
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy_key",
-            "model": "gemini-3"
+            "model": "gemini-3",
         },
         headers=auth_headers(test_user_token),
     )
@@ -1190,17 +1790,22 @@ def test_79_assistant_chat_gemini(mock_post, client, test_user_token):
     assert kwargs["json"]["systemInstruction"]["parts"][0]["text"]
     assert kwargs["json"]["tools"]
 
+
 @patch("app.services.llm.requests.post")
-def test_79c_assistant_chat_normalizes_gemini_model_url(mock_post, client, test_user_token):
+def test_79c_assistant_chat_normalizes_gemini_model_url(
+    mock_post, client, test_user_token
+):
     """79c. Gemini provider routes strip provider prefixes before building Google API URLs."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": '{"reply":"{neutral} Ready.","actions":[]}'}]
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": '{"reply":"{neutral} Ready.","actions":[]}'}]
+                }
             }
-        }]
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1210,7 +1815,7 @@ def test_79c_assistant_chat_normalizes_gemini_model_url(mock_post, client, test_
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy_key",
-            "model": "gemini/gemini-2.5-flash"
+            "model": "gemini/gemini-2.5-flash",
         },
         headers=auth_headers(test_user_token),
     )
@@ -1219,25 +1824,36 @@ def test_79c_assistant_chat_normalizes_gemini_model_url(mock_post, client, test_
     args, _ = mock_post.call_args
     assert args[0].endswith("/v1beta/models/gemini-2.5-flash:generateContent")
 
+
 @patch("app.services.llm.requests.post")
-def test_79b_assistant_chat_injects_authenticated_memory(mock_post, client, test_user_token):
+def test_79b_assistant_chat_injects_authenticated_memory(
+    mock_post, client, test_user_token
+):
     """79b. Authenticated chat retrieves server memories and injects them into the prompt."""
     user_id = mock_db.users.store[-1]["id"]
-    mock_db.memories.store.append({
-        "id": "mem_chat",
-        "user_id": user_id,
-        "title": "Passport",
-        "content": "Passport is in the blue drawer",
-        "created_at": "2026-05-30",
-    })
+    mock_db.memories.store.append(
+        {
+            "id": "mem_chat",
+            "user_id": user_id,
+            "title": "Passport",
+            "content": "Passport is in the blue drawer",
+            "created_at": "2026-05-30",
+        }
+    )
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": '{"reply":"{happy} It is in the blue drawer.","actions":[]}'}]
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": '{"reply":"{happy} It is in the blue drawer.","actions":[]}'
+                        }
+                    ]
+                }
             }
-        }]
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1258,6 +1874,7 @@ def test_79b_assistant_chat_injects_authenticated_memory(mock_post, client, test
     assert "Passport" in system_text
     assert "blue drawer" in system_text
 
+
 def test_80_assistant_chat_invalid_provider(client, test_user_token):
     """80. Chat yields 400 error if provider is unsupported."""
     response = client.post(
@@ -1266,50 +1883,65 @@ def test_80_assistant_chat_invalid_provider(client, test_user_token):
             "message": "Hi",
             "provider": "unknown_provider",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 400
     assert "unsupported provider" in response.json()["detail"].lower()
 
+
 def test_80b_assistant_chat_requires_auth_before_provider_call(client):
     """80b. Chat requires auth before provider validation or outbound calls."""
-    response = client.post("/api/assistant/chat", json={
-        "message": "Hi",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model"
-    })
+    response = client.post(
+        "/api/assistant/chat",
+        json={
+            "message": "Hi",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model",
+        },
+    )
     assert response.status_code == 401
+
 
 def test_80c_provider_model_list_requires_auth(client):
     """80c. Provider metadata calls require auth before relaying user API keys."""
-    response = client.post("/api/providers/openrouter/models", json={"api_key": "dummy"})
+    response = client.post(
+        "/api/providers/openrouter/models", json={"api_key": "dummy"}
+    )
     assert response.status_code == 401
+
 
 def test_80d_mini_app_builder_requires_auth(client):
     """80d. Mini-app build/revise calls require auth before LLM and compile work."""
-    build_response = client.post("/api/mini-apps/build", json={
-        "prompt": "make notes",
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model",
-    })
+    build_response = client.post(
+        "/api/mini-apps/build",
+        json={
+            "prompt": "make notes",
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model",
+        },
+    )
     assert build_response.status_code == 401
 
-    revise_response = client.post("/api/mini-apps/revise", json={
-        "instruction": "change it",
-        "currentBundle": {
-            "id": "generated.notes",
-            "metadata": {"name": "Notes"},
-            "dataSchema": {"recordType": "note"},
+    revise_response = client.post(
+        "/api/mini-apps/revise",
+        json={
+            "instruction": "change it",
+            "currentBundle": {
+                "id": "generated.notes",
+                "metadata": {"name": "Notes"},
+                "dataSchema": {"recordType": "note"},
+            },
+            "provider": "gemini",
+            "api_key": "dummy",
+            "model": "model",
         },
-        "provider": "gemini",
-        "api_key": "dummy",
-        "model": "model",
-    })
+    )
     assert revise_response.status_code == 401
+
 
 @patch("app.services.llm.requests.post")
 def test_81_assistant_chat_gemini_api_error(mock_post, client, test_user_token):
@@ -1325,7 +1957,7 @@ def test_81_assistant_chat_gemini_api_error(mock_post, client, test_user_token):
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
@@ -1333,17 +1965,16 @@ def test_81_assistant_chat_gemini_api_error(mock_post, client, test_user_token):
     detail = response.json()["detail"].lower()
     assert "gemini error" in detail or "assistant error" in detail
 
+
 @patch("app.services.llm.requests.post")
 def test_82_assistant_action_parsing_fallback(mock_post, client, test_user_token):
     """82. Handles LLM text responses that do not contain valid json actions."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": "Hello, I cannot parse actions for this"}]
-            }
-        }]
+        "candidates": [
+            {"content": {"parts": [{"text": "Hello, I cannot parse actions for this"}]}}
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1353,13 +1984,14 @@ def test_82_assistant_action_parsing_fallback(mock_post, client, test_user_token
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 200
     assert response.json()["reply"] == "Hello, I cannot parse actions for this"
     assert response.json()["actions"] == []
+
 
 @patch("app.api.assistant.requests.get")
 def test_83_openrouter_models_list(mock_get, client, test_user_token):
@@ -1369,7 +2001,7 @@ def test_83_openrouter_models_list(mock_get, client, test_user_token):
     mock_response.json.return_value = {
         "data": [
             {"id": "gpt-4", "name": "GPT 4"},
-            {"id": "claude-3", "name": "Claude 3"}
+            {"id": "claude-3", "name": "Claude 3"},
         ]
     }
     mock_get.return_value = mock_response
@@ -1385,7 +2017,11 @@ def test_83_openrouter_models_list(mock_get, client, test_user_token):
     assert data[0]["name"] == "Claude 3"
     assert data[1]["name"] == "GPT 4"
 
-@patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
+
+@patch(
+    "app.services.llm.requests.post",
+    side_effect=requests.exceptions.Timeout("Connection timed out"),
+)
 def test_84_assistant_chat_gemini_timeout(mock_post, client, test_user_token):
     """84. Gemini timeout exceptions map to a standard HTTP 502 response."""
     response = client.post(
@@ -1394,14 +2030,21 @@ def test_84_assistant_chat_gemini_timeout(mock_post, client, test_user_token):
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 502
-    assert "timeout" in response.json()["detail"].lower() or "failed to connect" in response.json()["detail"].lower()
+    assert (
+        "timeout" in response.json()["detail"].lower()
+        or "failed to connect" in response.json()["detail"].lower()
+    )
 
-@patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
+
+@patch(
+    "app.services.llm.requests.post",
+    side_effect=requests.exceptions.Timeout("Connection timed out"),
+)
 def test_85_assistant_chat_openai_timeout(mock_post, client, test_user_token):
     """85. OpenAI timeout exceptions map to a standard HTTP 502 response."""
     response = client.post(
@@ -1410,24 +2053,23 @@ def test_85_assistant_chat_openai_timeout(mock_post, client, test_user_token):
             "message": "Hi",
             "provider": "openai",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 502
 
+
 @patch("app.services.llm.requests.post")
-def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client, test_user_token):
+def test_85b_assistant_chat_openai_includes_image_payload(
+    mock_post, client, test_user_token
+):
     """85b. OpenAI chat requests include attached images instead of dropping them."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "output": [
-            {
-                "content": [
-                    {"type": "output_text", "text": "{neutral} I can see it."}
-                ]
-            }
+            {"content": [{"type": "output_text", "text": "{neutral} I can see it."}]}
         ]
     }
     mock_post.return_value = mock_response
@@ -1451,7 +2093,11 @@ def test_85b_assistant_chat_openai_includes_image_payload(mock_post, client, tes
     assert user_content[1]["type"] == "input_image"
     assert user_content[1]["image_url"] == "data:image/png;base64,aW1hZ2U="
 
-@patch("app.services.llm.requests.post", side_effect=requests.exceptions.Timeout("Connection timed out"))
+
+@patch(
+    "app.services.llm.requests.post",
+    side_effect=requests.exceptions.Timeout("Connection timed out"),
+)
 def test_86_assistant_chat_openrouter_timeout(mock_post, client, test_user_token):
     """86. OpenRouter timeout exceptions map to a standard HTTP 502 response."""
     response = client.post(
@@ -1460,14 +2106,17 @@ def test_86_assistant_chat_openrouter_timeout(mock_post, client, test_user_token
             "message": "Hi",
             "provider": "openrouter",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 502
 
+
 @patch("app.services.llm.requests.post")
-def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client, test_user_token):
+def test_86b_assistant_chat_openrouter_includes_image_payload(
+    mock_post, client, test_user_token
+):
     """86b. OpenRouter chat requests include attached images instead of dropping them."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -1502,6 +2151,7 @@ def test_86b_assistant_chat_openrouter_includes_image_payload(mock_post, client,
     assert user_content[0] == {"type": "text", "text": "What is in this image?"}
     assert user_content[1]["image_url"]["url"] == "data:image/png;base64,aW1hZ2U="
 
+
 @patch("app.services.llm.requests.post")
 def test_87_assistant_chat_gemini_403_forbidden(mock_post, client, test_user_token):
     """87. API key permission issues (403) are propagated as bad gateway/failures."""
@@ -1516,11 +2166,12 @@ def test_87_assistant_chat_gemini_403_forbidden(mock_post, client, test_user_tok
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 500 or response.status_code == 403
+
 
 @patch("app.services.llm.requests.post")
 def test_88_assistant_chat_gemini_429_rate_limit(mock_post, client, test_user_token):
@@ -1536,11 +2187,12 @@ def test_88_assistant_chat_gemini_429_rate_limit(mock_post, client, test_user_to
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 500 or response.status_code == 429
+
 
 @patch("app.services.llm.requests.post")
 def test_89_assistant_chat_gemini_503_unavailable(mock_post, client, test_user_token):
@@ -1556,30 +2208,28 @@ def test_89_assistant_chat_gemini_503_unavailable(mock_post, client, test_user_t
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 500 or response.status_code == 503
 
+
 # ==============================================================================
 # TEST CASE GROUP 9: Assistant payloads, audio & gateway echos (13 Tests)
 # ==============================================================================
+
 
 def test_90_assistant_chat_empty_api_key(client, test_user_token):
     """90. Sending empty provider API keys results in 400 validation error."""
     response = client.post(
         "/api/assistant/chat",
-        json={
-            "message": "Hi",
-            "provider": "gemini",
-            "api_key": "",
-            "model": "model"
-        },
+        json={"message": "Hi", "provider": "gemini", "api_key": "", "model": "model"},
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 400
     assert "api key is required" in response.json()["detail"].lower()
+
 
 def test_91_assistant_chat_empty_message(client, test_user_token):
     """91. Sending empty message in assistant chat."""
@@ -1589,11 +2239,12 @@ def test_91_assistant_chat_empty_message(client, test_user_token):
             "message": "",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 400
+
 
 @patch("app.services.llm.requests.post")
 def test_92_assistant_chat_session_retention(mock_post, client, test_user_token):
@@ -1601,11 +2252,9 @@ def test_92_assistant_chat_session_retention(mock_post, client, test_user_token)
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": '{"reply":"{happy} OK","actions":[]}'}]
-            }
-        }]
+        "candidates": [
+            {"content": {"parts": [{"text": '{"reply":"{happy} OK","actions":[]}'}]}}
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1616,24 +2265,25 @@ def test_92_assistant_chat_session_retention(mock_post, client, test_user_token)
             "provider": "gemini",
             "api_key": "dummy",
             "model": "model",
-            "session_id": "custom-session-123"
+            "session_id": "custom-session-123",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 200
     assert response.json()["session_id"] == "custom-session-123"
 
+
 @patch("app.services.llm.requests.post")
-def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(mock_post, client, test_user_token):
+def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(
+    mock_post, client, test_user_token
+):
     """93. Unbalanced JSON structures in LLM text returns are mapped to plain text fallbacks."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": " { malformed json reply text "}]
-            }
-        }]
+        "candidates": [
+            {"content": {"parts": [{"text": " { malformed json reply text "}]}}
+        ]
     }
     mock_post.return_value = mock_response
 
@@ -1643,13 +2293,14 @@ def test_93_assistant_chat_malformed_json_unbalanced_curly_braces(mock_post, cli
             "message": "Hi",
             "provider": "gemini",
             "api_key": "dummy",
-            "model": "model"
+            "model": "model",
         },
         headers=auth_headers(test_user_token),
     )
     assert response.status_code == 200
     assert response.json()["reply"] == "{ malformed json reply text"
     assert response.json()["actions"] == []
+
 
 @patch("app.services.transcription.requests.post")
 def test_94_transcribe_audio_success(mock_post, client, test_user_token):
@@ -1658,24 +2309,24 @@ def test_94_transcribe_audio_success(mock_post, client, test_user_token):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": "Hello world"}]
-            }
-        }]
+        "candidates": [{"content": {"parts": [{"text": "Hello world"}]}}]
     }
     mock_post.return_value = mock_response
 
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": wav_payload(), "mime_type": "audio/wav"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["text"] == "Hello world"
     args, kwargs = mock_post.call_args
     assert args[0].endswith(f"/v1beta/models/{settings.GEMINI_MODEL}:generateContent")
-    assert kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["mimeType"] == "audio/wav"
+    assert (
+        kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["mimeType"]
+        == "audio/wav"
+    )
+
 
 def test_94a_transcribe_audio_requires_auth(client):
     """94a. Transcription requires auth before decoding or provider calls."""
@@ -1685,27 +2336,30 @@ def test_94a_transcribe_audio_requires_auth(client):
     )
     assert response.status_code == 401
 
+
 @patch("app.services.transcription.requests.post")
-def test_94b_transcribe_audio_normalizes_gemini_model_setting(mock_post, client, test_user_token):
+def test_94b_transcribe_audio_normalizes_gemini_model_setting(
+    mock_post, client, test_user_token
+):
     """94b. Gemini transcription also normalizes prefixed model names."""
     original_model = settings.GEMINI_MODEL
     settings.GEMINI_MODEL = "models/gemini-2.5-flash"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{"text": "Hello model"}]
-            }
-        }]
+        "candidates": [{"content": {"parts": [{"text": "Hello model"}]}}]
     }
     mock_post.return_value = mock_response
 
     try:
         response = client.post(
             "/api/transcribe",
-            json={"audio_base64": wav_payload(), "mime_type": "audio/wav", "api_key": "test_key"},
-            headers={"Authorization": f"Bearer {test_user_token}"}
+            json={
+                "audio_base64": wav_payload(),
+                "mime_type": "audio/wav",
+                "api_key": "test_key",
+            },
+            headers={"Authorization": f"Bearer {test_user_token}"},
         )
     finally:
         settings.GEMINI_MODEL = original_model
@@ -1714,22 +2368,24 @@ def test_94b_transcribe_audio_normalizes_gemini_model_setting(mock_post, client,
     args, _ = mock_post.call_args
     assert args[0].endswith("/v1beta/models/gemini-2.5-flash:generateContent")
 
+
 def test_95_transcribe_audio_invalid_base64(client, test_user_token):
     """95. Transcription rejects corrupt base64 string payloads with 400."""
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": "!!!corrupt_base64!!!", "mime_type": "audio/m4a"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 400
     assert "invalid" in response.json()["detail"].lower()
+
 
 def test_96_supabase_gateway_mock_success(client, test_user_token):
     """96. Validates supabase gateway response format and echo logic."""
     response = client.post(
         "/api/gateway/supabase",
         json={"action": "fetch_profile", "payload": {"foo": "bar"}},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -1737,14 +2393,16 @@ def test_96_supabase_gateway_mock_success(client, test_user_token):
     assert data["action"] == "fetch_profile"
     assert data["result"]["echo"]["foo"] == "bar"
 
+
 def test_97_transcribe_audio_empty_string(client, test_user_token):
     """97. Empty base64 payload inside audio transcribes triggers 400."""
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": "", "mime_type": "audio/m4a"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 400
+
 
 def test_98_transcribe_audio_not_padded_base64(client, test_user_token):
     """98. Rejects base64 strings with malformed padding headers."""
@@ -1752,10 +2410,11 @@ def test_98_transcribe_audio_not_padded_base64(client, test_user_token):
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": "dGVzdA", "mime_type": "audio/wav"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     # python base64.b64decode handles minor missing padding, but corrupt ones will fail
     assert response.status_code in [200, 400]
+
 
 def test_99_transcribe_audio_missing_api_key(client, test_user_token):
     """99. Transcription API connection fails gracefully when Gemini key is missing."""
@@ -1763,10 +2422,11 @@ def test_99_transcribe_audio_missing_api_key(client, test_user_token):
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": wav_payload(), "mime_type": "audio/wav"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 500
     assert "not configured" in response.json()["detail"].lower()
+
 
 def test_99b_transcribe_audio_rejects_too_short_wav(client, test_user_token):
     """99b. Header-only or tiny WAV captures are rejected before provider calls."""
@@ -1774,10 +2434,11 @@ def test_99b_transcribe_audio_rejects_too_short_wav(client, test_user_token):
     response = client.post(
         "/api/transcribe",
         json={"audio_base64": wav_payload(duration_ms=40), "mime_type": "audio/wav"},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 400
     assert "too short" in response.json()["detail"].lower()
+
 
 @patch("app.services.transcription.requests.post")
 def test_99c_transcribe_audio_openai_success(mock_post, client, test_user_token):
@@ -1795,7 +2456,7 @@ def test_99c_transcribe_audio_openai_success(mock_post, client, test_user_token)
             "api_key": "openai_key",
             "provider": "openai",
         },
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
 
     assert response.status_code == 200
@@ -1805,6 +2466,7 @@ def test_99c_transcribe_audio_openai_success(mock_post, client, test_user_token)
     assert kwargs["files"]["file"][0].endswith(".wav")
     assert kwargs["files"]["file"][2] == "audio/wav"
 
+
 def test_99d_transcribe_audio_rejects_unsupported_provider(client, test_user_token):
     """99d. Transcription fails clearly when an unsupported provider is requested."""
     settings.GEMINI_API_KEY = "test_key"
@@ -1813,12 +2475,13 @@ def test_99d_transcribe_audio_rejects_unsupported_provider(client, test_user_tok
         json={
             "audio_base64": wav_payload(),
             "mime_type": "audio/wav",
-            "provider": "openrouter"
+            "provider": "openrouter",
         },
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 400
     assert "gemini or openai" in response.json()["detail"].lower()
+
 
 def test_100_supabase_gateway_massive_payload(client, test_user_token):
     """100. Supabase gateway can handle massive dictionary payloads (boundary check)."""
@@ -1826,20 +2489,22 @@ def test_100_supabase_gateway_massive_payload(client, test_user_token):
     response = client.post(
         "/api/gateway/supabase",
         json={"action": "save_config", "payload": large_payload},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert len(response.json()["result"]["echo"]) == 500
+
 
 def test_101_supabase_gateway_empty_action(client, test_user_token):
     """101. Supabase gateway returns mock actions even with empty payload actions."""
     response = client.post(
         "/api/gateway/supabase",
         json={"action": ""},
-        headers={"Authorization": f"Bearer {test_user_token}"}
+        headers={"Authorization": f"Bearer {test_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["action"] == ""
+
 
 def test_102_gateway_requires_auth(client):
     """102. Gateway requires authentication guards."""

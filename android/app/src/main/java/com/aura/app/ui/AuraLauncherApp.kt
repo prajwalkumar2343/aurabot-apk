@@ -88,6 +88,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import android.content.Context
+import android.view.View
 import android.content.pm.PackageManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
@@ -148,6 +149,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -179,6 +183,7 @@ import com.aura.app.miniapps.MiniAppVersion
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
@@ -214,6 +219,9 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.aura.app.ui.dreams.DreamsScreen
+import com.aura.app.ui.dreams.DreamsViewModel
+import com.aura.app.widgets.HostedAndroidWidget
 
 private enum class Route(val title: String) {
     Home("Aura"),
@@ -222,9 +230,11 @@ private enum class Route(val title: String) {
     Tasks("Tasks"),
     Memory("Memory"),
     Automations("Automations"),
+    Dreams("Dreams"),
     Settings("Settings"),
     Models("Models"),
-    MiniApp("MiniApp")
+    MiniApp("MiniApp"),
+    AuraSurface("AuraSurface")
 }
 
 enum class AuraPresenceMode {
@@ -281,17 +291,35 @@ internal fun phoneLayoutProfile(width: Dp, height: Dp): PhoneLayoutProfile {
 fun AuraLauncherApp(
     viewModel: LauncherViewModel,
     onRequestVoicePermissions: () -> Unit,
+    onStartVoice: () -> Unit,
     onRequestAutomationPermissions: (AutomationPermissionStatus?) -> Unit,
+    onAddAndroidWidget: () -> Unit,
+    onResizeAndroidWidget: (HostedAndroidWidget, Int, Int) -> Unit,
+    onRemoveAndroidWidget: (Int) -> Unit,
+    createHostedWidgetView: (Context, Int) -> View?,
     onOpenHomeSettings: () -> Unit,
     onQuitApp: () -> Unit,
-    onMinimizeApp: () -> Unit
+    onMinimizeApp: () -> Unit,
+    requestedSurface: String? = null,
+    onRequestedSurfaceHandled: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val onboardingComplete = state.session.onboardingComplete
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showHomePrompt by remember { mutableStateOf(false) }
+    var activeAuraSurfaceId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                viewModel.refreshMiniAppWidgets()
+                delay(15 * 60 * 1000L)
+            }
+        }
+    }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -359,8 +387,15 @@ fun AuraLauncherApp(
     }
 
     LaunchedEffect(state.session.homeSettingsPrompted, onboardingComplete, state.session.appMode) {
-        if (state.session.appMode == "launcher" && onboardingComplete && !state.session.homeSettingsPrompted) {
+        if (onboardingComplete && !state.session.homeSettingsPrompted) {
             showHomePrompt = true
+        }
+    }
+
+    LaunchedEffect(requestedSurface, onboardingComplete) {
+        if (requestedSurface == com.aura.app.LauncherActivity.SURFACE_SETTINGS && onboardingComplete) {
+            navController.navigate(Route.Settings.name) { launchSingleTop = true }
+            onRequestedSurfaceHandled()
         }
     }
 
@@ -403,28 +438,10 @@ fun AuraLauncherApp(
         OnboardingScreen(
             state = state,
             onRequestPermissions = onRequestVoicePermissions,
-            onCreateAccount = viewModel::register,
-            onSignIn = viewModel::login,
-            onFinishOnboarding = { appMode, provider, apiKey, modelId, bgListening ->
-                viewModel.setAppMode(appMode)
-                viewModel.setLlmProvider(provider)
-                when (provider) {
-                    LlmProvider.Gemini -> {
-                        viewModel.setGoogleApiKey(apiKey)
-                        if (modelId.isNotBlank()) viewModel.setGoogleModel(modelId)
-                    }
-                    LlmProvider.OpenAI -> {
-                        viewModel.setOpenAiApiKey(apiKey)
-                        if (modelId.isNotBlank()) viewModel.setOpenAiModel(modelId)
-                    }
-                    LlmProvider.OpenRouter -> {
-                        viewModel.setOpenRouterApiKey(apiKey)
-                        if (modelId.isNotBlank()) viewModel.setOpenRouterModel(modelId)
-                    }
-                }
-                viewModel.setBackgroundListening(bgListening)
-                viewModel.setOnboardingComplete(true)
-            }
+            onGoogleChallenge = viewModel::googleSignInChallenge,
+            onGoogleSignIn = viewModel::loginWithGoogle,
+            onVerifyLocalDatabase = viewModel::verifyLocalDatabase,
+            onFinishOnboarding = viewModel::completeOnboarding
         )
     } else {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -434,7 +451,6 @@ fun AuraLauncherApp(
                 bottomBar = {
                     if (!state.isDefaultLauncher) {
                         val current = navController.currentBackStackEntryAsState().value?.destination?.route
-                        val isDark = isSystemInDarkTheme()
                         val routes = listOf(Route.Home, Route.Settings)
                         Box(
                             modifier = Modifier
@@ -470,14 +486,10 @@ fun AuraLauncherApp(
                                             .scale(iconScale)
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(
-                                                if (selected) {
-                                                    if (isDark) Color.White.copy(alpha = 0.12f)
-                                                    else Color.Black.copy(alpha = 0.08f)
-                                                } else {
-                                                    Color.Transparent
-                                                }
+                                                if (selected) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)
+                                                else Color.Transparent
                                             )
-                                            .clickable {
+                                            .bounceClick {
                                                 navController.navigate(route.name) {
                                                     popUpTo(navController.graph.findStartDestination().id) {
                                                         saveState = true
@@ -508,10 +520,7 @@ fun AuraLauncherApp(
                                                     modifier = Modifier
                                                         .size(4.dp)
                                                         .clip(CircleShape)
-                                                        .background(
-                                                            if (isDark) Color(0xFF8B5CF6)
-                                                            else Color(0xFF6366F1)
-                                                        )
+                                                        .background(MaterialTheme.colorScheme.onBackground)
                                                 )
                                             }
                                         }
@@ -522,6 +531,14 @@ fun AuraLauncherApp(
                     }
                 }
             ) { padding ->
+            val slideSpringSpec = spring<androidx.compose.ui.unit.IntOffset>(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+            val fadeSpringSpec = spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
             NavHost(
                 navController = navController,
                 startDestination = Route.Home.name,
@@ -529,26 +546,26 @@ fun AuraLauncherApp(
                 enterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 exitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 },
                 popEnterTransition = {
                     slideIntoContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeIn(animationSpec = fadeSpringSpec)
                 },
                 popExitTransition = {
                     slideOutOfContainer(
                         AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
+                        animationSpec = slideSpringSpec
+                    ) + fadeOut(animationSpec = fadeSpringSpec)
                 }
             ) {
                 composable(Route.Home.name) {
@@ -563,16 +580,32 @@ fun AuraLauncherApp(
                         onAssistantInput = viewModel::setAssistantInput,
                         onSend = viewModel::sendAssistantMessage,
                         onTalk = {
-                            onRequestVoicePermissions()
-                            viewModel.startPushToTalk()
+                            onStartVoice()
                         },
                         onStopVoice = viewModel::stopVoice,
                         onOpenAssistant = { navController.navigate(Route.Assistant.name) },
                         onSwipeLeft = { navController.navigate(Route.Apps.name) },
                         onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onOpenSettings = { navController.navigate(Route.Settings.name) },
+                        onOpenMiniApp = { miniAppId ->
+                            viewModel.openMiniApp(miniAppId)
+                            navController.navigate(Route.MiniApp.name)
+                        },
+                        onRunMiniAppWidgetAction = viewModel::runMiniAppWidgetAction,
+                        onOpenAuraSurface = { widgetId ->
+                            activeAuraSurfaceId = widgetId
+                            navController.navigate(Route.AuraSurface.name)
+                        },
+                        onRunAuraWidgetAction = viewModel::runAuraWidgetAction,
+                        onConfirmAuraWidgetAction = viewModel::confirmAuraWidgetAction,
+                        onCancelAuraWidgetConfirmation = viewModel::cancelAuraWidgetConfirmation,
+                        onDismissAuraWidget = viewModel::dismissAuraWidget,
+                        onAddAndroidWidget = onAddAndroidWidget,
+                        onResizeAndroidWidget = onResizeAndroidWidget,
+                        onRemoveAndroidWidget = onRemoveAndroidWidget,
+                        createHostedWidgetView = createHostedWidgetView,
                         onLaunchApp = { app ->
-                            if (app.packageName == "com.aura.app.settings") {
+                            if (app.isAuraSettingsShortcut) {
                                 navController.navigate(Route.Settings.name)
                             } else {
                                 viewModel.launchIntent(app)?.let { intent ->
@@ -592,9 +625,13 @@ fun AuraLauncherApp(
                         state = state,
                         onQuery = viewModel::setAppQuery,
                         onLaunchApp = { app ->
-                            viewModel.launchIntent(app)?.let { intent ->
-                                if (!startActivitySafely(context, intent)) {
-                                    viewModel.showError("Could not open ${app.label}")
+                            if (app.isAuraSettingsShortcut) {
+                                navController.navigate(Route.Settings.name)
+                            } else {
+                                viewModel.launchIntent(app)?.let { intent ->
+                                    if (!startActivitySafely(context, intent)) {
+                                        viewModel.showError("Could not open ${app.label}")
+                                    }
                                 }
                             }
                         },
@@ -645,6 +682,21 @@ fun AuraLauncherApp(
                         onLaunchCamera = { cameraLauncher.launch(null) }
                     )
                 }
+                composable(Route.AuraSurface.name) {
+                    val widget = state.auraWidgets.firstOrNull { it.id == activeAuraSurfaceId }
+                    if (widget == null) {
+                        LaunchedEffect(Unit) { navController.popBackStack() }
+                    } else {
+                        AuraSurfaceScreen(
+                            widget = widget,
+                            onBack = { navController.popBackStack() },
+                            onDismiss = {
+                                viewModel.dismissAuraWidget(widget.id)
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+                }
                 composable(Route.Tasks.name) {
                     TasksScreen(state = state, onAddTodo = viewModel::addTodo, onBack = { navController.popBackStack() })
                 }
@@ -672,12 +724,13 @@ fun AuraLauncherApp(
                         onSelectWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                         onClearWallpaper = { viewModel.setWallpaper(null) },
                         onSetInteractionMode = viewModel::setInteractionMode,
+                        onConfigureHistory = { navController.navigate(Route.Assistant.name) },
                         onConfigureModels = { navController.navigate(Route.Models.name) },
                         onConfigureTasks = { navController.navigate(Route.Tasks.name) },
                         onConfigureMemories = { navController.navigate(Route.Memory.name) },
                         onConfigureAutomations = { navController.navigate(Route.Automations.name) },
-                        onQuitApp = onQuitApp,
-                        onSetAppMode = viewModel::setAppMode
+                        onConfigureDreams = { navController.navigate(Route.Dreams.name) },
+                        onQuitApp = onQuitApp
                     )
                 }
                 composable(Route.Automations.name) {
@@ -689,6 +742,17 @@ fun AuraLauncherApp(
                         onRunNow = viewModel::runAutomationNow,
                         onDelete = viewModel::deleteAutomation,
                         onOpenPermissions = onRequestAutomationPermissions
+                    )
+                }
+                composable(Route.Dreams.name) {
+                    val container = (context.applicationContext as com.aura.app.AuraApplication).container
+                    val dreamsViewModel: DreamsViewModel = viewModel(
+                        factory = DreamsViewModel.factory(container)
+                    )
+                    DreamsScreen(
+                        viewModel = dreamsViewModel,
+                        wallpaperUri = state.session.wallpaperUri,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable(Route.Models.name) {
@@ -718,7 +782,9 @@ private fun routeIcon(route: Route) = when (route) {
     Route.Tasks -> Icons.Rounded.CheckCircle
     Route.Memory -> Icons.Rounded.Layers
     Route.Automations -> Icons.Rounded.AutoAwesome
+    Route.Dreams -> Icons.Rounded.AutoAwesome
     Route.Settings -> Icons.Rounded.Settings
     Route.Models -> Icons.Rounded.Settings
     Route.MiniApp -> Icons.Rounded.Store
+    Route.AuraSurface -> Icons.Rounded.Layers
 }

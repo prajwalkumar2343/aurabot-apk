@@ -1,0 +1,63 @@
+{
+  "ok": false,
+  "strip": "/Users/administrator/apk/pets/pixel-sage-run/decoded/look-cardinals.png",
+  "directions": [
+    "000",
+    "090",
+    "180",
+    "270"
+  ],
+  "errors": [
+    "000 has 30 non-transparent pixels near its source slot edge"
+  ],
+  "anchors": [
+    {
+      "direction": "000",
+      "source_box": [
+        0,
+        0,
+        512,
+        768
+      ],
+      "used_pixels": 152736,
+      "edge_pixels": 30,
+      "output": "/Users/administrator/apk/pets/pixel-sage-run/decoded/look-anchors-source-check/000.png"
+    },
+    {
+      "direction": "090",
+      "source_box": [
+        512,
+        0,
+        1024,
+        768
+      ],
+      "used_pixels": 140303,
+      "edge_pixels": 18,
+      "output": "/Users/administrator/apk/pets/pixel-sage-run/decoded/look-anchors-source-check/090.png"
+    },
+    {
+      "direction": "180",
+      "source_box": [
+        1024,
+        0,
+        1536,
+        768
+      ],
+      "used_pixels": 147452,
+      "edge_pixels": 0,
+      "output": "/Users/administrator/apk/pets/pixel-sage-run/decoded/look-anchors-source-check/180.png"
+    },
+    {
+      "direction": "270",
+      "source_box": [
+        1536,
+        0,
+        2048,
+        768
+      ],
+      "used_pixels": 130203,
+      "edge_pixels": 0,
+      "output": "/Users/administrator/apk/pets/pixel-sage-run/decoded/look-anchors-source-check/270.png"
+    }
+  ]
+}

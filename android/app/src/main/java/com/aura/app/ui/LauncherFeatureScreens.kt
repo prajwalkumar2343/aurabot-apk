@@ -224,9 +224,8 @@ fun AssistantScreen(
     onLaunchPicker: () -> Unit,
     onLaunchCamera: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("ASSISTANT", "Your local AI conversation.")
+        Header("Assistant", "Your private conversation with Aura.")
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -256,23 +255,14 @@ fun AssistantScreen(
                                 )
                             )
                             .background(
-                                if (isUser) {
-                                    Brush.linearGradient(
-                                        colors = if (isDark) listOf(Color(0xFF7C3AED), Color(0xFF6366F1))
-                                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
-                                    )
-                                } else {
-                                    Brush.linearGradient(
-                                        colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF18181B))
-                                        else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
-                                    )
-                                }
+                                if (isUser) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.surfaceVariant
                             )
                             .then(
                                 if (!isUser) {
                                     Modifier.border(
                                         0.6.dp,
-                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        MaterialTheme.colorScheme.outlineVariant,
                                         RoundedCornerShape(
                                             topStart = 20.dp,
                                             topEnd = 20.dp,
@@ -287,7 +277,7 @@ fun AssistantScreen(
                         Text(
                             text = message.text,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isUser) Color.White
+                            color = if (isUser) MaterialTheme.colorScheme.surface
                             else MaterialTheme.colorScheme.onSurface,
                             lineHeight = 22.sp
                         )
@@ -297,7 +287,7 @@ fun AssistantScreen(
             // Typing indicator
             if (state.loading) {
                 item {
-                    TypingIndicator(isDark = isDark)
+                    TypingIndicator()
                 }
             }
         }
@@ -315,7 +305,7 @@ fun AssistantScreen(
 }
 
 @Composable
-private fun TypingIndicator(isDark: Boolean) {
+private fun TypingIndicator() {
     val infiniteTransition = rememberInfiniteTransition(label = "typing")
     val dot1 by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 1f,
@@ -348,10 +338,10 @@ private fun TypingIndicator(isDark: Boolean) {
         modifier = Modifier
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
-            .background(if (isDark) Color(0xFF1E1E22) else Color(0xFFFFFFFF))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(
                 0.6.dp,
-                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
             )
             .padding(horizontal = 20.dp, vertical = 14.dp),
@@ -364,10 +354,7 @@ private fun TypingIndicator(isDark: Boolean) {
                     .size(8.dp)
                     .scale(0.6f + dotAnim * 0.4f)
                     .clip(CircleShape)
-                    .background(
-                        if (isDark) Color(0xFF8B5CF6).copy(alpha = 0.4f + dotAnim * 0.6f)
-                        else Color(0xFF6366F1).copy(alpha = 0.3f + dotAnim * 0.7f)
-                    )
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f + dotAnim * 0.7f))
             )
         }
     }
@@ -378,12 +365,16 @@ fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onBack: () 
     var title by remember { mutableStateOf("") }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
-        Header("TASKS", "${state.openTodos} open items on this device.")
+        Header("Tasks", "${state.openTodos} open items on this device.")
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
@@ -400,19 +391,19 @@ fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onBack: () 
             shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = {
-                onAddTodo(title)
-                title = ""
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background
-            ),
-            modifier = Modifier.fillMaxWidth()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.onBackground)
+                .bounceClick {
+                    onAddTodo(title)
+                    title = ""
+                },
+            contentAlignment = Alignment.Center
         ) {
-            Text("ADD TASK", fontWeight = FontWeight.Bold)
+            Text("ADD TASK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.background)
         }
         Spacer(Modifier.height(16.dp))
         val isDark = isSystemInDarkTheme()
@@ -467,8 +458,12 @@ fun MemoryScreen(
     var content by remember { mutableStateOf("") }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -504,20 +499,20 @@ fun MemoryScreen(
             shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = {
-                onAddMemory(title, content)
-                title = ""
-                content = ""
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background
-            ),
-            modifier = Modifier.fillMaxWidth()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.onBackground)
+                .bounceClick {
+                    onAddMemory(title, content)
+                    title = ""
+                    content = ""
+                },
+            contentAlignment = Alignment.Center
         ) {
-            Text("SAVE MEMORY", fontWeight = FontWeight.Bold)
+            Text("SAVE MEMORY", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.background)
         }
         Spacer(Modifier.height(16.dp))
         val isDark = isSystemInDarkTheme()
@@ -624,25 +619,40 @@ private fun MemoryAppProposalCard(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = { onCreateMiniApp(proposal.id) },
-                enabled = !busy,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = primary,
-                    contentColor = MaterialTheme.colorScheme.background
-                )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (busy) primary.copy(alpha = 0.5f) else primary)
+                    .then(
+                        if (!busy) Modifier.bounceClick { onCreateMiniApp(proposal.id) }
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Rounded.Store, null)
-                Spacer(Modifier.width(6.dp))
-                Text(if (building) "BUILDING" else "CREATE")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                    Icon(Icons.Rounded.Store, null, tint = MaterialTheme.colorScheme.background)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (building) "BUILDING" else "CREATE",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.background
+                    )
+                }
             }
-            OutlinedButton(
-                onClick = { onDismissProposal(proposal.id) },
-                enabled = !busy,
-                shape = RoundedCornerShape(14.dp)
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)), RoundedCornerShape(14.dp))
+                    .then(
+                        if (!busy) Modifier.bounceClick { onDismissProposal(proposal.id) }
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Rounded.Clear, null)
+                Icon(Icons.Rounded.Clear, null, tint = MaterialTheme.colorScheme.onBackground)
             }
         }
     }

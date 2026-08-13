@@ -120,6 +120,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -155,6 +156,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
+import com.aura.app.BuildConfig
 import com.aura.app.automations.AutomationActionTypeSets
 import com.aura.app.automations.AutomationActionTypes
 import com.aura.app.automations.AutomationEvents
@@ -164,9 +166,11 @@ import com.aura.app.automations.AutomationSpec
 import com.aura.app.automations.AutomationTriggerTypes
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
+import com.aura.app.assistant.GoogleSignInClient
 import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.MemoryAppProposal
 import com.aura.app.assistant.MessageRole
+import com.aura.app.assistant.validateLocalMongoSettings
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
 import com.aura.app.miniapps.MiniAppComponentItem
@@ -215,30 +219,93 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.gestures.detectTapGestures
 
+data class OnboardingConfiguration(
+    val mode: OnboardingMode,
+    val appMode: String,
+    val provider: LlmProvider,
+    val apiKey: String,
+    val modelId: String,
+    val mongoConnectionUri: String,
+    val mongoDatabaseName: String,
+    val backgroundListening: Boolean
+)
+
+enum class OnboardingMode(val testTagValue: String) {
+    ManagedGoogle("google"),
+    Local("local")
+}
+
+internal fun validateOnboardingConfiguration(configuration: OnboardingConfiguration) {
+    if (configuration.mode == OnboardingMode.ManagedGoogle) return
+    validateLocalMongoSettings(
+        configuration.mongoConnectionUri,
+        configuration.mongoDatabaseName
+    )
+    require(configuration.apiKey.trim().isNotEmpty()) {
+        "${configuration.provider.label} API key is required."
+    }
+    require(configuration.modelId.trim().isNotEmpty()) {
+        "${configuration.provider.label} model is required."
+    }
+}
+
 @Composable
-fun OnboardingScreen(
+private fun LegacyOnboardingScreen(
     state: LauncherUiState,
     onRequestPermissions: () -> Unit,
-    onCreateAccount: (email: String, password: String, name: String?, onResult: (Result<com.aura.app.assistant.UserResponse>) -> Unit) -> Unit,
-    onSignIn: (email: String, password: String, onResult: (Result<com.aura.app.assistant.UserResponse>) -> Unit) -> Unit,
-    onFinishOnboarding: (appMode: String, provider: LlmProvider, apiKey: String, modelId: String, bgListening: Boolean) -> Unit
+    onGoogleChallenge: (onResult: (Result<String>) -> Unit) -> Unit,
+    onGoogleSignIn: (idToken: String, nonce: String, onResult: (Result<com.aura.app.assistant.UserResponse>) -> Unit) -> Unit,
+    onVerifyLocalDatabase: (connectionUri: String, databaseName: String, onResult: (Result<Unit>) -> Unit) -> Unit,
+    onFinishOnboarding: (OnboardingConfiguration) -> Unit
 ) {
-    var step by remember { mutableStateOf(1) }
+    var step by remember { mutableIntStateOf(1) }
     
     // State
-    var selectedAppMode by remember { mutableStateOf("launcher") }
-    var selectedStorageMode by remember { mutableStateOf("local") }
-    var accountMode by remember { mutableStateOf("signIn") }
-    var nameInput by remember { mutableStateOf("") }
-    var emailInput by remember { mutableStateOf("") }
-    var passwordInput by remember { mutableStateOf("") }
+    val selectedAppMode = "launcher"
+    var selectedStorageMode by remember { mutableStateOf(OnboardingMode.ManagedGoogle) }
     
     var selectedProvider by remember { mutableStateOf(LlmProvider.Gemini) }
     var apiKeyInput by remember { mutableStateOf("") }
+    var mongoConnectionUri by remember { mutableStateOf("") }
+    var mongoDatabaseName by remember { mutableStateOf("aura") }
+    var mongoInputError by remember { mutableStateOf<String?>(null) }
     var authMessage by remember { mutableStateOf<String?>(null) }
     var authComplete by remember { mutableStateOf(state.session.isLoggedIn) }
 
     val context = LocalContext.current
+    val onboardingScope = rememberCoroutineScope()
+    val googleSignInClient = remember(context) {
+        GoogleSignInClient(context, BuildConfig.STALKY_GOOGLE_WEB_CLIENT_ID)
+    }
+
+    val startGoogleSignIn = {
+        authMessage = null
+        onGoogleChallenge { challengeResult ->
+            val nonce = challengeResult.getOrElse { error ->
+                authMessage = error.message ?: "Could not start Google sign-in."
+                return@onGoogleChallenge
+            }
+            onboardingScope.launch {
+                try {
+                    val idToken = googleSignInClient.signIn(context, nonce)
+                    onGoogleSignIn(idToken, nonce) { result ->
+                        authComplete = result.isSuccess
+                        authMessage = result.fold(
+                            onSuccess = { "Signed in as ${it.email}. Aura is ready." },
+                            onFailure = { it.message ?: "Google sign-in failed." }
+                        )
+                        if (result.isSuccess) {
+                            selectedProvider = LlmProvider.Gemini
+                            apiKeyInput = ""
+                            step = 6
+                        }
+                    }
+                } catch (error: Exception) {
+                    authMessage = error.message ?: "Google sign-in failed."
+                }
+            }
+        }
+    }
     
     // Permission states
     var hasMicState by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) }
@@ -277,50 +344,65 @@ fun OnboardingScreen(
     }
 
     val stepTitle = when (step) {
-        1 -> "01 // SYSTEM SHELL"
-        2 -> "02 // DATA RESIDENCY"
-        3 -> "03 // CLOUD ACCOUNT"
-        4 -> "04 // LLM ENGINE"
-        5 -> "05 // CREDENTIALS"
-        6 -> "06 // HARDWARE CAPABILITY"
-        7 -> "07 // HARDWARE CAPABILITY"
-        8 -> "08 // HARDWARE CAPABILITY"
+        1 -> "AURA HOME"
+        2 -> "SETUP MODE"
+        3 -> "LOCAL DATABASE"
+        4 -> "AI PROVIDER"
+        5 -> "PROVIDER ACCESS"
+        6 -> "MICROPHONE"
+        7 -> "NOTIFICATIONS"
+        8 -> "LOCATION"
         else -> ""
     }
 
     val stepHeadline = when (step) {
-        1 -> "SELECT APP MODE"
-        2 -> "CHOOSE DATA STORAGE"
-        3 -> "SIGN IN / REGISTER"
-        4 -> "SELECT PROVIDER"
-        5 -> "ENTER API KEY"
-        6 -> "WE NEED ACCESS."
-        7 -> "WE NEED ACCESS."
-        8 -> "WE NEED ACCESS."
+        1 -> "Make Aura your Home"
+        2 -> "Choose how Aura should run"
+        3 -> "Set up local data"
+        4 -> "Choose your AI provider"
+        5 -> "Connect your provider"
+        6 -> "Talk to Aura"
+        7 -> "Stay informed"
+        8 -> "Enable contextual assistance"
         else -> ""
     }
 
-    val onContinue = {
-        if (step == 2 && selectedStorageMode == "local") {
-            step = 4
-        } else if (step == 3 && !authComplete) {
-            selectedStorageMode = "local"
-            step = 4
+    val onContinue: () -> Unit = {
+        if (step == 2 && selectedStorageMode == OnboardingMode.ManagedGoogle) {
+            startGoogleSignIn()
+        } else if (step == 2) {
+            step = 3
+        } else if (step == 3) {
+            val validation = runCatching {
+                validateLocalMongoSettings(mongoConnectionUri, mongoDatabaseName)
+            }
+            mongoInputError = validation.exceptionOrNull()?.message
+            if (validation.isSuccess) {
+                onVerifyLocalDatabase(mongoConnectionUri, mongoDatabaseName) { result ->
+                    mongoInputError = result.exceptionOrNull()?.message
+                    if (result.isSuccess) step = 4
+                }
+            }
         } else if (step < 8) {
             step++
         } else {
             onFinishOnboarding(
-                selectedAppMode,
-                selectedProvider,
-                apiKeyInput,
-                if (selectedProvider == LlmProvider.Gemini) DEFAULT_GEMINI_MODEL else "gpt-4o-mini",
-                hasMicState
+                OnboardingConfiguration(
+                    mode = selectedStorageMode,
+                    appMode = selectedAppMode,
+                    provider = selectedProvider,
+                    apiKey = if (selectedStorageMode == OnboardingMode.ManagedGoogle) "" else apiKeyInput,
+                    modelId = defaultOnboardingModel(selectedProvider),
+                    mongoConnectionUri = if (selectedStorageMode == OnboardingMode.Local) mongoConnectionUri else "",
+                    mongoDatabaseName = if (selectedStorageMode == OnboardingMode.Local) mongoDatabaseName else "",
+                    backgroundListening = ENABLE_BACKGROUND_LISTENING_AFTER_ONBOARDING
+                )
             )
         }
     }
 
     BackHandler(enabled = step > 1) {
-        if (step == 4 && selectedStorageMode == "local") {
+        if (step == 6 && selectedStorageMode == OnboardingMode.ManagedGoogle) {
             step = 2
         } else {
             step--
@@ -331,6 +413,7 @@ fun OnboardingScreen(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("aura-onboarding-step-$step")
                 .background(Color.Black)
         ) {
             val layout = phoneLayoutProfile(maxWidth, maxHeight)
@@ -376,45 +459,43 @@ fun OnboardingScreen(
 
                     when (step) {
                         1 -> {
-                            val modes = listOf(
-                                "launcher" to Pair("01 / HOME LAUNCHER", "Replace your default Android home screen with the Aura system environment."),
-                                "normal" to Pair("02 / SANDBOX APP", "Run Aura as a standard independent application without home integration."),
-                                "overlay" to Pair("03 / OVERLAY ASSISTANT", "Display the assistant floating overlay over existing system tasks.")
-                            )
-                            modes.forEach { (mode, pair) ->
-                                val isSelected = selectedAppMode == mode
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.Black)
-                                        .border(
-                                            width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable { selectedAppMode = mode }
-                                        .padding(16.dp)
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(
-                                            text = pair.first,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = pair.second,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = Color.White.copy(alpha = 0.6f)
-                                        )
-                                    }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.Black)
+                                    .border(2.dp, Color.White, RoundedCornerShape(8.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "AURA WIDGET CANVAS",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "Aura becomes your Home screen. The 3×3 eyes are the primary control, while reports, meeting tools, progress, and approvals appear as live work surfaces around it.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.7f)
+                                    )
+                                    Text(
+                                        text = "History, permissions, models, and settings remain available as secondary screens.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White.copy(alpha = 0.5f)
+                                    )
                                 }
                             }
                         }
                         
                         2 -> {
                             val storages = listOf(
-                                "local" to Pair("LOCAL STORAGE", "Save settings, tasks, and memory entries securely on this hardware only."),
-                                "cloud" to Pair("CLOUD SYNCHRONIZATION", "Synchronize tasks and database memory logs in real-time across devices.")
+                                OnboardingMode.ManagedGoogle to Pair(
+                                    "CONTINUE WITH GOOGLE",
+                                    "Sign in once. Aura supplies the backend, database, and AI access so the app works immediately."
+                                ),
+                                OnboardingMode.Local to Pair(
+                                    "CONTINUE LOCALLY",
+                                    "Connect directly to your MongoDB deployment and your own AI provider. Aura's backend is never contacted."
+                                )
                             )
                             storages.forEach { (mode, pair) ->
                                 val isSelected = selectedStorageMode == mode
@@ -427,12 +508,13 @@ fun OnboardingScreen(
                                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp)
                                         )
-                                        .clickable { selectedStorageMode = mode }
+                                        .testTag("aura-onboarding-${mode.testTagValue}-option")
+                                        .bounceClick { selectedStorageMode = mode }
                                         .padding(16.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
-                                            text = pair.first,
+                                            text = if (isSelected) "[X] ${pair.first}" else "[ ] ${pair.first}",
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = Color.White
                                         )
@@ -444,129 +526,6 @@ fun OnboardingScreen(
                                     }
                                 }
                             }
-                        }
-                        
-                        3 -> {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
-                                    .padding(4.dp)
-                            ) {
-                                val authModes = listOf("signIn" to "Sign In", "create" to "Register")
-                                authModes.forEach { (mode, label) ->
-                                    val isSelected = accountMode == mode
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(if (isSelected) Color.White else Color.Transparent)
-                                            .clickable { 
-                                                accountMode = mode 
-                                                authMessage = null
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = label.uppercase(),
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.6f)
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (accountMode == "create") {
-                                OutlinedTextField(
-                                    value = nameInput,
-                                    onValueChange = { nameInput = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                    label = { Text("NAME_ENTRY", color = Color.White.copy(alpha = 0.4f)) },
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedBorderColor = Color.White,
-                                        unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                        focusedContainerColor = Color.Transparent,
-                                        unfocusedContainerColor = Color.Transparent
-                                    ),
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                            }
-
-                            OutlinedTextField(
-                                value = emailInput,
-                                onValueChange = { emailInput = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                label = { Text("EMAIL_ADDRESS", color = Color.White.copy(alpha = 0.4f)) },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(4.dp)
-                            )
-
-                            OutlinedTextField(
-                                value = passwordInput,
-                                onValueChange = { passwordInput = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                label = { Text("PASSWORD_HASH", color = Color.White.copy(alpha = 0.4f)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(4.dp)
-                            )
-
-                            Button(
-                                onClick = {
-                                    val done: (Result<com.aura.app.assistant.UserResponse>) -> Unit = { result ->
-                                        authComplete = result.isSuccess
-                                        authMessage = result.fold(
-                                            onSuccess = { "Authenticated successfully as ${it.email}." },
-                                            onFailure = { it.message ?: "Authentication failed." }
-                                        )
-                                    }
-                                    if (accountMode == "create") {
-                                        onCreateAccount(emailInput.trim(), passwordInput, nameInput.trim(), done)
-                                    } else {
-                                        onSignIn(emailInput.trim(), passwordInput, done)
-                                    }
-                                },
-                                enabled = !state.loading && emailInput.isNotBlank() && passwordInput.length >= 6,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color.Black,
-                                    disabledContainerColor = Color.White.copy(alpha = 0.2f),
-                                    disabledContentColor = Color.Black
-                                ),
-                                shape = RoundedCornerShape(24.dp)
-                            ) {
-                                Text(
-                                    text = if (state.loading) "AUTHENTICATING..." else if (accountMode == "create") "CREATE ACCOUNT" else "AUTHENTICATE",
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
                             authMessage?.let {
                                 Text(
                                     text = it,
@@ -575,6 +534,57 @@ fun OnboardingScreen(
                                     modifier = Modifier.padding(horizontal = 4.dp)
                                 )
                             }
+                        }
+                        
+                        3 -> {
+                            OutlinedTextField(
+                                value = mongoConnectionUri,
+                                onValueChange = {
+                                    mongoConnectionUri = it
+                                    mongoInputError = null
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("aura-onboarding-mongo-uri"),
+                                label = { Text("MongoDB connection URI") },
+                                supportingText = { Text("Use mongodb:// with credentials and tls=true. SRV URIs are not supported on Android.") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                isError = mongoInputError != null,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color.White,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            )
+                            OutlinedTextField(
+                                value = mongoDatabaseName,
+                                onValueChange = {
+                                    mongoDatabaseName = it
+                                    mongoInputError = null
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("aura-onboarding-mongo-database"),
+                                label = { Text("Database name") },
+                                singleLine = true,
+                                isError = mongoInputError != null,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color.White,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            )
+                            mongoInputError?.let { error ->
+                                Text(error, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text(
+                                text = "Use a dedicated MongoDB user limited to this database and only find, insert, update, and delete permissions. The encrypted credential remains on this device.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
                         }
                         
                         4 -> {
@@ -593,7 +603,7 @@ fun OnboardingScreen(
                                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.1f),
                                             shape = RoundedCornerShape(8.dp)
                                         )
-                                        .clickable { selectedProvider = provider }
+                                        .bounceClick { selectedProvider = provider }
                                         .padding(16.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -617,7 +627,9 @@ fun OnboardingScreen(
                             OutlinedTextField(
                                 value = apiKeyInput,
                                 onValueChange = { apiKeyInput = it },
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("aura-onboarding-api-key"),
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 label = { Text("$providerLabel API Key", color = Color.White.copy(alpha = 0.4f)) },
                                 singleLine = true,
@@ -639,7 +651,7 @@ fun OnboardingScreen(
                                     .padding(16.dp)
                             ) {
                                 Text(
-                                    text = "Aura core requires an API key to execute cognitive actions. Keys are securely stored in the on-device keystore. You can skip this and configure it later in settings.",
+                                    text = "Local mode uses your provider account. This key is required and is encrypted with Android Keystore before it is stored on this device.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.White.copy(alpha = 0.6f)
                                 )
@@ -831,7 +843,7 @@ fun OnboardingScreen(
                     if (step > 1) {
                         Button(
                             onClick = {
-                                if (step == 4 && selectedStorageMode == "local") {
+                                if (step == 6 && selectedStorageMode == OnboardingMode.ManagedGoogle) {
                                     step = 2
                                 } else {
                                     step--
@@ -851,13 +863,13 @@ fun OnboardingScreen(
                         }
                     }
 
-                    val isNextEnabled = when (step) {
-                        3 -> authComplete
-                        else -> true
-                    }
-
                     val nextText = when (step) {
-                        3 -> if (authComplete) "CONTINUE" else "SKIP SYNC"
+                        2 -> if (selectedStorageMode == OnboardingMode.ManagedGoogle) {
+                            if (state.loading) "SIGNING IN..." else "CONTINUE WITH GOOGLE"
+                        } else {
+                            "CONTINUE LOCALLY"
+                        }
+                        3 -> "VERIFY DATABASE SETTINGS"
                         5 -> "SAVE & CONTINUE"
                         8 -> "INITIALIZE SYSTEM"
                         6, 7 -> if ((step == 6 && hasMicState) || (step == 7 && hasNotifState)) "CONTINUE" else "SKIP STEP"
@@ -865,18 +877,14 @@ fun OnboardingScreen(
                     }
 
                     Button(
-                        onClick = {
-                            if (step == 3 && !authComplete) {
-                                selectedStorageMode = "local"
-                                step = 4
-                            } else {
-                                onContinue()
-                            }
-                        },
-                        enabled = isNextEnabled,
+                        onClick = onContinue,
+                        enabled = !state.loading &&
+                            (step != 3 || (mongoConnectionUri.isNotBlank() && mongoDatabaseName.isNotBlank())) &&
+                            (step != 5 || apiKeyInput.isNotBlank()),
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp),
+                            .height(48.dp)
+                            .testTag("aura-onboarding-next"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.White,
                             contentColor = Color.Black,
@@ -891,4 +899,12 @@ fun OnboardingScreen(
             }
         }
     }
+}
+
+internal const val ENABLE_BACKGROUND_LISTENING_AFTER_ONBOARDING = false
+
+internal fun defaultOnboardingModel(provider: LlmProvider): String = when (provider) {
+    LlmProvider.Gemini -> DEFAULT_GEMINI_MODEL
+    LlmProvider.OpenAI -> "gpt-4.1-mini"
+    LlmProvider.OpenRouter -> ""
 }

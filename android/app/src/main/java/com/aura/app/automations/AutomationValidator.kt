@@ -31,8 +31,8 @@ object AutomationValidator {
         spec.conditions.forEach { validateCondition(it) }
         spec.actions.forEach { validateAction(it) }
         if (normalizedFlow == null) {
-            require(spec.actions.none { it.isHighImpactCrossAppAction() }) {
-                "High-impact cross-app actions must be modeled as flow steps with a checkpoint before the action"
+            require(spec.actions.none { it.hasAtMostOnceSideEffect() }) {
+                "Irreversible actions must be modeled as flow steps with a checkpoint before the action"
             }
         }
         normalizedFlow?.let { validateFlow(it) }
@@ -127,7 +127,7 @@ object AutomationValidator {
             "Unsupported flow concurrency policy: ${flow.concurrencyPolicy}"
         }
         val ids = mutableSetOf<String>()
-        var hasPriorCheckpoint = false
+        var approvalAvailable = false
         flow.steps.forEach { step ->
             require(step.id.isNotBlank()) { "Flow step id is required" }
             require(step.id.length <= MAX_ID_LENGTH) { "Flow step id cannot exceed $MAX_ID_LENGTH characters" }
@@ -157,12 +157,13 @@ object AutomationValidator {
                     require(step.waitMillis == 0L) { "Action flow steps cannot include waitMillis" }
                     val action = requireNotNull(step.action) { "Action flow steps need an action" }
                     validateAction(action)
-                    require(!action.isHighImpactCrossAppAction() || hasPriorCheckpoint) {
-                        "High-impact cross-app action '${action.type}' needs a prior checkpoint step"
+                    require(!action.hasAtMostOnceSideEffect() || approvalAvailable) {
+                        "Irreversible action '${action.type}' needs a prior checkpoint step"
                     }
                     require(!action.hasAtMostOnceSideEffect() || step.retryPolicy.maxAttempts == 1) {
                         "Irreversible action '${action.type}' cannot be retried"
                     }
+                    if (action.hasAtMostOnceSideEffect()) approvalAvailable = false
                 }
                 AutomationFlowStepTypes.Condition -> {
                     require(step.action == null) { "Condition flow steps cannot include an action" }
@@ -182,7 +183,7 @@ object AutomationValidator {
                     require(step.action == null) { "Checkpoint flow steps cannot include an action" }
                     require(step.condition == null) { "Checkpoint flow steps cannot include a condition" }
                     require(step.waitMillis == 0L) { "Checkpoint flow steps cannot include waitMillis" }
-                    hasPriorCheckpoint = true
+                    approvalAvailable = true
                 }
             }
         }
@@ -210,6 +211,9 @@ object AutomationValidator {
         }
 
     private fun validateAction(action: AutomationAction) {
+        require(action.type !in RetiredAutomationActionTypes.All) {
+            "Unsupported automation action removed from Aura: ${action.type}"
+        }
         require(action.type in AutomationActionTypeSets.All) {
             "Unsupported automation action: ${action.type}"
         }
@@ -231,86 +235,6 @@ object AutomationValidator {
         }
         if (action.type == AutomationActionTypes.DirectSms) {
             require(action.recipientAddress?.isNotBlank() == true) { "Direct SMS actions need a recipientAddress" }
-        }
-        if (action.type == AutomationActionTypes.OpenApp) {
-            require(
-                action.metadata[AutomationActionMetadata.PackageName]?.isNotBlank() == true ||
-                    action.metadata[AutomationActionMetadata.AppQuery]?.isNotBlank() == true
-            ) { "Open app actions need packageName or appQuery metadata" }
-        }
-        if (action.type == AutomationActionTypes.WaitForApp) {
-            require(action.metadata[AutomationActionMetadata.PackageName]?.isNotBlank() == true) {
-                "Wait for app actions need packageName metadata"
-            }
-        }
-        if (action.type == AutomationActionTypes.TapText || action.type == AutomationActionTypes.WaitForText) {
-            require(action.metadata[AutomationActionMetadata.Text]?.isNotBlank() == true) {
-                "${action.type} actions need text metadata"
-            }
-        }
-        if (action.type == AutomationActionTypes.WaitForTarget) {
-            require(action.hasSelector()) {
-                "Wait for target actions need at least one selector metadata field: text, contentDescription, viewId, or className"
-            }
-        }
-        if (action.type == AutomationActionTypes.WaitUntilGone) {
-            require(action.hasSelector()) {
-                "Wait until gone actions need at least one selector metadata field: text, contentDescription, viewId, or className"
-            }
-        }
-        if (action.type == AutomationActionTypes.WaitForIdle) {
-            action.metadata[AutomationActionMetadata.MaxNodes]?.let { value ->
-                val maxNodes = value.toIntOrNull()
-                require(maxNodes != null && maxNodes in 1..80) { "Wait for idle maxNodes must be between 1 and 80" }
-            }
-            action.metadata[AutomationActionMetadata.StableSamples]?.let { value ->
-                val stableSamples = value.toIntOrNull()
-                require(stableSamples != null && stableSamples in 2..6) { "Wait for idle stableSamples must be between 2 and 6" }
-            }
-        }
-        if (action.type == AutomationActionTypes.TapTarget || action.type == AutomationActionTypes.LongPressTarget) {
-            require(action.hasSelector()) {
-                "${action.type} actions need at least one selector metadata field: text, contentDescription, viewId, or className"
-            }
-        }
-        if (action.type == AutomationActionTypes.TapBounds) {
-            require(action.bounds() != null) { "Tap bounds actions need numeric boundsLeft, boundsTop, boundsRight, and boundsBottom metadata" }
-        }
-        if (action.type == AutomationActionTypes.TypeText) {
-            require(action.metadata[AutomationActionMetadata.Text]?.isNotBlank() == true) {
-                "Type text actions need text metadata"
-            }
-        }
-        if (action.type == AutomationActionTypes.ClearText) {
-            require(action.hasSelector()) {
-                "Clear text actions need at least one selector metadata field: text, contentDescription, viewId, or className"
-            }
-        }
-        if (action.type == AutomationActionTypes.Scroll || action.type == AutomationActionTypes.ScrollUntilTarget) {
-            val direction = action.metadata[AutomationActionMetadata.Direction]?.lowercase().orEmpty()
-            require(direction in setOf("", "up", "down", "left", "right", "forward", "backward")) {
-                "Scroll direction must be up, down, left, right, forward, or backward"
-            }
-        }
-        if (action.type == AutomationActionTypes.ScrollUntilTarget) {
-            require(action.hasSelector()) {
-                "Scroll until target actions need at least one selector metadata field: text, contentDescription, viewId, or className"
-            }
-            action.metadata[AutomationActionMetadata.MaxScrolls]?.let { value ->
-                val maxScrolls = value.toIntOrNull()
-                require(maxScrolls != null && maxScrolls in 1..50) { "Scroll until target maxScrolls must be between 1 and 50" }
-            }
-        }
-        if (action.type == AutomationActionTypes.Swipe) {
-            require(action.swipePoints() != null) {
-                "Swipe actions need numeric startX, startY, endX, and endY metadata"
-            }
-        }
-        if (action.type == AutomationActionTypes.InspectScreen) {
-            action.metadata[AutomationActionMetadata.MaxNodes]?.let { value ->
-                val maxNodes = value.toIntOrNull()
-                require(maxNodes != null && maxNodes in 1..80) { "Inspect screen maxNodes must be between 1 and 80" }
-            }
         }
     }
 
@@ -381,35 +305,6 @@ object AutomationValidator {
                 "$owner metadata values cannot exceed $MAX_TEXT_LENGTH characters"
             }
         }
-    }
-
-    private fun AutomationAction.hasSelector(): Boolean =
-        listOf(
-            AutomationActionMetadata.Text,
-            AutomationActionMetadata.TargetText,
-            AutomationActionMetadata.ContentDescription,
-            AutomationActionMetadata.ViewId,
-            AutomationActionMetadata.ClassName
-        ).any { key -> metadata[key]?.isNotBlank() == true }
-
-    private fun AutomationAction.bounds(): List<Int>? {
-        val values = listOf(
-            metadata[AutomationActionMetadata.BoundsLeft],
-            metadata[AutomationActionMetadata.BoundsTop],
-            metadata[AutomationActionMetadata.BoundsRight],
-            metadata[AutomationActionMetadata.BoundsBottom]
-        ).map { it?.toIntOrNull() }
-        return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
-    }
-
-    private fun AutomationAction.swipePoints(): List<Int>? {
-        val values = listOf(
-            metadata[AutomationActionMetadata.StartX],
-            metadata[AutomationActionMetadata.StartY],
-            metadata[AutomationActionMetadata.EndX],
-            metadata[AutomationActionMetadata.EndY]
-        ).map { it?.toIntOrNull() }
-        return values.takeIf { it.all { value -> value != null } }?.filterNotNull()
     }
 
     private const val MAX_RETRY_ATTEMPTS = 5

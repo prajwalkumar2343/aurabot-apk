@@ -1,0 +1,973 @@
+{
+  "ok": true,
+  "frames_root": "/Users/administrator/apk/pets/pixel-sage-run/frames",
+  "states": [
+    "idle",
+    "running-right",
+    "running-left",
+    "waving",
+    "jumping",
+    "failed",
+    "waiting",
+    "running",
+    "review"
+  ],
+  "errors": [],
+  "warnings": [],
+  "rows": [
+    {
+      "state": "idle",
+      "expected_frames": 6,
+      "actual_frames": 6,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 19229,
+          "bbox": [
+            28,
+            5,
+            164,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 211
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 19159,
+          "bbox": [
+            27,
+            5,
+            165,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 253
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 19270,
+          "bbox": [
+            27,
+            5,
+            164,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 204
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17597,
+          "bbox": [
+            28,
+            5,
+            163,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 214
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18603,
+          "bbox": [
+            29,
+            5,
+            163,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 230
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/idle/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18246,
+          "bbox": [
+            32,
+            5,
+            160,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 220
+        }
+      ]
+    },
+    {
+      "state": "running-right",
+      "expected_frames": 8,
+      "actual_frames": 8,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15680,
+          "bbox": [
+            30,
+            5,
+            162,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 211
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 14895,
+          "bbox": [
+            33,
+            5,
+            159,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 210
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 14660,
+          "bbox": [
+            37,
+            5,
+            154,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 192
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15204,
+          "bbox": [
+            30,
+            5,
+            162,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 223
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15276,
+          "bbox": [
+            33,
+            5,
+            159,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 222
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 14788,
+          "bbox": [
+            35,
+            5,
+            157,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 235
+        },
+        {
+          "index": 6,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/06.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 14753,
+          "bbox": [
+            32,
+            5,
+            160,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 207
+        },
+        {
+          "index": 7,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-right/07.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 13620,
+          "bbox": [
+            38,
+            5,
+            154,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 167
+        }
+      ]
+    },
+    {
+      "state": "running-left",
+      "expected_frames": 8,
+      "actual_frames": 8,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17223,
+          "bbox": [
+            17,
+            5,
+            174,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 339
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17296,
+          "bbox": [
+            18,
+            5,
+            174,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 315
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16330,
+          "bbox": [
+            23,
+            5,
+            169,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 333
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16584,
+          "bbox": [
+            27,
+            5,
+            164,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 335
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17209,
+          "bbox": [
+            21,
+            5,
+            171,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 319
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16727,
+          "bbox": [
+            23,
+            5,
+            168,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 348
+        },
+        {
+          "index": 6,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/06.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16109,
+          "bbox": [
+            23,
+            5,
+            168,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 330
+        },
+        {
+          "index": 7,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running-left/07.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17043,
+          "bbox": [
+            24,
+            5,
+            167,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 340
+        }
+      ]
+    },
+    {
+      "state": "waving",
+      "expected_frames": 4,
+      "actual_frames": 4,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waving/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18318,
+          "bbox": [
+            30,
+            5,
+            161,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 119
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waving/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18276,
+          "bbox": [
+            25,
+            5,
+            166,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 136
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waving/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18139,
+          "bbox": [
+            30,
+            5,
+            162,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 124
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waving/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17381,
+          "bbox": [
+            31,
+            5,
+            160,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 125
+        }
+      ]
+    },
+    {
+      "state": "jumping",
+      "expected_frames": 5,
+      "actual_frames": 5,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/jumping/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 21470,
+          "bbox": [
+            17,
+            5,
+            175,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 256
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/jumping/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 19686,
+          "bbox": [
+            22,
+            5,
+            170,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 234
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/jumping/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 20703,
+          "bbox": [
+            21,
+            5,
+            170,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 212
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/jumping/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 20935,
+          "bbox": [
+            18,
+            5,
+            173,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 244
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/jumping/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 20112,
+          "bbox": [
+            26,
+            5,
+            166,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 229
+        }
+      ]
+    },
+    {
+      "state": "failed",
+      "expected_frames": 8,
+      "actual_frames": 8,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17801,
+          "bbox": [
+            31,
+            5,
+            160,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 279
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 19932,
+          "bbox": [
+            17,
+            5,
+            174,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 294
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 21426,
+          "bbox": [
+            13,
+            5,
+            178,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 336
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 23612,
+          "bbox": [
+            5,
+            7,
+            187,
+            200
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 393
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 26492,
+          "bbox": [
+            7,
+            5,
+            185,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 437
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17147,
+          "bbox": [
+            5,
+            42,
+            187,
+            166
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 279
+        },
+        {
+          "index": 6,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/06.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17950,
+          "bbox": [
+            5,
+            38,
+            187,
+            169
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 303
+        },
+        {
+          "index": 7,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/failed/07.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15305,
+          "bbox": [
+            5,
+            52,
+            187,
+            156
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 244
+        }
+      ]
+    },
+    {
+      "state": "waiting",
+      "expected_frames": 6,
+      "actual_frames": 6,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16488,
+          "bbox": [
+            33,
+            5,
+            159,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 176
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15559,
+          "bbox": [
+            41,
+            5,
+            150,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 156
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16575,
+          "bbox": [
+            34,
+            5,
+            157,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 183
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16973,
+          "bbox": [
+            35,
+            5,
+            157,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 200
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 14575,
+          "bbox": [
+            45,
+            5,
+            147,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 176
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/waiting/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 20871,
+          "bbox": [
+            16,
+            5,
+            175,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 253
+        }
+      ]
+    },
+    {
+      "state": "running",
+      "expected_frames": 6,
+      "actual_frames": 6,
+      "extraction_method": "components",
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16772,
+          "bbox": [
+            38,
+            5,
+            154,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 160
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17226,
+          "bbox": [
+            35,
+            5,
+            156,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 205
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17359,
+          "bbox": [
+            38,
+            5,
+            154,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 208
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15817,
+          "bbox": [
+            36,
+            5,
+            156,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 199
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16786,
+          "bbox": [
+            39,
+            5,
+            152,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 208
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/running/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 17605,
+          "bbox": [
+            37,
+            5,
+            155,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 203
+        }
+      ]
+    },
+    {
+      "state": "review",
+      "expected_frames": 6,
+      "actual_frames": 6,
+      "extraction_method": null,
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "frames": [
+        {
+          "index": 0,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/00.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16971,
+          "bbox": [
+            38,
+            5,
+            154,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 224
+        },
+        {
+          "index": 1,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/01.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 16701,
+          "bbox": [
+            34,
+            5,
+            158,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 200
+        },
+        {
+          "index": 2,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/02.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18046,
+          "bbox": [
+            20,
+            5,
+            171,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 237
+        },
+        {
+          "index": 3,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/03.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15790,
+          "bbox": [
+            42,
+            5,
+            150,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 194
+        },
+        {
+          "index": 4,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/04.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 15852,
+          "bbox": [
+            34,
+            5,
+            157,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 205
+        },
+        {
+          "index": 5,
+          "file": "/Users/administrator/apk/pets/pixel-sage-run/frames/review/05.png",
+          "width": 192,
+          "height": 208,
+          "nontransparent_pixels": 18166,
+          "bbox": [
+            32,
+            5,
+            160,
+            203
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 224
+        }
+      ]
+    }
+  ]
+}

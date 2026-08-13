@@ -88,6 +88,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import android.content.Context
+import android.view.View
 import android.content.pm.PackageManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
@@ -120,6 +121,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -167,6 +169,7 @@ import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
 import com.aura.app.assistant.LlmProvider
 import com.aura.app.assistant.MemoryAppProposal
 import com.aura.app.assistant.MessageRole
+import com.aura.app.widgets.HostedAndroidWidget
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppComponent
 import com.aura.app.miniapps.MiniAppComponentItem
@@ -226,6 +229,17 @@ fun HomeScreen(
     onSwipeLeft: () -> Unit,
     onSelectWallpaper: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMiniApp: (String) -> Unit,
+    onRunMiniAppWidgetAction: (String, String) -> Unit,
+    onOpenAuraSurface: (String) -> Unit,
+    onRunAuraWidgetAction: (String, String) -> Unit,
+    onConfirmAuraWidgetAction: (String, String) -> Unit,
+    onCancelAuraWidgetConfirmation: (String) -> Unit,
+    onDismissAuraWidget: (String) -> Unit,
+    onAddAndroidWidget: () -> Unit,
+    onResizeAndroidWidget: (HostedAndroidWidget, Int, Int) -> Unit,
+    onRemoveAndroidWidget: (Int) -> Unit,
+    createHostedWidgetView: (Context, Int) -> View?,
     onLaunchApp: (AppInfo) -> Unit,
     onClearAttachment: () -> Unit,
     onLaunchPicker: () -> Unit,
@@ -265,29 +279,61 @@ fun HomeScreen(
                 )
             }
     ) {
-        Box(
+        Column(
             modifier = Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .clickable {
-                    if (state.status.running) {
-                        onStopVoice()
-                    } else {
-                        onTalk()
-                    }
-                },
-            contentAlignment = Alignment.Center
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            AuraEyes(
+            val needsApproval = state.auraWidgets.any {
+                it.status == com.aura.app.widgets.AuraWidgetStatus.AwaitingConfirmation
+            }
+            AuraHomeHeader(
+                isWorking = state.loading || state.agentRunState in setOf("queued", "running"),
+                activeSubagents = state.activeSubagents,
+                needsApproval = needsApproval,
+                onOpenApps = onSwipeLeft,
+                onOpenSettings = onOpenSettings
+            )
+            AuraAssistantTile(
                 mode = presenceMode,
                 voiceLevel = state.status.rmsLevel,
-                commandText = state.assistantInput,
-                emotion = state.currentEmotion,
                 isSpeaking = state.isSpeaking,
-                interactionMode = state.session.interactionMode,
-                modifier = Modifier.fillMaxWidth()
+                runState = state.agentRunState,
+                runPhase = state.agentRunPhase,
+                activeSubagents = state.activeSubagents,
+                needsApproval = needsApproval,
+                emotion = state.currentEmotion,
+                createdEmotion = state.currentCreatedEmotion,
+                assistantText = state.messages.lastOrNull { it.role == MessageRole.Assistant }?.text.orEmpty(),
+                onActivate = {
+                    if (state.status.running) onStopVoice() else onTalk()
+                }
+            )
+            AuraDynamicWidgetSection(
+                widgets = state.auraWidgets,
+                onOpenSurface = onOpenAuraSurface,
+                onAction = onRunAuraWidgetAction,
+                onConfirm = onConfirmAuraWidgetAction,
+                onCancelConfirmation = onCancelAuraWidgetConfirmation,
+                onDismiss = onDismissAuraWidget
+            )
+            MiniAppHomeWidgetSection(
+                widgets = state.homeMiniAppWidgets,
+                unavailableCount = state.unavailableMiniAppWidgetCount,
+                onOpenMiniApp = onOpenMiniApp,
+                onRunAction = onRunMiniAppWidgetAction
+            )
+            HostedAndroidWidgetSection(
+                widgets = state.hostedAndroidWidgets,
+                onAdd = onAddAndroidWidget,
+                onResize = onResizeAndroidWidget,
+                onRemove = onRemoveAndroidWidget,
+                createView = createHostedWidgetView
             )
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
         AssistantComposer(
             value = state.assistantInput,
             onValueChange = onAssistantInput,
@@ -337,37 +383,35 @@ fun HomeScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "DESKTOP OPTIONS",
+                            text = "Home options",
                             fontWeight = FontWeight.Black,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(Modifier.height(16.dp))
-                        if (state.session.appMode == "launcher") {
-                            Button(
-                                onClick = {
-                                    showLongPressMenu = false
-                                    onSelectWallpaper()
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.onBackground,
-                                    contentColor = MaterialTheme.colorScheme.background
-                                  )
-                            ) {
-                                Icon(Icons.Rounded.Image, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("WALLPAPER", fontWeight = FontWeight.Bold)
-                            }
-                            Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                showLongPressMenu = false
+                                onSelectWallpaper()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.onBackground,
+                                contentColor = MaterialTheme.colorScheme.background
+                              )
+                        ) {
+                            Icon(Icons.Rounded.Image, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Wallpaper", fontWeight = FontWeight.Bold)
                         }
+                        Spacer(Modifier.height(10.dp))
                         Button(
                             onClick = {
                                 showLongPressMenu = false
                                 onOpenSettings()
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -376,7 +420,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Rounded.Settings, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("SETTINGS", fontWeight = FontWeight.Bold)
+                            Text("Settings", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -392,7 +436,7 @@ private fun HomeChatLayer(state: LauncherUiState, onClick: () -> Unit) {
             .fillMaxWidth()
             .heightIn(min = 112.dp, max = 176.dp)
             .glassCard(shape = RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
+            .bounceClick(onClick = onClick)
             .padding(16.dp)
     ) {
         Column(
@@ -493,7 +537,7 @@ private fun AuraEyes(
             label = "speech_wave"
         )
     } else {
-        remember { mutableStateOf(1f) }
+        remember { mutableFloatStateOf(1f) }
     }
 
     // Map emotions to target scales, offsets, and slant tilts
@@ -732,26 +776,10 @@ private fun AuraEyes(
 
 @Composable
 fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "app_scale"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick { onLaunchApp(app) }
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -792,26 +820,10 @@ fun AppGridItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "suggested_scale"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick { onLaunchApp(app) }
             .glassCard(shape = RoundedCornerShape(20.dp))
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -854,26 +866,10 @@ fun SuggestedAppCard(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
 
 @Composable
 fun AppListItem(app: AppInfo, onLaunchApp: (AppInfo) -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "list_item_scale"
-    )
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onLaunchApp(app) }
-            )
+            .bounceClick(pressedScale = 0.96f) { onLaunchApp(app) }
             .glassCard(shape = RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

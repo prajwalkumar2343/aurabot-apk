@@ -10,9 +10,6 @@
   <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
-  <uses-permission android:name="android.permission.ACCESS_HIDDEN_PROFILES" />
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
   <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
   <queries>
@@ -25,7 +22,9 @@
   <application
     android:name=".AuraApplication"
     android:allowBackup="false"
+    android:dataExtractionRules="@xml/data_extraction_rules"
     android:enableOnBackInvokedCallback="true"
+    android:fullBackupContent="@xml/backup_rules"
     android:icon="@mipmap/ic_launcher"
     android:label="@string/app_name"
     android:roundIcon="@mipmap/ic_launcher_round"
@@ -46,6 +45,10 @@
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.HOME" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.content.pm.action.CONFIRM_PIN_APPWIDGET" />
         <category android:name="android.intent.category.DEFAULT" />
       </intent-filter>
     </activity>
@@ -69,18 +72,6 @@
       android:name=".voice.AuraListeningService"
       android:exported="false"
       android:foregroundServiceType="microphone" />
-
-    <service
-      android:name=".automations.AuraAutomationAccessibilityService"
-      android:exported="true"
-      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-      <intent-filter>
-        <action android:name="android.accessibilityservice.AccessibilityService" />
-      </intent-filter>
-      <meta-data
-        android:name="android.accessibilityservice"
-        android:resource="@xml/aura_automation_accessibility_service" />
-    </service>
 
     <receiver
       android:name=".voice.BootReceiver"
@@ -106,6 +97,11 @@
 
     <receiver
       android:name=".automations.AutomationFlowContinuationReceiver"
+      android:enabled="true"
+      android:exported="false" />
+
+    <receiver
+      android:name=".automations.AutomationCheckpointDecisionReceiver"
       android:enabled="true"
       android:exported="false" />
   </application>

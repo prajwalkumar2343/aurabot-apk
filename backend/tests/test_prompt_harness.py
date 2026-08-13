@@ -79,6 +79,8 @@ def test_ai_harness_rules_affect_mini_app_prompts():
     assert "Use progressive disclosure for skills" in system
     assert "### mini_app_builder" in system
     assert "call create_mini_app with a specific professional mini_app_prompt" in system
+    assert "Every mini app bundle must include that widget" in system
+    assert "required Aura home widget representing the app's main purpose" in system
 
 
 def test_planning_mode_auto_enables_plan_for_complex_requests():
@@ -138,3 +140,12 @@ def test_repair_needed_detects_mini_app_creation_without_tool_call():
     reason = repair_needed("Done, created it.", "Done, created it.", [], chat)
 
     assert reason == "reply claimed a local action without calling the matching tool"
+
+
+def test_repair_needed_detects_invalid_structured_action():
+    chat = ChatIn(message="make a lunch widget", api_key="key", model="model")
+    raw = '{"reply":"Done.","actions":[{"type":"present_widget","widget":{"kind":"food_order"}}]}'
+
+    reason = repair_needed(raw, "Done.", [], chat)
+
+    assert reason == "response contained an unsupported or invalid action structure"

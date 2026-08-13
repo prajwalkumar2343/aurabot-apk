@@ -12,9 +12,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AutomationEntity::class,
         AutomationRunLogEntity::class,
         AutomationRunEntity::class,
-        AutomationStepRunEntity::class
+        AutomationStepRunEntity::class,
+        AutomationEventEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AutomationDatabase : RoomDatabase() {
@@ -29,7 +30,7 @@ abstract class AutomationDatabase : RoomDatabase() {
                     context.applicationContext,
                     AutomationDatabase::class.java,
                     "aura_automations.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
             }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -86,6 +87,30 @@ abstract class AutomationDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE automation_runs ADD COLUMN automationRevision TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS automation_events (
+                        deliveryId TEXT NOT NULL PRIMARY KEY,
+                        automationId TEXT,
+                        eventType TEXT NOT NULL,
+                        occurredAt INTEGER NOT NULL,
+                        valuesJson TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_automation_events_automationId_createdAt " +
+                        "ON automation_events(automationId, createdAt)"
                 )
             }
         }

@@ -73,6 +73,8 @@ def transcribe_audio(
     provider: Optional[str] = None
 ) -> str:
     try:
+        if len(audio_base64) > MAX_AUDIO_BYTES * 2:
+            raise HTTPException(status_code=413, detail="Audio payload is too large")
         base64_data, decoded = _decode_audio_base64(audio_base64)
         _validate_audio_payload(mime_type, decoded)
     except Exception as e:

@@ -9,16 +9,42 @@ android {
     namespace = "com.aura.app"
     compileSdk = 36
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("sideload") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "DIRECT_SMS_AVAILABLE", "false")
+        }
+        create("unrestricted") {
+            dimension = "distribution"
+            versionNameSuffix = "-unrestricted"
+            buildConfigField("boolean", "DIRECT_SMS_AVAILABLE", "true")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.aura.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 4
+        versionName = "1.0.3"
 
-        val backendUrl = providers.gradleProperty("auraBackendUrl").orElse("http://10.0.2.2:8001")
+        val stalkyApiUrl = providers.gradleProperty("stalkyApiUrl").orElse("")
+        val supabaseUrl = providers.gradleProperty("stalkySupabaseUrl").orElse("")
+        val supabasePublishableKey = providers.gradleProperty("stalkySupabasePublishableKey").orElse("")
+        val googleWebClientId = providers.gradleProperty("stalkyGoogleWebClientId").orElse("")
         val backgroundDefault = providers.gradleProperty("auraEnableBackgroundListeningDefault").orElse("false")
-        buildConfigField("String", "AURA_BACKEND_URL", "\"${backendUrl.get()}\"")
+        fun quoteBuildConfig(value: String): String =
+            "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        buildConfigField("String", "STALKY_API_URL", quoteBuildConfig(stalkyApiUrl.get()))
+        buildConfigField("String", "STALKY_SUPABASE_URL", quoteBuildConfig(supabaseUrl.get()))
+        buildConfigField(
+            "String",
+            "STALKY_SUPABASE_PUBLISHABLE_KEY",
+            quoteBuildConfig(supabasePublishableKey.get())
+        )
+        buildConfigField("String", "STALKY_GOOGLE_WEB_CLIENT_ID", quoteBuildConfig(googleWebClientId.get()))
         buildConfigField("boolean", "AURA_ENABLE_BACKGROUND_LISTENING_DEFAULT", backgroundDefault.get())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -85,14 +111,23 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.6")
     implementation("androidx.room:room-ktx:2.8.4")
     implementation("androidx.room:room-runtime:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // MongoDB 3.12 is the final official Java driver line with Android support.
+    // Local mode rejects SRV URIs and MongoDB Server 8.1+ because that legacy
+    // transport cannot safely support either on Android.
+    implementation("org.mongodb:mongodb-driver-sync:3.12.14")
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
@@ -107,5 +142,46 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-web:3.7.0")
+    androidTestImplementation("androidx.work:work-testing:2.11.2")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+}
+
+val validateReleaseBackendUrl = tasks.register("validateReleaseBackendUrl") {
+    group = "verification"
+    description = "Ensures release builds have secure Stalky and Supabase configuration."
+    doLast {
+        val releaseApiUrl = providers.gradleProperty("stalkyApiUrl").orNull?.trim().orEmpty()
+        if (!releaseApiUrl.startsWith("https://")) {
+            throw org.gradle.api.GradleException(
+                "Release builds require -PstalkyApiUrl=https://...; the checked-in build has no secure default."
+            )
+        }
+        val releaseSupabaseUrl = providers.gradleProperty("stalkySupabaseUrl")
+            .orNull?.trim().orEmpty()
+        if (!releaseSupabaseUrl.startsWith("https://")) {
+            throw org.gradle.api.GradleException(
+                "Release builds require -PstalkySupabaseUrl=https://<project>.supabase.co."
+            )
+        }
+        val releasePublishableKey = providers.gradleProperty("stalkySupabasePublishableKey")
+            .orNull?.trim().orEmpty()
+        if (releasePublishableKey.isEmpty() || releasePublishableKey.any(Char::isWhitespace)) {
+            throw org.gradle.api.GradleException(
+                "Release builds require -PstalkySupabasePublishableKey=<public key>."
+            )
+        }
+        val releaseGoogleWebClientId = providers.gradleProperty("stalkyGoogleWebClientId")
+            .orNull?.trim().orEmpty()
+        if (!releaseGoogleWebClientId.endsWith(".apps.googleusercontent.com")) {
+            throw org.gradle.api.GradleException(
+                "Release builds require -PstalkyGoogleWebClientId=<web OAuth client id>."
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(validateReleaseBackendUrl)
+    }
 }

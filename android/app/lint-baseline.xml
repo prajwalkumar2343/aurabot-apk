@@ -13,17 +13,6 @@
     </issue>
 
     <issue
-        id="InvalidFragmentVersionForActivityResult"
-        message="Upgrade Fragment version to at least 1.3.0."
-        errorLine1="        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/LauncherActivity.kt"
-            line="30"
-            column="9"/>
-    </issue>
-
-    <issue
         id="RedundantLabel"
         message="Redundant label can be removed"
         errorLine1="      android:label=&quot;@string/app_name&quot;"
@@ -102,17 +91,6 @@
 
     <issue
         id="NewerVersionAvailable"
-        message="A newer version of com.squareup.okhttp3:logging-interceptor than 5.3.2 is available: 5.4.0"
-        errorLine1="    implementation(&quot;com.squareup.okhttp3:logging-interceptor:5.3.2&quot;)"
-        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="build.gradle.kts"
-            line="96"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
         message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.10.2 is available: 1.11.0"
         errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2&quot;)"
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -145,65 +123,10 @@
     </issue>
 
     <issue
-        id="SetJavaScriptEnabled"
-        message="Using `setJavaScriptEnabled` can introduce XSS vulnerabilities into your application, review carefully"
-        errorLine1="                        settings.javaScriptEnabled = true"
-        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="2036"
-            column="25"/>
-    </issue>
-
-    <issue
         id="ObsoleteSdkInt"
         message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 26. Merge all the resources in this folder into `mipmap-anydpi`.">
         <location
             file="src/main/res/mipmap-anydpi-v26"/>
-    </issue>
-
-    <issue
-        id="AutoboxingStateCreation"
-        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
-        errorLine1="        remember { mutableStateOf(1f) }"
-        errorLine2="                   ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="989"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="AutoboxingStateCreation"
-        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
-        errorLine1="    var step by remember { mutableStateOf(1) }"
-        errorLine2="                           ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="4100"
-            column="28"/>
-    </issue>
-
-    <issue
-        id="AutoboxingStateCreation"
-        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
-        errorLine1="        var tiltX by remember { mutableStateOf(0f) }"
-        errorLine2="                                ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5618"
-            column="33"/>
-    </issue>
-
-    <issue
-        id="AutoboxingStateCreation"
-        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
-        errorLine1="        var tiltY by remember { mutableStateOf(0f) }"
-        errorLine2="                                ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5619"
-            column="33"/>
     </issue>
 
     <issue
@@ -428,39 +351,6 @@
         message="Misleading file extension; named `.webp` but the file format is `png`">
         <location
             file="src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `String.toColorInt` instead?"
-        errorLine1="        Color(android.graphics.Color.parseColor(value))"
-        errorLine2="              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="3178"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `String.toUri` instead?"
-        errorLine1="                        Uri.parse(&quot;package:${context.packageName}&quot;)"
-        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5296"
-            column="25"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `String.toUri` instead?"
-        errorLine1="            val uri = Uri.parse(uriString)"
-        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/aura/app/ui/AuraLauncherApp.kt"
-            line="5335"
-            column="23"/>
     </issue>
 
 </issues>

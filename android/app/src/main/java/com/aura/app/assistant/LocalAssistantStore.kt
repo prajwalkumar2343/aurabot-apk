@@ -17,13 +17,21 @@ private data class LocalAssistantState(
     val todos: List<TodoResponse> = emptyList()
 )
 
-class LocalAssistantStore(private val context: Context) {
+internal interface AssistantLocalStore {
+    suspend fun memories(): List<MemoryResponse>
+    suspend fun createMemory(title: String, content: String): MemoryResponse
+    suspend fun todos(): List<TodoResponse>
+    suspend fun createTodo(title: String): TodoResponse
+    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse
+}
+
+class LocalAssistantStore(private val context: Context) : AssistantLocalStore {
     private val gson = Gson()
     private val stateKey = stringPreferencesKey("local_state")
 
-    suspend fun memories(): List<MemoryResponse> = readState().memories
+    override suspend fun memories(): List<MemoryResponse> = readState().memories
 
-    suspend fun createMemory(title: String, content: String): MemoryResponse {
+    override suspend fun createMemory(title: String, content: String): MemoryResponse {
         val memory = MemoryResponse(
             id = UUID.randomUUID().toString(),
             title = title,
@@ -34,9 +42,9 @@ class LocalAssistantStore(private val context: Context) {
         return memory
     }
 
-    suspend fun todos(): List<TodoResponse> = readState().todos
+    override suspend fun todos(): List<TodoResponse> = readState().todos
 
-    suspend fun createTodo(title: String): TodoResponse {
+    override suspend fun createTodo(title: String): TodoResponse {
         val todo = TodoResponse(
             id = UUID.randomUUID().toString(),
             title = title,
@@ -47,7 +55,7 @@ class LocalAssistantStore(private val context: Context) {
         return todo
     }
 
-    suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse {
+    override suspend fun updateTodoDone(id: String, done: Boolean): TodoResponse {
         var updated: TodoResponse? = null
         updateState { state ->
             val todos = state.todos.map { todo ->

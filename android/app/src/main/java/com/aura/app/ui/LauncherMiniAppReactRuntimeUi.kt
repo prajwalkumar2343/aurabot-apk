@@ -276,6 +276,8 @@ fun MiniAppReactRuntimeScreen(
                         settings.allowFileAccess = false
                         settings.allowContentAccess = false
                         settings.mediaPlaybackRequiresUserGesture = true
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.setSupportMultipleWindows(false)
                         webViewClient = AuraMiniAppWebViewClient()
                         addJavascriptInterface(
                             AuraMiniAppWebBridge(
@@ -313,6 +315,7 @@ private class AuraMiniAppWebBridge(
 ) {
     @JavascriptInterface
     fun postMessage(raw: String) {
+        if (raw.length > MaxBridgeMessageChars) return
         scope.launch {
             val response = runCatching {
                 val request = gson.fromJson(raw, MiniAppBridgeRequest::class.java)
@@ -347,25 +350,17 @@ private class AuraMiniAppWebBridge(
 }
 
 private class AuraMiniAppWebViewClient : WebViewClient() {
-    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
-        request?.url?.let { uri ->
-            uri.scheme == "http" || uri.scheme == "https"
-        } == true && request?.url?.host != MINI_APP_ASSET_HOST
+    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = true
 
     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
         val uri = request?.url ?: return super.shouldInterceptRequest(view, request)
-        val isRemote = uri.scheme == "http" || uri.scheme == "https"
-        val isTrustedShell = uri.host == MINI_APP_ASSET_HOST
-        return if (isRemote && !isTrustedShell) {
+        return if (uri.scheme == "http" || uri.scheme == "https") {
             WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
         } else {
             super.shouldInterceptRequest(view, request)
         }
     }
 
-    companion object {
-        private const val MINI_APP_ASSET_HOST = "appassets.androidplatform.net"
-    }
 }
 
 private data class MiniAppBridgeRequest(
@@ -411,6 +406,7 @@ private fun buildMiniAppReactHtml(bundle: MiniAppBundle): String {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; img-src data:; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
   <style>
     html, body, #root { min-height: 100%; margin: 0; }
     body { background: #f7f8fb; overflow-x: hidden; }
@@ -471,3 +467,5 @@ private fun buildMiniAppReactHtml(bundle: MiniAppBundle): String {
 }
 
 private fun String.escapeScriptEnd(): String = replace("</script", "<\\/script", ignoreCase = true)
+
+private const val MaxBridgeMessageChars = 32_000

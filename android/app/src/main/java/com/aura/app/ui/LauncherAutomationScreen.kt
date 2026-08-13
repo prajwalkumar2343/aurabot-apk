@@ -157,11 +157,16 @@ import androidx.navigation.compose.rememberNavController
 import com.aura.app.AppContainer
 import com.aura.app.automations.AutomationActionTypeSets
 import com.aura.app.automations.AutomationActionTypes
+import com.aura.app.automations.AutomationActionMetadata
 import com.aura.app.automations.AutomationEvents
+import com.aura.app.automations.AutomationFlowStep
+import com.aura.app.automations.AutomationFlowStepTypes
 import com.aura.app.automations.AutomationPermissionStatus
 import com.aura.app.automations.AutomationRunLog
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.automations.AutomationTriggerTypes
+import com.aura.app.automations.RetiredAutomationActionTypes
+import com.aura.app.automations.hasRetiredAutomationActions
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.DEFAULT_GEMINI_MODEL
 import com.aura.app.assistant.LlmProvider
@@ -230,12 +235,21 @@ fun AutomationsScreen(
     }
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh automations")
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .bounceClick(onClick = onRefresh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh automations", tint = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -295,8 +309,9 @@ private fun AutomationCard(
     onOpenPermissions: (AutomationPermissionStatus?) -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
+    val isRetired = automation.hasRetiredAutomationActions()
     val missingPermissions = permissionStatuses.filterNot { it.granted }
-    val canEnable = missingPermissions.isEmpty()
+    val canEnable = !isRetired && missingPermissions.isEmpty()
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -334,15 +349,17 @@ private fun AutomationCard(
                     )
                 }
                 Switch(
-                    checked = automation.enabled,
+                    checked = automation.enabled && !isRetired,
                     onCheckedChange = { checked ->
-                        if (checked && !canEnable) {
-                            onOpenPermissions(missingPermissions.firstOrNull())
-                        } else {
-                            onSetEnabled(automation.id, checked)
+                        if (!isRetired) {
+                            if (checked && !canEnable) {
+                                onOpenPermissions(missingPermissions.firstOrNull())
+                            } else {
+                                onSetEnabled(automation.id, checked)
+                            }
                         }
                     },
-                    enabled = automation.enabled || canEnable
+                    enabled = !isRetired && (automation.enabled || canEnable)
                 )
             }
 
@@ -354,13 +371,54 @@ private fun AutomationCard(
                 )
             }
 
+            if (automation.createdBy == "assistant" && !automation.enabled) {
+                Text(
+                    "LLM-AUTHORED DRAFT · REVIEW EVERY STEP BEFORE ENABLING",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black
+                )
+            }
+            if (isRetired) {
+                Text(
+                    "UNSUPPORTED · CROSS-APP UI AUTOMATION WAS REMOVED · DELETE AND RECREATE",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black
+                )
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 AutomationChip(text = automation.trigger.type.uppercase(), icon = automationIcon(automation))
                 automation.flow?.steps?.takeIf { it.isNotEmpty() }?.let { steps ->
                     AutomationChip(text = "FLOW ${steps.size}", icon = Icons.Rounded.AutoAwesome)
                 }
-                automation.actions.take(2).forEach { action ->
+                val effectiveActions = automation.flow?.steps.orEmpty().mapNotNull { it.action }
+                    .ifEmpty { automation.actions }
+                effectiveActions.take(2).forEach { action ->
                     AutomationChip(text = action.type.replace('_', ' ').uppercase(), icon = actionIcon(action.type))
+                }
+            }
+
+            automation.flow?.steps?.takeIf { it.isNotEmpty() }?.let { steps ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("EXECUTION PLAN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                    steps.take(8).forEachIndexed { index, step ->
+                        Text(
+                            "${index + 1}. ${automationStepSummary(step)}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (steps.size > 8) {
+                        Text(
+                            "+ ${steps.size - 8} more steps",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
             }
 
@@ -394,23 +452,35 @@ private fun AutomationCard(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(
-                    onClick = { onRunNow(automation.id) },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .bounceClick { onRunNow(automation.id) }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("TEST")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Spacer(Modifier.width(6.dp))
+                        Text("TEST", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
-                OutlinedButton(
-                    onClick = { onDelete(automation.id) },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline), RoundedCornerShape(14.dp))
+                        .bounceClick { onDelete(automation.id) }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("DELETE")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text("DELETE", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
@@ -464,8 +534,12 @@ private fun AutomationPermissionRow(
             )
         }
         if (!status.granted) {
-            TextButton(onClick = onOpen, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                Text("OPEN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onOpen)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("OPEN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -482,8 +556,6 @@ private fun actionIcon(actionType: String): ImageVector =
     when (actionType) {
         in AutomationActionTypeSets.Message -> Icons.Rounded.Mail
         AutomationActionTypes.Notify -> Icons.Rounded.Refresh
-        AutomationActionTypes.OpenApp -> Icons.Rounded.Apps
-        in AutomationActionTypeSets.CrossApp -> Icons.Rounded.TouchApp
         else -> Icons.Rounded.AutoAwesome
     }
 
@@ -502,4 +574,33 @@ private fun automationSummary(automation: AutomationSpec): String =
     }.let { summary ->
         val stepCount = automation.flow?.steps.orEmpty().size
         if (stepCount > 0) "$summary · $stepCount-step flow" else summary
+    }
+
+private fun automationStepSummary(step: AutomationFlowStep): String =
+    when (step.type) {
+        AutomationFlowStepTypes.Checkpoint -> "APPROVAL CHECKPOINT"
+        AutomationFlowStepTypes.Wait -> "WAIT ${step.waitMillis}ms"
+        AutomationFlowStepTypes.Condition -> {
+            val condition = step.condition
+            "CHECK ${condition?.key.orEmpty()} ${condition?.operator.orEmpty()} ${condition?.value.orEmpty()}".trim()
+        }
+        AutomationFlowStepTypes.Action -> {
+            step.action?.let { action ->
+                if (action.type in RetiredAutomationActionTypes.All) {
+                    return "UNSUPPORTED REMOVED ACTION"
+                }
+                val resource = listOfNotNull(
+                    action.recipientAddress?.takeIf { it.isNotBlank() }?.let { "recipient $it" },
+                    action.metadata[AutomationActionMetadata.PackageName]?.takeIf { it.isNotBlank() },
+                    action.metadata[AutomationActionMetadata.AppQuery]?.takeIf { it.isNotBlank() },
+                    action.metadata[AutomationActionMetadata.ViewId]?.takeIf { it.isNotBlank() },
+                    action.metadata[AutomationActionMetadata.ContentDescription]?.takeIf { it.isNotBlank() },
+                    action.metadata[AutomationActionMetadata.Text]?.takeIf { it.isNotBlank() },
+                    action.messageTemplate?.takeIf { it.isNotBlank() }
+                ).joinToString(" · ")
+                action.type.replace('_', ' ').uppercase() +
+                    resource.takeIf { it.isNotBlank() }?.let { " — $it" }.orEmpty()
+            } ?: "INVALID ACTION"
+        }
+        else -> "UNSUPPORTED STEP ${step.type}"
     }

@@ -230,12 +230,35 @@ fun ModelsScreen(
 ) {
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)) {
-                Text("← BACK", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .bounceClick(showRipple = true, onClick = onBack)
+                    .padding(8.dp)
+            ) {
+                Text("← BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             }
         }
         Spacer(Modifier.height(10.dp))
         Header("MODELS", "Configure LLM providers, API keys, and model parameters.")
+        if (state.session.serviceMode == "managed") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("AURA MANAGED", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Your Google account uses Aura's managed Gemini service. There is no API key or database connection to configure on this device.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            return@ScreenShell
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -261,17 +284,21 @@ fun ModelsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LlmProvider.entries.forEach { provider ->
                             val selected = state.llmSettings.provider == provider
-                            FilledTonalButton(
-                                onClick = { onProviderSelected(provider) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface,
-                                    contentColor = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surface)
+                                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)), RoundedCornerShape(16.dp))
+                                    .bounceClick { onProviderSelected(provider) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(provider.label.uppercase(), fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = provider.label.uppercase(),
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                     }
@@ -304,6 +331,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.googleApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.googleModel,
                         onValueChange = onGoogleModelChanged,
@@ -349,6 +383,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.openAiApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.openAiModel,
                         onValueChange = onOpenAiModelChanged,
@@ -394,6 +435,13 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    state.llmSettings.openRouterApiKeyError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = state.llmSettings.openRouterModel,
                         onValueChange = onOpenRouterModelChanged,
@@ -410,16 +458,23 @@ fun ModelsScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     )
-                    Button(
-                        onClick = onLoadOpenRouterModels,
-                        enabled = !state.loadingModels,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.onBackground,
-                            contentColor = MaterialTheme.colorScheme.background
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (state.loadingModels) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onBackground)
+                            .then(
+                                if (!state.loadingModels) Modifier.bounceClick(onClick = onLoadOpenRouterModels)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(if (state.loadingModels) "LOADING" else "LOAD MODELS", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (state.loadingModels) "LOADING" else "LOAD MODELS",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.background
+                        )
                     }
                 }
                 if (state.openRouterModels.isNotEmpty()) {
@@ -453,40 +508,25 @@ fun SettingsScreen(
     onSelectWallpaper: () -> Unit,
     onClearWallpaper: () -> Unit,
     onSetInteractionMode: (String) -> Unit,
+    onConfigureHistory: () -> Unit,
     onConfigureModels: () -> Unit,
     onConfigureTasks: () -> Unit,
     onConfigureMemories: () -> Unit,
     onConfigureAutomations: () -> Unit,
-    onQuitApp: () -> Unit,
-    onSetAppMode: (String) -> Unit
+    onConfigureDreams: () -> Unit,
+    onQuitApp: () -> Unit
 ) {
-    var showAppModeDialog by remember { mutableStateOf(false) }
-    var showPermissionExplanation by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("SETTINGS", "System, model, and voice configuration.")
+        Header("Settings", "History, privacy, models, and launcher preferences.")
         Column(
             modifier = Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Status card
-            val isDark = isSystemInDarkTheme()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF161618))
-                            else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
-                        )
-                    )
-                    .border(
-                        0.6.dp,
-                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
-                        RoundedCornerShape(20.dp)
-                    )
+                    .glassCard(RoundedCornerShape(16.dp))
                     .padding(18.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -494,14 +534,14 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF22C55E))
+                            .background(MaterialTheme.colorScheme.onSurface)
                     )
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text("LOCAL-FIRST MODE", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Aura Home", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            "Data stays on this device.",
+                            "Private by default. Your launcher data stays on this device.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -511,6 +551,13 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(8.dp))
             SettingsSectionLabel("AI & Data")
+
+            SettingsRow(
+                title = "Conversation history",
+                subtitle = "Review recent requests, results, and agent responses.",
+                icon = Icons.Rounded.GraphicEq,
+                onClick = onConfigureHistory
+            )
 
             SettingsRow(
                 title = "Models",
@@ -536,31 +583,22 @@ fun SettingsScreen(
                 icon = Icons.Rounded.AutoAwesome,
                 onClick = onConfigureAutomations
             )
+            SettingsRow(
+                title = "Aura Dreams",
+                subtitle = "Private nightly analysis with approval-gated improvements.",
+                icon = Icons.Rounded.AutoAwesome,
+                onClick = onConfigureDreams
+            )
 
             Spacer(Modifier.height(8.dp))
             SettingsSectionLabel("System")
 
-            val currentModeLabel = when (state.session.appMode) {
-                "launcher" -> "Home Launcher"
-                "normal" -> "Normal App"
-                "overlay" -> "Always-On Assistant"
-                else -> "Home Launcher"
-            }
             SettingsRow(
-                title = "App Mode",
-                subtitle = currentModeLabel,
-                icon = Icons.Rounded.Apps,
-                onClick = { showAppModeDialog = true }
+                title = "Default launcher",
+                subtitle = "Open Android Home settings.",
+                icon = Icons.Rounded.Home,
+                onClick = onOpenHomeSettings
             )
-
-            if (state.session.appMode == "launcher") {
-                SettingsRow(
-                    title = "Default launcher",
-                    subtitle = "Open Android Home settings.",
-                    icon = Icons.Rounded.Home,
-                    onClick = onOpenHomeSettings
-                )
-            }
 
             SettingsRow(
                 title = "Permissions",
@@ -581,21 +619,19 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             SettingsSectionLabel("Appearance")
 
-            if (state.session.appMode == "launcher") {
+            SettingsRow(
+                title = "Wallpaper",
+                subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active" else "None set",
+                icon = Icons.Rounded.Image,
+                onClick = onSelectWallpaper
+            )
+            if (state.session.wallpaperUri != null) {
                 SettingsRow(
-                    title = "Wallpaper",
-                    subtitle = if (state.session.wallpaperUri != null) "Custom wallpaper active" else "None set",
-                    icon = Icons.Rounded.Image,
-                    onClick = onSelectWallpaper
+                    title = "Clear wallpaper",
+                    subtitle = "Reset to default background.",
+                    icon = Icons.Rounded.Delete,
+                    onClick = onClearWallpaper
                 )
-                if (state.session.wallpaperUri != null) {
-                    SettingsRow(
-                        title = "Clear wallpaper",
-                        subtitle = "Reset to default background.",
-                        icon = Icons.Rounded.Delete,
-                        onClick = onClearWallpaper
-                    )
-                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -614,18 +650,13 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    colors = if (isDark) listOf(Color(0xFF22C55E).copy(alpha = 0.15f), Color(0xFF16A34A).copy(alpha = 0.08f))
-                                    else listOf(Color(0xFF22C55E).copy(alpha = 0.12f), Color(0xFF16A34A).copy(alpha = 0.05f))
-                                )
-                            ),
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Mic,
                             contentDescription = null,
-                            tint = Color(0xFF22C55E),
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -654,106 +685,4 @@ fun SettingsScreen(
         }
     }
 
-    if (showAppModeDialog) {
-        AlertDialog(
-            onDismissRequest = { showAppModeDialog = false },
-            title = { Text("SELECT APP MODE") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Choose how Aura runs on this device:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            onSetAppMode("launcher")
-                            showAppModeDialog = false
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (state.session.appMode == "launcher") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Home Launcher", fontWeight = FontWeight.Bold)
-                            Text("Operate as default system home screen.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            onSetAppMode("normal")
-                            showAppModeDialog = false
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (state.session.appMode == "normal") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Normal App", fontWeight = FontWeight.Bold)
-                            Text("Run as a standard standalone assistant application.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            val overlayGranted = android.provider.Settings.canDrawOverlays(context)
-                            if (overlayGranted) {
-                                onSetAppMode("overlay")
-                                showAppModeDialog = false
-                            } else {
-                                showPermissionExplanation = true
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (state.session.appMode == "overlay") MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Always-On Background Assistant", fontWeight = FontWeight.Bold)
-                            Text("Run always in background; auto-overlay on speech (requires display overlay permission).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showAppModeDialog = false }) {
-                    Text("CANCEL")
-                }
-            }
-        )
-    }
-
-    if (showPermissionExplanation) {
-        AlertDialog(
-            onDismissRequest = { showPermissionExplanation = false },
-            title = { Text("OVERLAY PERMISSION REQUIRED") },
-            text = {
-                Text("To pop up Aura instantly when speech is detected in the background, please grant the 'Display over other apps' permission in system settings.")
-            },
-            confirmButton = {
-                Button(onClick = {
-                    showPermissionExplanation = false
-                    showAppModeDialog = false
-                    onSetAppMode("overlay")
-                    val intent = Intent(
-                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:${context.packageName}")
-                    )
-                    startActivitySafely(context, intent)
-                }) {
-                    Text("GO TO SETTINGS")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPermissionExplanation = false }) {
-                    Text("CANCEL")
-                }
-            }
-        )
-    }
 }

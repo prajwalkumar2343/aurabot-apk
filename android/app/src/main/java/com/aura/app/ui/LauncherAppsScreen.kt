@@ -526,7 +526,7 @@ private fun AuraStoreSection(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
                             .background(primary.copy(alpha = 0.09f))
-                            .clickable { onInstall(bundle) }
+                            .bounceClick { onInstall(bundle) }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -610,7 +610,7 @@ private fun MiniAppIconCard(
                 )
             )
             .border(BorderStroke(1.dp, primary.copy(alpha = 0.18f)), RoundedCornerShape(24.dp))
-            .clickable { onOpen(miniApp) }
+            .bounceClick { onOpen(miniApp) }
             .padding(14.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {

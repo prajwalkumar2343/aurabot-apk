@@ -23,28 +23,12 @@ class AutomationPermissionStatusResolverTest {
     }
 
     @Test
-    fun statusesDetectAccessibilitySeparatelyFromRuntimePermissions() {
-        val disabled = resolver(accessibilityEnabled = false)
-            .statuses(setOf(AutomationPermissionPlanner.AccessibilityService))
-            .single()
-        val enabled = resolver(accessibilityEnabled = true)
-            .statuses(setOf(AutomationPermissionPlanner.AccessibilityService))
-            .single()
-
-        assertEquals("Accessibility service", disabled.label)
-        assertEquals(AutomationPermissionSettingsTarget.Accessibility, disabled.settingsTarget)
-        assertFalse(disabled.granted)
-        assertTrue(enabled.granted)
-    }
-
-    @Test
     fun statusesUseTargetedSettingsCategories() {
         val statuses = resolver().statuses(
             setOf(
                 Manifest.permission.POST_NOTIFICATIONS,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-                Manifest.permission.SEND_SMS,
-                AutomationPermissionPlanner.AccessibilityService
+                Manifest.permission.SEND_SMS
             )
         ).associateBy { it.permission }
 
@@ -60,19 +44,25 @@ class AutomationPermissionStatusResolverTest {
             AutomationPermissionSettingsTarget.Sms,
             statuses.getValue(Manifest.permission.SEND_SMS).settingsTarget
         )
-        assertEquals(
-            AutomationPermissionSettingsTarget.Accessibility,
-            statuses.getValue(AutomationPermissionPlanner.AccessibilityService).settingsTarget
+    }
+
+    @Test
+    fun plannerNeverAddsAccessibilityPermission() {
+        val spec = AutomationSpec(
+            name = "supported",
+            actions = listOf(AutomationAction(type = AutomationActionTypes.Notify))
         )
+
+        assertTrue(AutomationPermissionPlanner().requiredPermissions(spec).none {
+            it.contains("ACCESSIBILITY", ignoreCase = true)
+        })
     }
 
     private fun resolver(
         grantedRuntimePermissions: Set<String> = emptySet(),
-        notificationsEnabled: Boolean = true,
-        accessibilityEnabled: Boolean = false
+        notificationsEnabled: Boolean = true
     ) = AutomationPermissionStatusResolver(
         runtimePermissionGranted = { it in grantedRuntimePermissions },
-        notificationsEnabled = { notificationsEnabled },
-        accessibilityEnabled = { accessibilityEnabled }
+        notificationsEnabled = { notificationsEnabled }
     )
 }

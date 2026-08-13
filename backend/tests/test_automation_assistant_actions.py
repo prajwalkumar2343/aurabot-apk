@@ -162,29 +162,27 @@ def test_create_automation_tool_schema_bounds_spec_resources():
 def test_system_prompt_forbids_retries_for_irreversible_automation_actions():
     prompt = build_system_message(ChatIn(message="", api_key="", model="gemini-test"))
 
-    assert "Always use maxAttempts=1 for unconfirmed direct_sms and high-impact gestures" in prompt
+    assert "Always use maxAttempts=1 for unconfirmed direct_sms" in prompt
+    assert "Accessibility Service" not in prompt
+    assert "open_app" not in prompt
+    assert "tap_target" not in prompt
 
 
-def test_create_automation_tool_schema_supports_cross_app_actions():
+def test_system_prompt_keeps_llm_authored_automations_as_new_disabled_drafts():
+    prompt = build_system_message(ChatIn(message="", api_key="", model="gemini-test"))
+    create_automation = next(tool for tool in assistant_tool_definitions() if tool["name"] == "create_automation")
+    id_schema = create_automation["parameters"]["properties"]["automation_spec"]["properties"]["id"]
+
+    assert "new disabled drafts with a fresh local id" in prompt
+    assert "explicitly enable the draft" in prompt
+    assert "Always leave blank" in id_schema["description"]
+
+
+def test_create_automation_tool_schema_excludes_retired_cross_app_actions():
     tools = assistant_tool_definitions()
     create_automation = next(tool for tool in tools if tool["name"] == "create_automation")
 
     spec = create_automation["parameters"]["properties"]["automation_spec"]
     action_types = spec["properties"]["flow"]["properties"]["steps"]["items"]["properties"]["action"]["properties"]["type"]["enum"]
 
-    assert "open_app" in action_types
-    assert "wait_for_app" in action_types
-    assert "tap_text" in action_types
-    assert "type_text" in action_types
-    assert "wait_for_text" in action_types
-    assert "wait_for_target" in action_types
-    assert "wait_until_gone" in action_types
-    assert "wait_for_idle" in action_types
-    assert "tap_target" in action_types
-    assert "long_press_target" in action_types
-    assert "clear_text" in action_types
-    assert "scroll" in action_types
-    assert "scroll_until_target" in action_types
-    assert "swipe" in action_types
-    assert "inspect_screen" in action_types
-    assert "press_back" in action_types
+    assert action_types == ["notify", "draft_message", "eta_message", "direct_sms"]
