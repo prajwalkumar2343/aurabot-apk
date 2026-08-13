@@ -10,6 +10,7 @@ import com.aura.app.automations.AutomationPermissionPlanner
 import com.aura.app.automations.AutomationPermissionStatus
 import com.aura.app.automations.AutomationRunLog
 import com.aura.app.automations.AutomationSpec
+import com.aura.app.automations.toAssistantDraft
 import com.aura.app.apps.AppBlockRule
 import com.aura.app.apps.AppInfo
 import com.aura.app.assistant.AssistantMessage
@@ -23,6 +24,7 @@ import com.aura.app.assistant.MessageRole
 import com.aura.app.assistant.OpenRouterModelInfo
 import com.aura.app.assistant.TodoResponse
 import com.aura.app.assistant.UserResponse
+import com.aura.app.assistant.userFacingMessage
 import com.aura.app.miniapps.BuiltInMiniApps
 import com.aura.app.miniapps.MiniAppBundle
 import com.aura.app.miniapps.MiniAppEvolutionEngine
@@ -35,16 +37,25 @@ import com.aura.app.miniapps.MiniAppWidgetSnapshot
 import com.aura.app.miniapps.MiniAppWidgetCatalog
 import com.aura.app.session.SessionState
 import com.aura.app.voice.ListeningStatus
+import com.aura.app.widgets.AuraWidget
+import com.aura.app.widgets.AuraWidgetAction
+import com.aura.app.widgets.AuraWidgetActionDecision
+import com.aura.app.widgets.AuraWidgetActionType
+import com.aura.app.widgets.HostedAndroidWidget
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 data class LauncherUiState(
     val session: SessionState = SessionState(),
@@ -66,6 +77,8 @@ data class LauncherUiState(
     val miniApps: List<MiniAppInstall> = emptyList(),
     val homeMiniAppWidgets: List<MiniAppWidgetSnapshot> = emptyList(),
     val unavailableMiniAppWidgetCount: Int = 0,
+    val auraWidgets: List<AuraWidget> = emptyList(),
+    val hostedAndroidWidgets: List<HostedAndroidWidget> = emptyList(),
     val builtInMiniApps: List<MiniAppBundle> = BuiltInMiniApps.all,
     val activeMiniApp: MiniAppBundle? = null,
     val activeMiniAppRecords: List<MiniAppRecord> = emptyList(),
@@ -78,8 +91,13 @@ data class LauncherUiState(
     val loadingModels: Boolean = false,
     val status: ListeningStatus = ListeningStatus(),
     val loading: Boolean = false,
+    val agentRunId: String? = null,
+    val agentRunState: String? = null,
+    val agentRunPhase: String? = null,
+    val activeSubagents: Int = 0,
     val error: String? = null,
     val currentEmotion: String = "neutral",
+    val currentCreatedEmotion: String? = null,
     val isSpeaking: Boolean = false,
     val isDefaultLauncher: Boolean = false,
     val sessionLoaded: Boolean = false,
@@ -97,6 +115,7 @@ data class LauncherUiState(
     val recentMessages: List<AssistantMessage> = messages.takeLast(4)
 }
 
+private const val MAX_ASSISTANT_ACTIONS_PER_RESPONSE = 16
 class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     private val localState = MutableStateFlow(LauncherUiState())
     private val automationPermissionPlanner = AutomationPermissionPlanner()
@@ -131,23 +150,36 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         refreshAutomations()
         refreshCloud()
         observeVoiceStatus()
+        observeAuraWidgets()
     }
 
-    private fun updateEmotionFromReply(reply: String) {
-        val regex = """\{([a-zA-Z0-9_-]+)\}""".toRegex()
-        val match = regex.find(reply)
-        val emotion = match?.groupValues?.get(1)?.lowercase() ?: "neutral"
-        localState.update { it.copy(currentEmotion = emotion) }
+    private fun updateEmotionFromReply(
+        reply: String,
+        responseEmotion: String? = null,
+        responseCreatedEmotion: String? = null,
+    ) {
+        val direct = AuraEmotion.resolve(responseEmotion, responseCreatedEmotion)
+        val resolved = if (direct.createdEmotion != null || AuraEmotion.isKnownWireValue(responseEmotion)) {
+            direct
+        } else {
+            AuraEmotion.resolve(AuraEmotion.fromReplyTag(reply).wireValue, null)
+        }
+        localState.update {
+            it.copy(
+                currentEmotion = resolved.wireValue,
+                currentCreatedEmotion = resolved.createdEmotion,
+            )
+        }
     }
 
     fun refreshApps(force: Boolean = false) {
         viewModelScope.launch {
             val apps = container.appsRepository.loadLaunchableApps(force).toMutableList()
-            if (uiState.value.isDefaultLauncher) {
+            if (localState.value.isDefaultLauncher) {
                 apps.add(
                     AppInfo(
                         label = "Aurabot Settings",
-                        packageName = "com.aura.app.settings",
+                        packageName = AppInfo.AURA_SETTINGS_SHORTCUT_PACKAGE,
                         componentName = android.content.ComponentName("com.aura.app", "com.aura.app.SettingsActivity"),
                         icon = null
                     )
@@ -159,6 +191,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun launchIntent(app: AppInfo): Intent? {
+        if (app.isAuraSettingsShortcut) return null
         val block = uiState.value.appBlocks.firstOrNull { it.packageName == app.packageName && it.isActive() }
         if (block != null) {
             localState.update {
@@ -193,6 +226,55 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    private fun observeAuraWidgets() {
+        viewModelScope.launch {
+            try {
+                container.assistantRunSurfaceRepository.reconcileStartup()
+                container.auraWidgetRepository.reconcileStartup()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                localState.update {
+                    it.copy(error = error.userFacingMessage("Could not restore Aura widgets"))
+                }
+            }
+            while (true) {
+                delay(60_000)
+                try {
+                    container.auraWidgetRepository.expireWidgets()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    localState.update {
+                        it.copy(error = error.userFacingMessage("Could not refresh Aura widgets"))
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            container.auraWidgetRepository.visibleWidgets
+                .catch { error ->
+                    localState.update {
+                        it.copy(error = error.userFacingMessage("Could not load Aura widgets"))
+                    }
+                }
+                .collect { widgets ->
+                    localState.update { it.copy(auraWidgets = widgets) }
+                }
+        }
+        viewModelScope.launch {
+            container.auraWidgetRepository.hostedWidgets
+                .catch { error ->
+                    localState.update {
+                        it.copy(error = error.userFacingMessage("Could not load Android widgets"))
+                    }
+                }
+                .collect { widgets ->
+                    localState.update { it.copy(hostedAndroidWidgets = widgets) }
+                }
+        }
+    }
+
     private fun transcribeAndSend(audioBase64: String) {
         viewModelScope.launch {
             localState.update {
@@ -214,7 +296,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     localState.update { it.copy(loading = false, error = "Speech not recognized") }
                 }
             } catch (error: Exception) {
-                localState.update { it.copy(loading = false, error = error.message ?: "Transcription failed") }
+                localState.update {
+                    it.copy(loading = false, error = error.userFacingMessage("Transcription failed"))
+                }
             } finally {
                 transcribingAudioBase64 = null
                 container.voiceServiceController.clearLastRecordedAudio(audioBase64)
@@ -234,7 +318,13 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     attachedImageBase64 = null,
                     attachedImageMimeType = null,
                     loading = true,
+                    agentRunId = null,
+                    agentRunState = "queued",
+                    agentRunPhase = "admitted",
+                    activeSubagents = 0,
                     error = null,
+                    currentEmotion = AuraEmotion.Thinking.wireValue,
+                    currentCreatedEmotion = null,
                     messages = it.messages + AssistantMessage(MessageRole.User, if (message.isNotBlank()) message else "[Attached Image]")
                 )
             }
@@ -242,30 +332,54 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private suspend fun sendAssistantMessageInternal(message: String, imgBase64: String?, imgMime: String?) {
+    private suspend fun sendAssistantMessageInternal(
+        message: String,
+        imgBase64: String?,
+        imgMime: String?
+    ): Boolean {
+        var observedRunId: String? = null
         try {
             val bundles = uiState.value.miniApps.mapNotNull { container.miniAppRepository.bundle(it.id) }
             val response = container.assistantRepository.chat(
                 message = message,
                 sessionId = uiState.value.assistantSessionId,
+                memories = uiState.value.memories,
+                todos = uiState.value.todos,
                 apps = uiState.value.apps,
                 automations = container.automationRepository.list(),
                 miniApps = uiState.value.miniApps,
                 miniAppBundles = bundles,
                 image_base64 = imgBase64,
-                image_mime_type = imgMime
+                image_mime_type = imgMime,
+                onRunProgress = { progress ->
+                    observedRunId = progress.runId
+                    container.assistantRunSurfaceRepository.recordProgress(progress)
+                    localState.update {
+                        it.copy(
+                            agentRunId = progress.runId,
+                            agentRunState = progress.state,
+                            agentRunPhase = progress.phase,
+                            activeSubagents = progress.activeSubagents
+                        )
+                    }
+                }
             )
+            observedRunId?.let { runId ->
+                container.assistantRunSurfaceRepository.complete(runId, response)
+            }
             val actionReplies = applyChatActions(response.actions)
             localState.update {
                 it.copy(
                     loading = false,
+                    activeSubagents = 0,
                     assistantSessionId = response.session_id,
                     messages = it.messages +
                         AssistantMessage(MessageRole.Assistant, response.reply) +
                         actionReplies.map { text -> AssistantMessage(MessageRole.Assistant, text) }
                 )
             }
-            updateEmotionFromReply(response.reply)
+            clearTerminalRunStateAfterDelay(localState.value.agentRunId)
+            updateEmotionFromReply(response.reply, response.emotion, response.created_emotion)
             localState.update { it.copy(isSpeaking = true) }
             val acceptedSpeech = container.voiceSpeaker.speak(response.reply) {
                 localState.update { state -> state.copy(isSpeaking = false) }
@@ -273,22 +387,74 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
             if (!acceptedSpeech) {
                 localState.update { it.copy(isSpeaking = false) }
             }
+            return true
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
-            localState.update { it.copy(loading = false, error = error.message ?: "Assistant failed") }
+            observedRunId?.let { runId ->
+                runCatching {
+                    container.assistantRunSurfaceRepository.fail(
+                        runId,
+                        error.userFacingMessage("Assistant failed")
+                    )
+                }
+            }
+            localState.update {
+                it.copy(
+                    loading = false,
+                    agentRunState = if (it.agentRunState in setOf("failed", "interrupted", "cancelled")) {
+                        it.agentRunState
+                    } else {
+                        "failed"
+                    },
+                    agentRunPhase = if (it.agentRunPhase in setOf("failed", "interrupted", "cancelled")) {
+                        it.agentRunPhase
+                    } else {
+                        "failed"
+                    },
+                    activeSubagents = 0,
+                    currentEmotion = AuraEmotion.Concerned.wireValue,
+                    currentCreatedEmotion = null,
+                    error = error.userFacingMessage("Assistant failed")
+                )
+            }
+            clearTerminalRunStateAfterDelay(localState.value.agentRunId)
+            return false
+        }
+    }
+
+    private fun clearTerminalRunStateAfterDelay(runId: String?) {
+        viewModelScope.launch {
+            delay(2_000)
+            localState.update { state ->
+                if (state.agentRunId == runId && state.agentRunState in setOf(
+                        "completed", "failed", "interrupted", "cancelled"
+                    )
+                ) {
+                    state.copy(
+                        agentRunId = null,
+                        agentRunState = null,
+                        agentRunPhase = null,
+                        activeSubagents = 0
+                    )
+                } else {
+                    state
+                }
+            }
         }
     }
 
     fun logout() {
         viewModelScope.launch {
             container.assistantRepository.logout()
+            container.assistantRunSurfaceRepository.reconcileStartup()
+            val refreshError = reloadAssistantData()
             localState.update {
                 it.copy(
-                    memories = emptyList(),
-                    memoryAppProposals = emptyList(),
                     buildingMemoryAppProposalId = null,
-                    todos = emptyList(),
                     assistantSessionId = null,
-                    messages = listOf(AssistantMessage(MessageRole.Assistant, "Aura is back in local mode."))
+                    messages = listOf(AssistantMessage(MessageRole.Assistant, "Aura is back in local mode.")),
+                    error = refreshError
                 )
             }
         }
@@ -297,8 +463,19 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun register(email: String, password: String, name: String?, onResult: (Result<UserResponse>) -> Unit) {
         viewModelScope.launch {
             localState.update { it.copy(loading = true, error = null) }
-            val result = runCatching { container.assistantRepository.register(email, password, name) }
-            localState.update { it.copy(loading = false, error = result.exceptionOrNull()?.message) }
+            val result = userFacingResult("Could not create account") {
+                container.assistantRepository.register(email, password, name)
+            }
+            val refreshError = if (result.isSuccess) {
+                container.assistantRunSurfaceRepository.reconcileStartup()
+                reloadAssistantData()
+            } else null
+            localState.update {
+                it.copy(
+                    loading = false,
+                    error = result.exceptionOrNull()?.message ?: refreshError
+                )
+            }
             onResult(result)
         }
     }
@@ -306,29 +483,102 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun login(email: String, password: String, onResult: (Result<UserResponse>) -> Unit) {
         viewModelScope.launch {
             localState.update { it.copy(loading = true, error = null) }
-            val result = runCatching { container.assistantRepository.login(email, password) }
-            localState.update { it.copy(loading = false, error = result.exceptionOrNull()?.message) }
+            val result = userFacingResult("Could not sign in") {
+                container.assistantRepository.login(email, password)
+            }
+            val refreshError = if (result.isSuccess) {
+                container.assistantRunSurfaceRepository.reconcileStartup()
+                reloadAssistantData()
+            } else null
+            localState.update {
+                it.copy(
+                    loading = false,
+                    error = result.exceptionOrNull()?.message ?: refreshError
+                )
+            }
             onResult(result)
         }
     }
 
+    fun googleSignInChallenge(onResult: (Result<String>) -> Unit) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            val result = userFacingResult("Could not start Google sign-in") {
+                container.assistantRepository.googleSignInChallenge()
+            }
+            localState.update {
+                it.copy(loading = false, error = result.exceptionOrNull()?.message)
+            }
+            onResult(result)
+        }
+    }
+
+    fun loginWithGoogle(idToken: String, nonce: String, onResult: (Result<UserResponse>) -> Unit) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            val result = userFacingResult("Could not continue with Google") {
+                container.assistantRepository.loginWithGoogle(idToken, nonce)
+            }
+            val refreshError = if (result.isSuccess) {
+                container.assistantRunSurfaceRepository.reconcileStartup()
+                reloadAssistantData()
+            } else null
+            localState.update {
+                it.copy(loading = false, error = result.exceptionOrNull()?.message ?: refreshError)
+            }
+            onResult(result)
+        }
+    }
+
+    fun verifyLocalDatabase(
+        connectionUri: String,
+        databaseName: String,
+        onResult: (Result<Unit>) -> Unit
+    ) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            val result = userFacingResult("Could not connect to MongoDB") {
+                container.verifyLocalMongoConnection(connectionUri, databaseName)
+            }
+            localState.update {
+                it.copy(loading = false, error = result.exceptionOrNull()?.message)
+            }
+            onResult(result)
+        }
+    }
+
+    private suspend fun <T> userFacingResult(
+        fallback: String,
+        block: suspend () -> T
+    ): Result<T> = try {
+        Result.success(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(IllegalStateException(error.userFacingMessage(fallback), error))
+    }
+
     fun refreshCloud() {
         viewModelScope.launch {
-            try {
-                val memories = container.assistantRepository.memories()
-                val todos = container.assistantRepository.todos()
-                localState.update {
-                    it.copy(
-                        memories = memories,
-                        memoryAppProposals = suggestMemoryApps(memories),
-                        todos = todos,
-                        error = null
-                    )
-                }
-            } catch (error: Exception) {
-                localState.update { it.copy(error = error.message) }
-            }
+            localState.update { it.copy(error = reloadAssistantData()) }
         }
+    }
+
+    private suspend fun reloadAssistantData(): String? = try {
+        val memories = container.assistantRepository.memories()
+        val todos = container.assistantRepository.todos()
+        localState.update {
+            it.copy(
+                memories = memories,
+                memoryAppProposals = suggestMemoryApps(memories),
+                todos = todos
+            )
+        }
+        null
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        error.userFacingMessage("Could not refresh tasks and memories")
     }
 
     fun addTodo(title: String) {
@@ -339,7 +589,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 container.assistantRepository.createTodo(trimmed)
                 refreshCloud()
             } catch (error: Exception) {
-                localState.update { it.copy(error = error.message ?: "Could not add task") }
+                localState.update { it.copy(error = error.userFacingMessage("Could not add task")) }
             }
         }
     }
@@ -351,7 +601,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 container.assistantRepository.createMemory(title.trim(), content.trim())
                 refreshCloud()
             } catch (error: Exception) {
-                localState.update { it.copy(error = error.message ?: "Could not add memory") }
+                localState.update { it.copy(error = error.userFacingMessage("Could not add memory")) }
             }
         }
     }
@@ -403,7 +653,9 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     localState.update {
                         it.copy(
                             buildingMemoryAppProposalId = null,
-                            error = fallbackError.message ?: error.message ?: "Could not create mini app from memories"
+                            error = fallbackError.userFacingMessage(
+                                error.userFacingMessage("Could not create mini app from memories")
+                            )
                         )
                     }
                 }
@@ -413,7 +665,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun applyChatActions(actions: List<ChatAction>): List<String> {
         val replies = mutableListOf<String>()
-        actions.forEach { action ->
+        actions.take(MAX_ASSISTANT_ACTIONS_PER_RESPONSE).forEach { action ->
             when (action.type) {
                 "block_app" -> {
                     val durationMinutes = action.duration_minutes ?: 0
@@ -448,7 +700,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                             )
                             replies += "Created ${installed.name}."
                         } catch (error: Exception) {
-                            replies += error.message ?: "Could not create that mini app."
+                            replies += error.userFacingMessage("Could not create that mini app.")
                         }
                     }
                 }
@@ -495,23 +747,22 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                     if (spec == null) {
                         replies += "I need a complete automation plan to save that."
                     } else {
-                        val saved = container.automationRuntime.upsertAndRestore(spec.asAssistantDraft())
+                        val saved = container.automationRuntime.upsertAndRestore(spec.toAssistantDraft())
                         refreshAutomationState()
                         replies += "Saved ${saved.name} as a disabled draft. Review it and explicitly enable it when ready."
+                    }
+                }
+                "present_widget" -> {
+                    replies += if (action.widget == null) {
+                        "I could not create that home widget."
+                    } else {
+                        "Added it to your home screen."
                     }
                 }
             }
         }
         return replies
     }
-
-    private fun AutomationSpec.asAssistantDraft(): AutomationSpec = copy(
-        enabled = false,
-        actions = actions.map { action -> action.copy(requireConfirmation = true) },
-        flow = flow?.copy(steps = flow.steps.map { step ->
-            step.copy(action = step.action?.copy(requireConfirmation = true))
-        })
-    )
 
     fun refreshAutomations() {
         viewModelScope.launch {
@@ -875,6 +1126,109 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun runAuraWidgetAction(widgetId: String, actionId: String) {
+        runAuraWidgetMutation("Could not start widget action") {
+            when (val decision = container.auraWidgetRepository.requestAction(widgetId, actionId)) {
+                AuraWidgetActionDecision.Ignored,
+                is AuraWidgetActionDecision.NeedsConfirmation -> Unit
+                is AuraWidgetActionDecision.Execute -> executeAuraWidgetAction(decision.widget, decision.action)
+            }
+        }
+    }
+
+    fun confirmAuraWidgetAction(widgetId: String, actionId: String) {
+        runAuraWidgetMutation("Could not confirm widget action") {
+            when (val decision = container.auraWidgetRepository.confirmAction(widgetId, actionId)) {
+                AuraWidgetActionDecision.Ignored,
+                is AuraWidgetActionDecision.NeedsConfirmation -> Unit
+                is AuraWidgetActionDecision.Execute -> executeAuraWidgetAction(decision.widget, decision.action)
+            }
+        }
+    }
+
+    fun cancelAuraWidgetConfirmation(widgetId: String) {
+        runAuraWidgetMutation("Could not cancel widget confirmation") {
+            container.auraWidgetRepository.cancelConfirmation(widgetId)
+        }
+    }
+
+    fun dismissAuraWidget(widgetId: String) {
+        runAuraWidgetMutation("Could not dismiss widget") {
+            container.auraWidgetRepository.dismiss(widgetId)
+        }
+    }
+
+    private fun runAuraWidgetMutation(
+        fallbackMessage: String,
+        mutation: suspend () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                mutation()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                localState.update {
+                    it.copy(error = error.userFacingMessage(fallbackMessage))
+                }
+            }
+        }
+    }
+
+    private suspend fun executeAuraWidgetAction(widget: AuraWidget, action: AuraWidgetAction) {
+        try {
+            when (action.type) {
+                AuraWidgetActionType.AssistantMessage -> {
+                    val message = action.payload["message"]?.trim().orEmpty()
+                    if (message.isEmpty()) throw IllegalArgumentException("Widget action message is missing")
+                    localState.update {
+                        it.copy(
+                            loading = true,
+                            error = null,
+                            messages = it.messages + AssistantMessage(MessageRole.User, message)
+                        )
+                    }
+                    if (!sendAssistantMessageInternal(message, null, null)) {
+                        throw IllegalStateException("The assistant request did not complete")
+                    }
+                }
+                AuraWidgetActionType.OpenApp -> {
+                    val app = resolveApp(action.payload["package_name"], action.payload["app_query"])
+                        ?: throw IllegalArgumentException("The requested app is not installed")
+                    val intent = launchIntent(app)
+                        ?: throw IllegalStateException("Could not open ${app.label}")
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    container.appContext.startActivity(intent)
+                }
+                AuraWidgetActionType.Dismiss -> Unit
+            }
+            val completed = container.auraWidgetRepository.completeAction(widget.id, action.id)
+            if (completed) {
+                delay(1_500)
+                container.auraWidgetRepository.dismiss(widget.id)
+            }
+        } catch (error: CancellationException) {
+            withContext(NonCancellable) {
+                try {
+                    container.auraWidgetRepository.completeAction(
+                        widget.id,
+                        action.id,
+                        "Action interrupted. Verify the result before trying again."
+                    )
+                } catch (recoveryError: Exception) {
+                    error.addSuppressed(recoveryError)
+                }
+            }
+            throw error
+        } catch (error: Exception) {
+            container.auraWidgetRepository.completeAction(
+                widget.id,
+                action.id,
+                error.userFacingMessage("Widget action failed")
+            )
+        }
+    }
+
     fun createMiniAppRecord(miniAppId: String, recordType: String, values: Map<String, String>) {
         viewModelScope.launch {
             container.miniAppRepository.createRecord(miniAppId, recordType, values)
@@ -988,7 +1342,8 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun rollbackActiveMiniApp(version: Int) {
-        val id = uiState.value.activeMiniApp?.id ?: return
+        val activeMiniApp = uiState.value.activeMiniApp ?: return
+        val id = activeMiniApp.id
         viewModelScope.launch {
             try {
                 container.miniAppRepository.rollback(id, version)
@@ -1162,7 +1517,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 localState.update {
                     it.copy(
                         loadingModels = false,
-                        error = error.message ?: "Could not load OpenRouter models"
+                        error = error.userFacingMessage("Could not load OpenRouter models")
                     )
                 }
             }
@@ -1201,6 +1556,63 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     fun setOnboardingComplete(complete: Boolean) {
         viewModelScope.launch {
             container.sessionStore.setOnboardingComplete(complete)
+        }
+    }
+
+    fun completeOnboarding(configuration: OnboardingConfiguration) {
+        viewModelScope.launch {
+            localState.update { it.copy(loading = true, error = null) }
+            try {
+                validateOnboardingConfiguration(configuration)
+                container.sessionStore.setAppMode(configuration.appMode)
+                if (configuration.mode == OnboardingMode.Local) {
+                    container.verifyLocalMongoConnection(
+                        configuration.mongoConnectionUri,
+                        configuration.mongoDatabaseName
+                    )
+                    container.localModeSettingsStore.setMongoConnection(
+                        configuration.mongoConnectionUri,
+                        configuration.mongoDatabaseName
+                    )
+                    container.assistantRepository.setProvider(configuration.provider)
+                    when (configuration.provider) {
+                        LlmProvider.Gemini -> {
+                            container.assistantRepository.setGoogleApiKey(configuration.apiKey)
+                            container.assistantRepository.setGoogleModel(configuration.modelId)
+                        }
+                        LlmProvider.OpenAI -> {
+                            container.assistantRepository.setOpenAiApiKey(configuration.apiKey)
+                            container.assistantRepository.setOpenAiModel(configuration.modelId)
+                        }
+                        LlmProvider.OpenRouter -> {
+                            container.assistantRepository.setOpenRouterApiKey(configuration.apiKey)
+                            container.assistantRepository.setOpenRouterModel(configuration.modelId)
+                        }
+                    }
+                    // Switch modes only after all local secrets have been validated and stored.
+                    container.sessionStore.clearTokens()
+                } else {
+                    check(!container.sessionStore.accessToken().isNullOrBlank()) {
+                        "Complete Google sign-in before continuing."
+                    }
+                    container.sessionStore.setServiceMode("managed")
+                    container.assistantRepository.setProvider(LlmProvider.Gemini)
+                }
+                container.voiceServiceController.setBackgroundListening(
+                    configuration.backgroundListening
+                )
+                container.sessionStore.setOnboardingComplete(true)
+                localState.update { it.copy(loading = false) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                localState.update {
+                    it.copy(
+                        loading = false,
+                        error = error.userFacingMessage("Could not finish onboarding")
+                    )
+                }
+            }
         }
     }
 
