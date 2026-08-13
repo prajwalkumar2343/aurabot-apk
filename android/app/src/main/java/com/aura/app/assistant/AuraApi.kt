@@ -3,25 +3,14 @@ package com.aura.app.assistant
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface AuraApi {
-    @POST("auth/register")
-    suspend fun register(@Body request: RegisterRequest): LoginResponse
-
-    @POST("auth/login")
-    suspend fun login(@Body request: LoginRequest): LoginResponse
-
-    @POST("auth/logout")
-    suspend fun logout(@Body request: RefreshRequest)
-
-    @POST("auth/refresh")
-    suspend fun refresh(@Body request: RefreshRequest): RefreshResponse
-
     @GET("auth/me")
-    suspend fun me(): UserResponse
+    suspend fun me(): StalkyPrincipalResponse
 
     @GET("memories")
     suspend fun memories(): List<MemoryResponse>
@@ -46,6 +35,15 @@ interface AuraApi {
 
     @POST("assistant/chat")
     suspend fun chat(@Body request: ChatRequest): ChatResponse
+
+    @POST("assistant/runs")
+    suspend fun startAssistantRun(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body request: ChatRequest
+    ): AgentRunAccepted
+
+    @GET("assistant/runs/{runId}")
+    suspend fun assistantRun(@Path("runId") runId: String): AgentRunResponse
 
     @POST("providers/openrouter/models")
     suspend fun openRouterModels(@Body request: OpenRouterModelsRequest): OpenRouterModelsResponse
