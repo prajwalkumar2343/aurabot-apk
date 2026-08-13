@@ -13,7 +13,8 @@ class AutomationRuntime(
     private val scheduleScheduler: AutomationScheduleScheduler,
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
     private val executionRegistry: AutomationExecutionRegistry = AutomationExecutionRegistry(),
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val checkpointNotifier: AutomationCheckpointNotifier = NoOpAutomationCheckpointNotifier
 ) {
     private val restoreMutex = Mutex()
 
@@ -76,6 +77,8 @@ class AutomationRuntime(
                         activeRuns.forEach { run ->
                             captureCleanupFailure { flowContinuationScheduler.cancel(run.id) }
                                 ?.let(cleanupFailures::add)
+                            captureCleanupFailure { checkpointNotifier.cancel(run.id) }
+                                ?.let(cleanupFailures::add)
                         }
                         repository.delete(id)
                         captureCleanupFailure { geofenceRegistrar.remove(id) }?.let(cleanupFailures::add)
@@ -118,10 +121,41 @@ class AutomationRuntime(
     }
 
     private suspend fun restoreTriggersLocked() {
-        val automations = repository.list()
-        val failures = restoreConfiguredTriggerFailures(automations)
+        val retirement = repository.retireLegacyCrossAppAutomations()
+        val failures = retireLegacyAutomations(retirement.retiredIds)
+        repository.failInterruptedEvents()
+        val automations = retirement.automations
+        failures += restoreConfiguredTriggerFailures(automations)
         captureFailure { restoreFlowContinuations(automations) }?.let(failures::add)
         failures.throwIfNotEmpty()
+    }
+
+    private suspend fun retireLegacyAutomations(retiredIds: List<String>): MutableList<Exception> {
+        val failures = mutableListOf<Exception>()
+        retiredIds.forEach { automationId ->
+            repository.activeRuns(automationId).forEach { run ->
+                captureFailure { flowContinuationScheduler.cancel(run.id) }?.let(failures::add)
+                captureFailure { checkpointNotifier.cancel(run.id) }?.let(failures::add)
+                captureFailure {
+                    repository.updateRun(
+                        run.id,
+                        AutomationRunStatus.Skipped,
+                        "Cross-app UI automation was removed; this run was not resumed"
+                    )
+                }?.let(failures::add)
+                captureFailure {
+                    repository.log(
+                        automationId,
+                        run.eventType,
+                        AutomationRunStatus.Skipped,
+                        "Cross-app UI automation was removed; this run was not resumed"
+                    )
+                }?.let(failures::add)
+            }
+            captureFailure { geofenceRegistrar.remove(automationId) }?.let(failures::add)
+            captureFailure { scheduleScheduler.cancel(automationId) }?.let(failures::add)
+        }
+        return failures
     }
 
     private suspend fun restoreConfigurationOrRollback(
@@ -245,7 +279,23 @@ class AutomationRuntime(
                     )
                 }
             }
-            AutomationFlowStepTypes.Checkpoint -> flowContinuationScheduler.cancel(run.id)
+            AutomationFlowStepTypes.Checkpoint -> {
+                flowContinuationScheduler.cancel(run.id)
+                val checkpointStartedAt = waitingStep.completedAt ?: waitingStep.startedAt
+                val expiresAt = AutomationCheckpointPolicy.expiresAt(checkpointStartedAt, flowStep.metadata)
+                if (clock() > expiresAt) {
+                    terminalizeRun(run, AutomationRunStatus.Failed, "Automation approval expired")
+                } else {
+                    checkpointNotifier.present(
+                        AutomationCheckpointRequest(
+                            runId = run.id,
+                            automationName = spec.name,
+                            message = AutomationCheckpointPolicy.approvalMessage(spec, waitingStep.stepIndex),
+                            expiresAt = expiresAt
+                        )
+                    )
+                }
+            }
             else -> terminalizeRun(
                 run,
                 AutomationRunStatus.Failed,
@@ -255,16 +305,33 @@ class AutomationRuntime(
     }
 
     private suspend fun terminalizeInterruptedRun(run: AutomationRunRecord, mutationBarrierHeld: Boolean) {
-        val message = "Automation run was interrupted before completion"
+        val spec = repository.get(run.automationId)
+        val unsettledStep = repository.stepRuns(run.id)
+            .lastOrNull { it.status == AutomationRunStatus.Running && it.completedAt == null }
+        val ambiguousSideEffect = unsettledStep != null && spec
+            ?.effectiveSteps()
+            ?.getOrNull(unsettledStep.stepIndex)
+            ?.action
+            ?.hasAtMostOnceSideEffect() == true
+        val terminalStatus = if (ambiguousSideEffect) {
+            AutomationRunStatus.OutcomeUnknown
+        } else {
+            AutomationRunStatus.Failed
+        }
+        val message = if (ambiguousSideEffect) {
+            "Automation stopped during an irreversible action; verify the external result before retrying"
+        } else {
+            "Automation run was interrupted before completion"
+        }
         val terminalizeIfStillRunning: suspend () -> Unit = {
             repository.getRun(run.id)
                 ?.takeIf { it.status == AutomationRunStatus.Running }
-                ?.let { current -> terminalizeRun(current, AutomationRunStatus.Failed, message) }
+                ?.let { current -> terminalizeRun(current, terminalStatus, message) }
         }
         if (mutationBarrierHeld) {
             terminalizeIfStillRunning()
         } else {
-            executionRegistry.mutate(run.automationId, AutomationRunStatus.Failed, message) {
+            executionRegistry.mutate(run.automationId, terminalStatus, message) {
                 terminalizeIfStillRunning()
             }
         }
@@ -273,6 +340,7 @@ class AutomationRuntime(
     private suspend fun terminalizeRun(run: AutomationRunRecord, status: String, message: String) {
         repository.updateRun(run.id, status, message)
         flowContinuationScheduler.cancel(run.id)
+        checkpointNotifier.cancel(run.id)
         repository.log(run.automationId, run.eventType, status, message)
     }
 
@@ -287,6 +355,17 @@ class AutomationRuntime(
         val configuredWait = waitMillis.coerceAtLeast(0L)
         return (configuredWait - elapsedMillis).coerceIn(0L, configuredWait)
     }
+
+    private fun AutomationSpec.effectiveSteps(): List<AutomationFlowStep> =
+        flow?.steps?.takeIf { it.isNotEmpty() }
+            ?: actions.mapIndexed { index, action ->
+                AutomationFlowStep(
+                    id = "action-${index + 1}",
+                    name = action.title.orEmpty(),
+                    type = AutomationFlowStepTypes.Action,
+                    action = action
+                )
+            }
 
     private fun List<Exception>.throwIfNotEmpty() {
         if (isNotEmpty()) throw AutomationRestoreException(this)

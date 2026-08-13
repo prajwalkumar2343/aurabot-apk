@@ -25,6 +25,22 @@ class AutomationRepository(
     suspend fun listEnabled(): List<AutomationSpec> =
         dao.listEnabledAutomations().mapNotNull { it.spec() }
 
+    /** Disarms persisted rules authored for the removed privileged UI-control service. */
+    suspend fun retireLegacyCrossAppAutomations(): LegacyAutomationRetirement {
+        val retiredIds = mutableListOf<String>()
+        val automations = dao.listAutomations().mapNotNull { entity ->
+            val spec = entity.spec() ?: return@mapNotNull null
+            if (!spec.hasRetiredAutomationActions()) return@mapNotNull spec
+            val retiredAt = clock()
+            if (entity.enabled) {
+                dao.setEnabled(entity.id, enabled = false, updatedAt = retiredAt)
+            }
+            retiredIds += entity.id
+            spec.copy(enabled = false, updatedAt = retiredAt)
+        }
+        return LegacyAutomationRetirement(automations, retiredIds)
+    }
+
     suspend fun get(id: String): AutomationSpec? =
         dao.automation(id)?.spec()
 
@@ -56,6 +72,55 @@ class AutomationRepository(
 
     suspend fun lastTriggeredAt(id: String): Long? =
         dao.automation(id)?.lastTriggeredAt
+
+    suspend fun admitEvent(deliveryId: String, event: AutomationEvent): AutomationEventRecord {
+        val now = clock()
+        dao.insertEvent(
+            AutomationEventEntity(
+                deliveryId = deliveryId,
+                automationId = event.automationId,
+                eventType = event.type,
+                occurredAt = event.occurredAt,
+                valuesJson = gson.toJson(event.values),
+                status = AutomationEventStatus.Queued,
+                message = "Automation event admitted",
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+        return requireNotNull(dao.event(deliveryId)) { "Automation event admission was not persisted" }.record()
+    }
+
+    suspend fun claimEvent(deliveryId: String): Boolean =
+        dao.claimEvent(deliveryId, "Automation event execution started", clock()) == 1
+
+    suspend fun settleEvent(deliveryId: String, status: String, message: String) {
+        require(status in setOf(AutomationEventStatus.Succeeded, AutomationEventStatus.Failed)) {
+            "Automation event terminal status is invalid"
+        }
+        val automationId = dao.event(deliveryId)?.automationId
+        dao.settleEvent(deliveryId, status, message, clock())
+        automationId?.let { id ->
+            try {
+                dao.pruneEvents(id, DefaultEventHistoryLimit)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                reportMaintenanceFailure("Failed to prune event history for automation '$id'", error)
+            }
+        }
+    }
+
+    suspend fun failInterruptedEvents() {
+        dao.runningEventIds().forEach { deliveryId ->
+            dao.settleEvent(
+                deliveryId,
+                AutomationEventStatus.Failed,
+                "Automation event was interrupted after execution started; it was not replayed",
+                clock()
+            )
+        }
+    }
 
     suspend fun log(
         automationId: String,
@@ -198,6 +263,55 @@ class AutomationRepository(
         return entity.record()
     }
 
+    suspend fun startStep(
+        runId: String,
+        automationId: String,
+        step: AutomationFlowStep,
+        stepIndex: Int,
+        attempt: Int
+    ): AutomationStepRunRecord {
+        val now = clock()
+        val entity = AutomationStepRunEntity(
+            id = UUID.randomUUID().toString(),
+            runId = runId,
+            automationId = automationId,
+            stepId = step.id,
+            stepIndex = stepIndex,
+            stepType = step.type,
+            actionType = step.action?.type,
+            status = AutomationRunStatus.Running,
+            attempt = attempt,
+            message = "Flow step execution started",
+            startedAt = now,
+            completedAt = null
+        )
+        dao.insertStepRun(entity)
+        return entity.record()
+    }
+
+    suspend fun completeStep(
+        started: AutomationStepRunRecord,
+        status: String,
+        message: String
+    ): AutomationStepRunRecord {
+        val entity = AutomationStepRunEntity(
+            id = started.id,
+            runId = started.runId,
+            automationId = started.automationId,
+            stepId = started.stepId,
+            stepIndex = started.stepIndex,
+            stepType = started.stepType,
+            actionType = started.actionType,
+            status = status,
+            attempt = started.attempt,
+            message = message,
+            startedAt = started.startedAt,
+            completedAt = clock()
+        )
+        dao.insertStepRun(entity)
+        return entity.record()
+    }
+
     suspend fun stepRuns(runId: String): List<AutomationStepRunRecord> =
         dao.stepRuns(runId).map { it.record() }
 
@@ -287,15 +401,36 @@ class AutomationRepository(
         completedAt = completedAt
     )
 
+    private fun AutomationEventEntity.record() = AutomationEventRecord(
+        deliveryId = deliveryId,
+        automationId = automationId,
+        eventType = eventType,
+        occurredAt = occurredAt,
+        values = runCatching {
+            gson.fromJson<Map<String, String>>(valuesJson, stringMapType)
+        }.getOrNull().orEmpty(),
+        status = status,
+        message = message,
+        createdAt = createdAt,
+        updatedAt = updatedAt
+    )
+
     private companion object {
         const val TAG = "AutomationRepository"
         const val DefaultRunHistoryLimit = 100
         const val DefaultLogHistoryLimit = 200
+        const val DefaultEventHistoryLimit = 200
 
         val terminalStatuses = setOf(
             AutomationRunStatus.Success,
             AutomationRunStatus.Skipped,
-            AutomationRunStatus.Failed
+            AutomationRunStatus.Failed,
+            AutomationRunStatus.OutcomeUnknown
         )
     }
 }
+
+data class LegacyAutomationRetirement(
+    val automations: List<AutomationSpec>,
+    val retiredIds: List<String>
+)
