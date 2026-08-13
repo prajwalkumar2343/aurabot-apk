@@ -14,6 +14,7 @@ class AutomationEngine(
     private val contextEnricher: AutomationContextEnricher = DefaultAutomationContextEnricher(),
     private val actionExecutor: AutomationActionExecutor,
     private val flowContinuationScheduler: AutomationFlowContinuationScheduler = NoOpAutomationFlowContinuationScheduler,
+    private val checkpointNotifier: AutomationCheckpointNotifier = NoOpAutomationCheckpointNotifier,
     private val executionRegistry: AutomationExecutionRegistry = AutomationExecutionRegistry(),
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
@@ -141,6 +142,7 @@ class AutomationEngine(
             message = "Automation flow resumed",
             completed = false
         )
+        checkpointNotifier.cancel(run.id)
         return ResumePreparation.Ready(
             spec = spec,
             event = AutomationEvent(
@@ -159,6 +161,7 @@ class AutomationEngine(
     ): AutomationRunResult {
         repository.updateRun(run.id, status, message)
         cancelContinuation(run.id)
+        checkpointNotifier.cancel(run.id)
         repository.log(run.automationId, run.eventType, status, message)
         return AutomationRunResult(run.automationId, status, message, runId = run.id)
     }
@@ -248,6 +251,7 @@ class AutomationEngine(
             var finalMessage = ""
             var nonBlockingSkippedSteps = 0
             var nonBlockingFailedSteps = 0
+            var waitingStep: AutomationFlowStep? = null
             for ((index, step) in steps.withIndex().drop(startStepIndex)) {
                 val stepResult = executeStep(run.id, spec.id, index, step, enrichedEvent)
                 stepResults += stepResult
@@ -255,6 +259,7 @@ class AutomationEngine(
                 when (stepResult.status) {
                     AutomationRunStatus.Success -> Unit
                     AutomationRunStatus.Waiting -> {
+                        waitingStep = step
                         finalStatus = AutomationRunStatus.Waiting
                         finalMessage = stepResult.message
                         if (step.type == AutomationFlowStepTypes.Wait) {
@@ -295,19 +300,37 @@ class AutomationEngine(
                 )
             }
             repository.updateRun(run.id, finalStatus, finalMessage, enrichedEvent.values)
+            if (finalStatus == AutomationRunStatus.Waiting && waitingStep?.type == AutomationFlowStepTypes.Checkpoint) {
+                try {
+                    checkpointNotifier.present(
+                        AutomationCheckpointRequest(
+                            runId = run.id,
+                            automationName = spec.name,
+                            message = AutomationCheckpointPolicy.approvalMessage(
+                                spec,
+                                steps.indexOfFirst { it.id == waitingStep.id }
+                            ),
+                            expiresAt = AutomationCheckpointPolicy.expiresAt(clock(), waitingStep.metadata)
+                        )
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    finalStatus = AutomationRunStatus.Failed
+                    finalMessage = failureMessage("Failed to request automation approval", error)
+                    repository.updateRun(run.id, finalStatus, finalMessage, enrichedEvent.values)
+                }
+            }
             if (finalStatus != AutomationRunStatus.Waiting) {
                 cancelContinuation(run.id)
+                checkpointNotifier.cancel(run.id)
             }
             repository.log(spec.id, event.type, finalStatus, finalMessage)
             AutomationRunResult(spec.id, finalStatus, finalMessage, actionResults, run.id, stepResults)
         }
         return try {
             executionRegistry.track(spec.id, run.id, executionGeneration) {
-                if (steps.drop(startStepIndex).any { it.action?.type in AutomationActionTypeSets.CrossApp }) {
-                    CrossAppExecutionMutex.withLock { executeSteps() }
-                } else {
-                    executeSteps()
-                }
+                executeSteps()
             }
         } catch (error: AutomationConfigurationChangedException) {
             withContext(NonCancellable) {
@@ -323,6 +346,14 @@ class AutomationEngine(
                 terminalizeRun(run, AutomationRunStatus.Failed, "Automation run was cancelled")
             }
             throw error
+        } catch (error: AutomationOutcomePersistenceException) {
+            withContext(NonCancellable) {
+                terminalizeRun(
+                    run,
+                    AutomationRunStatus.OutcomeUnknown,
+                    "Automation completed an irreversible action, but its outcome could not be recorded; verify the external result before retrying"
+                )
+            }
         } catch (error: Exception) {
             recoverRunFailure(run, error)
         }
@@ -434,22 +465,34 @@ class AutomationEngine(
         val maxAttempts = step.retryPolicy.maxAttempts.coerceAtLeast(1)
         for (attempt in 1..maxAttempts) {
             attemptsUsed = attempt
-            val execution = executeStepOnce(step, event)
-            lastActionResult = execution.actionResult
-            lastStatus = execution.status
-            lastMessage = execution.message
-            repository.recordStep(
+            val startedStep = repository.startStep(
                 runId = runId,
                 automationId = automationId,
                 step = step,
                 stepIndex = stepIndex,
-                status = lastStatus,
-                attempt = attempt,
-                message = lastMessage,
-                bestEffort =
+                attempt = attempt
+            )
+            val execution = executeStepOnce(step, event)
+            lastActionResult = execution.actionResult
+            lastStatus = execution.status
+            lastMessage = execution.message
+            try {
+                repository.completeStep(
+                    started = startedStep,
+                    status = lastStatus,
+                    message = lastMessage
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (
                     lastStatus == AutomationRunStatus.Success &&
                     step.action?.hasAtMostOnceSideEffect() == true
-            )
+                ) {
+                    throw AutomationOutcomePersistenceException(error)
+                }
+                throw error
+            }
             if (lastStatus != AutomationRunStatus.Failed || attempt == maxAttempts) break
             val backoffMillis = step.retryPolicy.backoffMillis.coerceAtLeast(0L)
             if (backoffMillis > 0L) delay(backoffMillis)
@@ -539,6 +582,7 @@ class AutomationEngine(
         existingRunId?.let { id ->
             repository.updateRun(id, status, message)
             cancelContinuation(id)
+            checkpointNotifier.cancel(id)
         }
         repository.log(automationId, eventType, status, message)
         return AutomationRunResult(automationId, status, message, runId = runId ?: existingRunId)
@@ -572,6 +616,10 @@ class AutomationEngine(
 
     private companion object {
         const val StateMutexCount = 64
-        val CrossAppExecutionMutex = Mutex()
     }
 }
+
+private class AutomationOutcomePersistenceException(cause: Exception) : Exception(
+    "Irreversible automation outcome could not be persisted",
+    cause
+)
