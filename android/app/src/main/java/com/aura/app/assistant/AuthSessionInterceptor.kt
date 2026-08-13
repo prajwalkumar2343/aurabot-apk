@@ -1,17 +1,14 @@
 package com.aura.app.assistant
 
 import com.aura.app.session.AuthTokenStore
-import com.google.gson.Gson
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
-class AuthSessionInterceptor(
+internal class AuthSessionInterceptor(
     private val sessionStore: AuthTokenStore,
-    private val gson: Gson = Gson()
+    private val authTransport: SupabaseAuthTransport? = null
 ) : Interceptor {
     private val refreshLock = Any()
 
@@ -20,7 +17,7 @@ class AuthSessionInterceptor(
         val accessToken = runBlocking { sessionStore.accessToken() }
         val authenticatedRequest = originalRequest.withBearer(accessToken)
         val response = chain.proceed(authenticatedRequest)
-        if (response.code != 401 || originalRequest.isAuthSessionRequest()) {
+        if (response.code != 401) {
             return response
         }
 
@@ -30,7 +27,7 @@ class AuthSessionInterceptor(
                 if (!currentAccessToken.isNullOrBlank() && currentAccessToken != accessToken) {
                     currentAccessToken
                 } else {
-                    refreshAccessToken(chain, originalRequest)
+                    refreshAccessToken()
                 }
             }
         } ?: return response
@@ -39,38 +36,21 @@ class AuthSessionInterceptor(
         return chain.proceed(originalRequest.withBearer(retryAccessToken))
     }
 
-    private suspend fun refreshAccessToken(chain: Interceptor.Chain, originalRequest: Request): String? {
+    private suspend fun refreshAccessToken(): String? {
         val refreshToken = sessionStore.refreshToken()
-        if (refreshToken.isNullOrBlank()) {
+        val transport = authTransport
+        if (refreshToken.isNullOrBlank() || transport == null) {
             sessionStore.clearTokens()
             return null
         }
 
-        val refreshBody = gson.toJson(RefreshRequest(refreshToken))
-            .toRequestBody("application/json".toMediaType())
-        val refreshRequest = originalRequest.newBuilder()
-            .url(originalRequest.url.newBuilder().encodedPath("/api/auth/refresh").build())
-            .post(refreshBody)
-            .removeHeader("Authorization")
-            .build()
-
-        val refreshResponse = chain.proceed(refreshRequest)
-        refreshResponse.use { response ->
-            if (!response.isSuccessful) {
-                sessionStore.clearTokens()
-                return null
-            }
-            val body = response.body?.string().orEmpty()
-            val parsed = runCatching { gson.fromJson(body, RefreshResponse::class.java) }.getOrNull()
-            val newAccessToken = parsed?.access_token
-            val newRefreshToken = parsed?.refresh_token
-            if (newAccessToken.isNullOrBlank() || newRefreshToken.isNullOrBlank()) {
-                sessionStore.clearTokens()
-                return null
-            }
-            sessionStore.setTokens(newAccessToken, newRefreshToken)
-            return newAccessToken
+        val refreshed = runCatching { transport.refresh(refreshToken) }.getOrNull()
+        if (refreshed == null) {
+            sessionStore.clearTokens()
+            return null
         }
+        sessionStore.setTokens(refreshed.access_token, refreshed.refresh_token)
+        return refreshed.access_token
     }
 
     private fun Request.withBearer(token: String?): Request =
@@ -82,11 +62,4 @@ class AuthSessionInterceptor(
                 .build()
         }
 
-    private fun Request.isAuthSessionRequest(): Boolean {
-        val path = url.encodedPath
-        return path.endsWith("/auth/login") ||
-            path.endsWith("/auth/register") ||
-            path.endsWith("/auth/refresh") ||
-            path.endsWith("/auth/logout")
-    }
 }
