@@ -2,22 +2,22 @@ package com.aura.app.assistant
 
 import com.aura.app.automations.AutomationSpec
 import com.aura.app.miniapps.MiniAppBundle
+import com.google.gson.annotations.SerializedName
 
-data class LoginRequest(val email: String, val password: String)
-data class RegisterRequest(val email: String, val password: String, val name: String? = null)
-data class LoginResponse(
+data class UserResponse(
     val id: String,
     val email: String,
     val name: String?,
     val role: String?,
-    val access_token: String,
-    val refresh_token: String
+    @SerializedName("service_mode") val serviceMode: String = "local"
 )
 
-data class RefreshRequest(val refresh_token: String)
-data class RefreshResponse(val access_token: String, val refresh_token: String)
-
-data class UserResponse(val id: String, val email: String, val name: String?, val role: String?)
+data class StalkyPrincipalResponse(
+    @SerializedName("userId") val userId: String,
+    val role: String,
+    val aal: String? = null,
+    @SerializedName("sessionId") val sessionId: String? = null
+)
 
 enum class LlmProvider(val wireValue: String, val label: String) {
     Gemini("gemini", "Google"),
@@ -47,6 +47,29 @@ data class ChatAutomationItem(
     val action_types: List<String> = emptyList()
 )
 
+data class ChatWidgetAction(
+    val id: String? = null,
+    val label: String? = null,
+    val type: String? = null,
+    val payload: Map<String, String>? = null,
+    val requires_confirmation: Boolean = false
+)
+
+data class ChatWidgetProposal(
+    val kind: String? = null,
+    val title: String? = null,
+    val message: String? = null,
+    val details: List<String>? = null,
+    val actions: List<ChatWidgetAction>? = null,
+    val presentation: String = "compact",
+    val content_format: String = "plain_text",
+    val content: String? = null,
+    val risk: String? = "low",
+    val priority: Int = 0,
+    val expires_in_minutes: Int = 60,
+    val dedupe_key: String? = null
+)
+
 data class ChatRequest(
     val message: String,
     val session_id: String? = null,
@@ -74,13 +97,57 @@ data class ChatAction(
     val action_id: String? = null,
     val record_type: String? = null,
     val values: Map<String, String>? = null,
-    val automation_spec: AutomationSpec? = null
+    val automation_spec: AutomationSpec? = null,
+    val widget: ChatWidgetProposal? = null
 )
 data class ChatResponse(
     val reply: String,
     val session_id: String,
+    val emotion: String = "neutral",
+    val created_emotion: String? = null,
     val actions: List<ChatAction> = emptyList()
 )
+
+data class AgentRunAccepted(
+    val run_id: String,
+    val session_id: String,
+    val state: String
+)
+
+data class AgentChildRun(
+    val id: String,
+    val agent: String,
+    val state: String,
+    val phase: String,
+    val output: String? = null,
+    val error: String? = null
+)
+
+data class AgentRunResponse(
+    val id: String,
+    val session_id: String,
+    val state: String,
+    val phase: String,
+    val reply: String? = null,
+    val emotion: String = "neutral",
+    val created_emotion: String? = null,
+    val actions: List<ChatAction> = emptyList(),
+    val children: List<AgentChildRun> = emptyList(),
+    val error: String? = null
+)
+
+data class AssistantRunProgress(
+    val runId: String,
+    val state: String,
+    val phase: String,
+    val activeSubagents: Int,
+    val mode: AssistantRunMode = AssistantRunMode.Managed
+)
+
+enum class AssistantRunMode(val wireValue: String) {
+    Managed("managed"),
+    Local("local")
+}
 
 data class OpenRouterModelsRequest(val api_key: String)
 data class OpenRouterModelsResponse(val data: List<OpenRouterModelInfo>)
