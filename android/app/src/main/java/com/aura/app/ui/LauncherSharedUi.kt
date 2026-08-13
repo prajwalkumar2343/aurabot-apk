@@ -120,6 +120,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -271,57 +272,16 @@ private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimension: Int
 }
 
 fun Modifier.glassCard(
-    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(20.dp),
-    borderWidth: androidx.compose.ui.unit.Dp = 0.8.dp
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp),
+    borderWidth: androidx.compose.ui.unit.Dp = 1.dp
 ): Modifier = this.composed {
-    val isDark = isSystemInDarkTheme()
-    val bgBrush = if (isDark) {
-        Brush.linearGradient(
-            colors = listOf(
-                Color(0xFF1E1E22),
-                Color(0xFF161618),
-                Color(0xFF131315)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(
-                Color(0xFFFFFFFF),
-                Color(0xFFFCFCFD),
-                Color(0xFFF9F9FB)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
-    }
-    val borderBrush = if (isDark) {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.12f),
-                Color.White.copy(alpha = 0.04f),
-                Color.White.copy(alpha = 0.08f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(
-                Color.Black.copy(alpha = 0.06f),
-                Color.Black.copy(alpha = 0.02f),
-                Color.Black.copy(alpha = 0.04f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
-    }
-    
+    val isDark = MaterialTheme.colorScheme.background == Color.Black
+    val background = if (isDark) Color(0xFF0A0A0A) else Color.White
+    val border = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.1f)
     this
         .clip(shape)
-        .background(brush = bgBrush)
-        .border(width = borderWidth, brush = borderBrush, shape = shape)
+        .background(background)
+        .border(width = borderWidth, color = border, shape = shape)
 }
 
 fun Modifier.bounceClick(
@@ -488,25 +448,7 @@ fun ScreenShell(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val wallpaperBitmap = rememberWallpaperPainter(wallpaperUri)
-    val isDark = isSystemInDarkTheme()
-
-    val bgBrush = remember(isDark) {
-        Brush.verticalGradient(
-            colors = if (isDark) {
-                listOf(Color(0xFF08080A), Color(0xFF0E0E11), Color(0xFF0A0A0C))
-            } else {
-                listOf(Color(0xFFF5F5F8), Color(0xFFEEEEF2), Color(0xFFE8E8ED))
-            }
-        )
-    }
-
-    val violetColors = remember { listOf(Color(0x558B5CF6), Color(0x2A7C3AED), Color.Transparent) }
-    val cyanColors = remember { listOf(Color(0x4406B6D4), Color(0x2200D4FF), Color.Transparent) }
-    val roseColors = remember { listOf(Color(0x33EC4899), Color(0x18F43F5E), Color.Transparent) }
-    val indigoColors = remember { listOf(Color(0x286366F1), Color.Transparent) }
-    val lightVioletColors = remember { listOf(Color(0x2A8B5CF6), Color(0x156366F1), Color.Transparent) }
-    val lightTealColors = remember { listOf(Color(0x2806B6D4), Color(0x1414B8A6), Color.Transparent) }
-    val lightPeachColors = remember { listOf(Color(0x1EFBBF24), Color(0x10F97316), Color.Transparent) }
+    val isDark = MaterialTheme.colorScheme.background == Color.Black
 
     Box(
         modifier = modifier
@@ -525,71 +467,6 @@ fun ScreenShell(
                     .fillMaxSize()
                     .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f))
             )
-        } else {
-            MeshBackground(
-                isDark = isDark,
-                bgBrush = bgBrush,
-                violetColors = violetColors,
-                cyanColors = cyanColors,
-                roseColors = roseColors,
-                indigoColors = indigoColors,
-                lightVioletColors = lightVioletColors,
-                lightTealColors = lightTealColors,
-                lightPeachColors = lightPeachColors
-            )
-        }
-
-        // Dynamic Parallax Particle Starfield
-        val starColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.08f)
-        val stars = remember {
-            List(60) {
-                Triple(
-                    kotlin.random.Random.nextFloat(),
-                    kotlin.random.Random.nextFloat(),
-                    kotlin.random.Random.nextFloat() * 2f + 0.5f
-                )
-            }
-        }
-        var tiltX by remember { mutableStateOf(0f) }
-        var tiltY by remember { mutableStateOf(0f) }
-        val sensorContext = LocalContext.current
-        androidx.compose.runtime.DisposableEffect(Unit) {
-            val sensorManager = sensorContext.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
-            val accel = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
-            val listener = object : android.hardware.SensorEventListener {
-                var smoothX = 0f
-                var smoothY = 0f
-                override fun onSensorChanged(event: android.hardware.SensorEvent?) {
-                    if (event != null && event.sensor.type == android.hardware.Sensor.TYPE_ACCELEROMETER) {
-                        val x = event.values[0]
-                        val y = event.values[1]
-                        smoothX = smoothX * 0.9f - x * 0.1f
-                        smoothY = smoothY * 0.9f + y * 0.1f
-                        tiltX = smoothX
-                        tiltY = smoothY
-                    }
-                }
-                override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
-            }
-            if (accel != null) {
-                sensorManager.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME)
-            }
-            onDispose {
-                sensorManager.unregisterListener(listener)
-            }
-        }
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            stars.forEach { (pctX, pctY, depth) ->
-                val x = (pctX * size.width) + (tiltX * depth * 22f)
-                val y = (pctY * size.height) + (tiltY * depth * 22f)
-                val finalX = (x % size.width + size.width) % size.width
-                val finalY = (y % size.height + size.height) % size.height
-                drawCircle(
-                    color = starColor,
-                    radius = depth * 1.5f,
-                    center = Offset(finalX, finalY)
-                )
-            }
         }
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -611,7 +488,7 @@ fun ScreenShell(
 fun Header(title: String, subtitle: String) {
     Column(modifier = Modifier.padding(bottom = 20.dp)) {
         Text(
-            title.uppercase(),
+            title,
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
             letterSpacing = 0.sp
@@ -624,18 +501,11 @@ fun Header(title: String, subtitle: String) {
             lineHeight = 20.sp
         )
         Spacer(Modifier.height(14.dp))
-        val isDark = isSystemInDarkTheme()
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.12f)
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(
-                    Brush.horizontalGradient(
-                        colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF06B6D4))
-                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
-                    )
-                )
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
         )
     }
 }
@@ -732,7 +602,6 @@ fun SettingsRow(
     icon: ImageVector? = null,
     onClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -748,17 +617,7 @@ fun SettingsRow(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = if (isDark) listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
-                                ) else listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.03f)
-                                )
-                            )
-                        ),
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
