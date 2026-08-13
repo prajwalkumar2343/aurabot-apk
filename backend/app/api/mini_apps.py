@@ -35,6 +35,7 @@ from app.services.mini_app_widgets import (
     validate_mini_app_widget,
     widget_builder_system_prompt,
 )
+from app.services.provider_credentials import resolve_provider_credentials
 
 router = APIRouter(prefix="/mini-apps", tags=["Mini Apps"])
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ MAX_RECORD_VALUE_CHARS = 4000
 
 @router.post("/build", response_model=MiniAppBuildOut)
 async def build_mini_app(data: MiniAppBuildIn, user=Depends(get_current_user)):
+    data = resolve_provider_credentials(data, user)
     trace_id = str(uuid.uuid4())
     if not data.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
@@ -65,6 +67,7 @@ async def build_mini_app(data: MiniAppBuildIn, user=Depends(get_current_user)):
 
 @router.post("/revise", response_model=MiniAppRevisionOut)
 async def revise_mini_app(data: MiniAppRevisionIn, user=Depends(get_current_user)):
+    data = resolve_provider_credentials(data, user)
     trace_id = str(uuid.uuid4())
     if not data.instruction.strip():
         raise HTTPException(status_code=400, detail="Revision instruction is required")
@@ -86,6 +89,7 @@ async def revise_mini_app(data: MiniAppRevisionIn, user=Depends(get_current_user
 
 @router.post("/widgets/build", response_model=MiniAppWidgetBuildOut)
 async def build_mini_app_widget(data: MiniAppWidgetBuildIn, user=Depends(get_current_user)):
+    data = resolve_provider_credentials(data, user)
     trace_id = str(uuid.uuid4())
     data = _validated_widget_build_data(data)
     logger.info("mini_app_widget_build_started", extra={"trace_id": trace_id, "mini_app_id": data.miniApp.id})
