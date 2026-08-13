@@ -9,7 +9,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -18,15 +17,14 @@ class AuthSessionInterceptorTest {
     @Test
     fun recoversFromUnauthorizedResponseByRefreshingAndRetryingOnce() {
         val store = FakeTokenStore(accessTokenValue = "expired-access", refreshTokenValue = "refresh-1")
+        val auth = FakeSupabaseAuthTransport(
+            refreshedSession = SupabaseAuthSession(
+                access_token = "fresh-access",
+                refresh_token = "refresh-2"
+            )
+        )
         val terminal = ScriptedTerminalInterceptor { request ->
             when (request.url.encodedPath) {
-                "/api/auth/refresh" -> {
-                    assertEquals("""{"refresh_token":"refresh-1"}""", request.bodyString())
-                    TestResponse(
-                        code = 200,
-                        body = """{"access_token":"fresh-access","refresh_token":"refresh-2"}"""
-                    )
-                }
                 "/api/assistant/chat" -> {
                     when (request.header("Authorization")) {
                         "Bearer expired-access" -> TestResponse(code = 401)
@@ -38,7 +36,7 @@ class AuthSessionInterceptorTest {
             }
         }
         val client = OkHttpClient.Builder()
-            .addInterceptor(AuthSessionInterceptor(store))
+            .addInterceptor(AuthSessionInterceptor(store, auth))
             .addInterceptor(terminal)
             .build()
 
@@ -52,10 +50,10 @@ class AuthSessionInterceptorTest {
         assertEquals(200, response.code)
         assertEquals("fresh-access", store.accessTokenValue)
         assertEquals("refresh-2", store.refreshTokenValue)
+        assertEquals(listOf("refresh-1"), auth.refreshTokens)
         assertEquals(
             listOf(
                 "Bearer expired-access",
-                null,
                 "Bearer fresh-access"
             ),
             terminal.requests.map { it.header("Authorization") }
@@ -65,15 +63,13 @@ class AuthSessionInterceptorTest {
     @Test
     fun clearsTokensWhenRefreshFails() {
         val store = FakeTokenStore(accessTokenValue = "expired-access", refreshTokenValue = "revoked-refresh")
+        val auth = FakeSupabaseAuthTransport(refreshError = IllegalStateException("revoked"))
         val terminal = ScriptedTerminalInterceptor { request ->
-            when (request.url.encodedPath) {
-                "/api/auth/refresh" -> TestResponse(code = 401)
-                "/api/assistant/chat" -> TestResponse(code = 401)
-                else -> TestResponse(code = 404)
-            }
+            if (request.url.encodedPath == "/api/assistant/chat") TestResponse(code = 401)
+            else TestResponse(code = 404)
         }
         val client = OkHttpClient.Builder()
-            .addInterceptor(AuthSessionInterceptor(store))
+            .addInterceptor(AuthSessionInterceptor(store, auth))
             .addInterceptor(terminal)
             .build()
 
@@ -87,7 +83,8 @@ class AuthSessionInterceptorTest {
         assertEquals(401, response.code)
         assertNull(store.accessTokenValue)
         assertNull(store.refreshTokenValue)
-        assertEquals(2, terminal.requests.size)
+        assertEquals(listOf("revoked-refresh"), auth.refreshTokens)
+        assertEquals(1, terminal.requests.size)
     }
 }
 
@@ -134,8 +131,26 @@ private class FakeTokenStore(
     }
 }
 
-private fun Request.bodyString(): String {
-    val buffer = Buffer()
-    body?.writeTo(buffer)
-    return buffer.readUtf8()
+private class FakeSupabaseAuthTransport(
+    private val refreshedSession: SupabaseAuthSession? = null,
+    private val refreshError: Throwable? = null
+) : SupabaseAuthTransport {
+    val refreshTokens = mutableListOf<String>()
+
+    override suspend fun exchangeGoogleIdToken(idToken: String, nonce: String): SupabaseAuthSession =
+        error("Not used in this test")
+
+    override suspend fun signInWithPassword(email: String, password: String): SupabaseAuthSession =
+        error("Not used in this test")
+
+    override suspend fun signUp(email: String, password: String, name: String?): SupabaseAuthSession =
+        error("Not used in this test")
+
+    override suspend fun refresh(refreshToken: String): SupabaseAuthSession {
+        refreshTokens += refreshToken
+        refreshError?.let { throw it }
+        return requireNotNull(refreshedSession)
+    }
+
+    override suspend fun logout(accessToken: String) = Unit
 }
