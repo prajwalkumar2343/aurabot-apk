@@ -16,6 +16,9 @@ class AuraApplication : Application() {
         super.onCreate()
         container = AppContainer(this)
         appScope.launch {
+            runCatching { container.assistantRunSurfaceRepository.reconcileStartup() }
+        }
+        appScope.launch {
             runCatching { container.automationRuntime.restoreTriggers() }
         }
         appScope.launch {
