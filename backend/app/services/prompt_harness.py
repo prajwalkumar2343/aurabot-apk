@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
@@ -263,14 +264,21 @@ def format_skill_summaries(summaries: list[str]) -> str:
 def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: ChatIn) -> Optional[str]:
     text = raw.strip()
     lower_message = data.message.lower()
+    if not actions:
+        try:
+            attempted_actions = json.loads(text).get("actions") if text.startswith("{") else None
+        except (json.JSONDecodeError, AttributeError):
+            attempted_actions = None
+        if attempted_actions:
+            return "response contained an unsupported or invalid action structure"
+        if "actions" in text and not text.startswith("{"):
+            return "response mentioned actions but did not return a valid action structure"
     wants_action = any(
         word in lower_message
         for word in ("block", "restrict", "pause", "limit", "open", "log", "check in", "record", "streak", "create", "build", "make", "generate", "revise", "upgrade", "patch", "automate", "automation", "daily", "schedule", "remind", "when i", "when leaving", "when entering")
     )
     if wants_action and not actions and any(word in reply.lower() for word in ("done", "blocked", "opened", "saved")):
         return "reply claimed a local action without calling the matching tool"
-    if "actions" in text and not actions and not text.startswith("{"):
-        return "response mentioned actions but did not return a valid action structure"
     for action in actions:
         if action.type == "block_app" and (action.duration_minutes is None or action.duration_minutes <= 0):
             return "block_app requires a positive duration_minutes value"
@@ -282,6 +290,8 @@ def repair_needed(raw: str, reply: str, actions: list[ChatActionOut], data: Chat
             spec = action.automation_spec or {}
             if not spec.get("name") or not isinstance(spec.get("trigger"), dict) or not spec.get("actions"):
                 return "create_automation requires automation_spec with name, trigger, and at least one action"
+        if action.type == "present_widget" and action.widget is None:
+            return "present_widget requires a valid widget payload"
     return None
 
 
@@ -292,6 +302,6 @@ def build_repair_system_message(system_message: str, reason: str, raw_reply: str
         "Repair pass:\n"
         f"- Previous response problem: {reason}.\n"
         "- Return a corrected short reply and call the matching tool when a local action is needed.\n"
-        "- Preserve the allowed expression tag requirement.\n"
+        "- Preserve the JSON response contract, choose one valid emotion, and use created_emotion only as a bounded `create <emotion>` directive when needed.\n"
         f"Previous response excerpt:\n{excerpt}"
     )
