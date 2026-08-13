@@ -21,15 +21,13 @@ enum class AutomationPermissionSettingsTarget {
     RuntimePermission,
     Notifications,
     Location,
-    Accessibility,
     Sms,
     AppDetails
 }
 
 class AutomationPermissionStatusResolver(
     private val runtimePermissionGranted: (String) -> Boolean,
-    private val notificationsEnabled: () -> Boolean,
-    private val accessibilityEnabled: () -> Boolean
+    private val notificationsEnabled: () -> Boolean
 ) {
     fun statuses(requiredPermissions: Set<String>): List<AutomationPermissionStatus> =
         requiredPermissions.map { permission ->
@@ -46,7 +44,6 @@ class AutomationPermissionStatusResolver(
 
     private fun isGranted(permission: String): Boolean =
         when (permission) {
-            AutomationPermissionPlanner.AccessibilityService -> accessibilityEnabled()
             Manifest.permission.POST_NOTIFICATIONS -> {
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                     runtimePermissionGranted(permission) && notificationsEnabled()
@@ -61,7 +58,6 @@ class AutomationPermissionStatusResolver(
             Manifest.permission.ACCESS_BACKGROUND_LOCATION -> "Background location"
             Manifest.permission.POST_NOTIFICATIONS -> "Notifications"
             Manifest.permission.SEND_SMS -> "SMS"
-            AutomationPermissionPlanner.AccessibilityService -> "Accessibility service"
             else -> permission.substringAfterLast('.').replace('_', ' ').lowercase()
                 .replaceFirstChar { it.uppercase() }
         }
@@ -73,7 +69,6 @@ class AutomationPermissionStatusResolver(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_BACKGROUND_LOCATION -> AutomationPermissionSettingsTarget.Location
             Manifest.permission.SEND_SMS -> AutomationPermissionSettingsTarget.Sms
-            AutomationPermissionPlanner.AccessibilityService -> AutomationPermissionSettingsTarget.Accessibility
             else -> AutomationPermissionSettingsTarget.AppDetails
         }
 }
@@ -85,9 +80,6 @@ class AndroidAutomationPermissionStatusResolver(private val context: Context) {
         },
         notificationsEnabled = {
             NotificationManagerCompat.from(context).areNotificationsEnabled()
-        },
-        accessibilityEnabled = {
-            AuraAutomationAccessibilityService.isEnabled()
         }
     )
 
@@ -99,7 +91,6 @@ object AutomationPermissionSettingsIntents {
     fun intentFor(context: Context, status: AutomationPermissionStatus): Intent =
         when (status.settingsTarget) {
             AutomationPermissionSettingsTarget.Notifications -> notificationSettingsIntent(context)
-            AutomationPermissionSettingsTarget.Accessibility -> CrossAppAutomationController.openAccessibilitySettingsIntent()
             AutomationPermissionSettingsTarget.Location,
             AutomationPermissionSettingsTarget.Sms,
             AutomationPermissionSettingsTarget.AppDetails,
