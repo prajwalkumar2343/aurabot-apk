@@ -57,6 +57,7 @@ import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Clear
@@ -225,7 +226,6 @@ fun AssistantComposer(
     onLaunchPicker: () -> Unit,
     onLaunchCamera: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
     val hasText = value.isNotBlank()
     val sendScale by animateFloatAsState(
         targetValue = if (hasText || attachedImageBase64 != null) 1f else 0.85f,
@@ -237,14 +237,14 @@ fun AssistantComposer(
     if (showPickerDialog) {
         AlertDialog(
             onDismissRequest = { showPickerDialog = false },
-            title = { Text("ATTACH VISUAL INPUT", fontWeight = FontWeight.Bold) },
-            text = { Text("Select an option to send an image to Aura.") },
+            title = { Text("Add an image", fontWeight = FontWeight.Bold) },
+            text = { Text("Take a photo or choose one from your library.") },
             confirmButton = {
                 TextButton(onClick = {
                     showPickerDialog = false
                     onLaunchCamera()
                 }) {
-                    Text("CAMERA", fontWeight = FontWeight.Bold)
+                    Text("Camera", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -252,7 +252,7 @@ fun AssistantComposer(
                     showPickerDialog = false
                     onLaunchPicker()
                 }) {
-                    Text("GALLERY", fontWeight = FontWeight.Bold)
+                    Text("Photo library", fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -261,8 +261,8 @@ fun AssistantComposer(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .glassCard(shape = RoundedCornerShape(28.dp))
-            .padding(4.dp)
+            .glassCard(shape = RoundedCornerShape(18.dp))
+            .padding(5.dp)
     ) {
         if (attachedImageBase64 != null) {
             Row(
@@ -281,7 +281,7 @@ fun AssistantComposer(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "IMAGE READY TO SEND",
+                        "Image attached",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -295,7 +295,7 @@ fun AssistantComposer(
                     Icon(
                         imageVector = Icons.Rounded.Clear,
                         contentDescription = "Clear",
-                        tint = MaterialTheme.colorScheme.error,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -331,7 +331,7 @@ fun AssistantComposer(
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        "Ask Aura anything...",
+                        "Ask Aura…",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                 },
@@ -341,7 +341,7 @@ fun AssistantComposer(
                     unfocusedBorderColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
-                    cursorColor = if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)
+                    cursorColor = MaterialTheme.colorScheme.onSurface
                 ),
                 shape = RoundedCornerShape(24.dp)
             )
@@ -352,27 +352,16 @@ fun AssistantComposer(
                     .scale(sendScale)
                     .clip(CircleShape)
                     .background(
-                        if (hasText || attachedImageBase64 != null) {
-                            Brush.linearGradient(
-                                colors = if (isDark) listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
-                                else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
-                            )
-                        } else {
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
-                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
-                                )
-                            )
-                        }
+                        if (hasText || attachedImageBase64 != null) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
                     )
                     .bounceClick(onClick = onSend),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Search,
+                    imageVector = Icons.Rounded.ArrowUpward,
                     contentDescription = "Send",
-                    tint = if (hasText || attachedImageBase64 != null) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (hasText || attachedImageBase64 != null) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }

@@ -224,9 +224,8 @@ fun AssistantScreen(
     onLaunchPicker: () -> Unit,
     onLaunchCamera: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
     ScreenShell(wallpaperUri = state.session.wallpaperUri) {
-        Header("ASSISTANT", "Your local AI conversation.")
+        Header("Assistant", "Your private conversation with Aura.")
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -256,23 +255,14 @@ fun AssistantScreen(
                                 )
                             )
                             .background(
-                                if (isUser) {
-                                    Brush.linearGradient(
-                                        colors = if (isDark) listOf(Color(0xFF7C3AED), Color(0xFF6366F1))
-                                        else listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
-                                    )
-                                } else {
-                                    Brush.linearGradient(
-                                        colors = if (isDark) listOf(Color(0xFF1E1E22), Color(0xFF18181B))
-                                        else listOf(Color(0xFFFFFFFF), Color(0xFFF9F9FB))
-                                    )
-                                }
+                                if (isUser) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.surfaceVariant
                             )
                             .then(
                                 if (!isUser) {
                                     Modifier.border(
                                         0.6.dp,
-                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        MaterialTheme.colorScheme.outlineVariant,
                                         RoundedCornerShape(
                                             topStart = 20.dp,
                                             topEnd = 20.dp,
@@ -287,7 +277,7 @@ fun AssistantScreen(
                         Text(
                             text = message.text,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isUser) Color.White
+                            color = if (isUser) MaterialTheme.colorScheme.surface
                             else MaterialTheme.colorScheme.onSurface,
                             lineHeight = 22.sp
                         )
@@ -297,7 +287,7 @@ fun AssistantScreen(
             // Typing indicator
             if (state.loading) {
                 item {
-                    TypingIndicator(isDark = isDark)
+                    TypingIndicator()
                 }
             }
         }
@@ -315,7 +305,7 @@ fun AssistantScreen(
 }
 
 @Composable
-private fun TypingIndicator(isDark: Boolean) {
+private fun TypingIndicator() {
     val infiniteTransition = rememberInfiniteTransition(label = "typing")
     val dot1 by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 1f,
@@ -348,10 +338,10 @@ private fun TypingIndicator(isDark: Boolean) {
         modifier = Modifier
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
-            .background(if (isDark) Color(0xFF1E1E22) else Color(0xFFFFFFFF))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(
                 0.6.dp,
-                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
             )
             .padding(horizontal = 20.dp, vertical = 14.dp),
@@ -364,10 +354,7 @@ private fun TypingIndicator(isDark: Boolean) {
                     .size(8.dp)
                     .scale(0.6f + dotAnim * 0.4f)
                     .clip(CircleShape)
-                    .background(
-                        if (isDark) Color(0xFF8B5CF6).copy(alpha = 0.4f + dotAnim * 0.6f)
-                        else Color(0xFF6366F1).copy(alpha = 0.3f + dotAnim * 0.7f)
-                    )
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f + dotAnim * 0.7f))
             )
         }
     }
@@ -387,7 +374,7 @@ fun TasksScreen(state: LauncherUiState, onAddTodo: (String) -> Unit, onBack: () 
             }
         }
         Spacer(Modifier.height(10.dp))
-        Header("TASKS", "${state.openTodos} open items on this device.")
+        Header("Tasks", "${state.openTodos} open items on this device.")
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
