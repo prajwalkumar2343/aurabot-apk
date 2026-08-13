@@ -170,7 +170,11 @@ private fun DreamsControlCard(
 ) {
     DreamCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = Color(0xFF8B5CF6))
+            Icon(
+                Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.padding(6.dp))
             Column(Modifier.weight(1f)) {
                 Text("NIGHTLY DREAMS", fontWeight = FontWeight.Bold)
@@ -256,7 +260,11 @@ private fun DreamProposalCard(
     DreamCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(proposalLabel(proposal.type), style = MaterialTheme.typography.labelSmall, color = Color(0xFF8B5CF6))
+                Text(
+                    proposalLabel(proposal.type),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text(proposal.title, fontWeight = FontWeight.Bold)
             }
             Text("${(proposal.confidence * 100).toInt()}%", fontWeight = FontWeight.Bold)
