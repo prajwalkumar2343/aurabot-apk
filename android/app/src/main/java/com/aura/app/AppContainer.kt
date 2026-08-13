@@ -2,6 +2,7 @@ package com.aura.app
 
 import android.content.Context
 import com.aura.app.automations.AndroidAutomationActionExecutor
+import com.aura.app.automations.AndroidAutomationCheckpointNotifier
 import com.aura.app.automations.AlarmAutomationFlowContinuationScheduler
 import com.aura.app.automations.AutomationDatabase
 import com.aura.app.automations.AutomationEngine
@@ -16,7 +17,9 @@ import com.aura.app.apps.AppBlockStore
 import com.aura.app.apps.AppsRepository
 import com.aura.app.assistant.AssistantRepository
 import com.aura.app.assistant.LlmSettingsStore
-import com.aura.app.assistant.LocalAssistantStore
+import com.aura.app.assistant.DirectLocalProviderGateway
+import com.aura.app.assistant.DirectMongoAssistantStore
+import com.aura.app.assistant.LocalModeSettingsStore
 import com.aura.app.miniapps.MiniAppDatabase
 import com.aura.app.miniapps.MiniAppRepository
 import com.aura.app.dreams.DreamDatabase
@@ -30,6 +33,8 @@ import com.aura.app.dreams.DreamScheduler
 import com.aura.app.dreams.DreamSettingsStore
 import com.aura.app.session.SessionStore
 import com.aura.app.voice.VoiceServiceController
+import com.aura.app.widgets.AuraWidgetDatabase
+import com.aura.app.widgets.AuraWidgetRepository
 
 class AppContainer(context: Context) {
     val appContext = context.applicationContext
@@ -38,6 +43,7 @@ class AppContainer(context: Context) {
     val appsRepository = AppsRepository(appContext.packageManager)
     val appBlockStore = AppBlockStore(appContext)
     val miniAppRepository = MiniAppRepository(MiniAppDatabase.get(appContext).miniAppDao())
+    val auraWidgetRepository = AuraWidgetRepository(AuraWidgetDatabase.get(appContext).auraWidgetDao())
     val automationRepository = AutomationRepository(AutomationDatabase.get(appContext).automationDao())
     val geofenceAutomationRegistrar = GeofenceAutomationRegistrar(appContext)
     val scheduleAutomationScheduler = ScheduleAutomationScheduler(appContext)
@@ -49,6 +55,7 @@ class AppContainer(context: Context) {
         contextEnricher = DefaultAutomationContextEnricher(etaProvider),
         actionExecutor = AndroidAutomationActionExecutor(appContext),
         flowContinuationScheduler = automationFlowContinuationScheduler,
+        checkpointNotifier = AndroidAutomationCheckpointNotifier(appContext),
         executionRegistry = automationExecutionRegistry
     )
     val automationRuntime = AutomationRuntime(
@@ -56,15 +63,32 @@ class AppContainer(context: Context) {
         geofenceRegistrar = geofenceAutomationRegistrar,
         scheduleScheduler = scheduleAutomationScheduler,
         flowContinuationScheduler = automationFlowContinuationScheduler,
-        executionRegistry = automationExecutionRegistry
+        executionRegistry = automationExecutionRegistry,
+        checkpointNotifier = AndroidAutomationCheckpointNotifier(appContext)
     )
     val llmSettingsStore = LlmSettingsStore(appContext)
-    private val localAssistantStore = LocalAssistantStore(appContext)
+    val localModeSettingsStore = LocalModeSettingsStore(appContext)
+    private val localAssistantStore = DirectMongoAssistantStore(localModeSettingsStore)
+    private val stalkyCloudConfiguration =
+        com.aura.app.assistant.StalkyCloudConfiguration.fromBuildConfig()
+
+    suspend fun verifyLocalMongoConnection(connectionUri: String, databaseName: String) {
+        localAssistantStore.verifyConnection(connectionUri, databaseName)
+    }
+
     val assistantRepository = AssistantRepository(
-        baseUrl = BuildConfig.AURA_BACKEND_URL,
+        cloudConfiguration = stalkyCloudConfiguration,
         sessionStore = sessionStore,
         localAssistantStore = localAssistantStore,
-        llmSettingsStore = llmSettingsStore
+        llmSettingsStore = llmSettingsStore,
+        localProviderGateway = DirectLocalProviderGateway()
+    )
+    val assistantRunWorkScheduler = com.aura.app.assistant.WorkManagerAssistantRunScheduler(appContext)
+    val assistantRunSurfaceRepository = com.aura.app.assistant.AssistantRunSurfaceRepository(
+        dao = AuraWidgetDatabase.get(appContext).assistantRunDao(),
+        auraWidgetRepository = auraWidgetRepository,
+        workScheduler = assistantRunWorkScheduler,
+        currentServiceMode = { sessionStore.serviceMode() }
     )
     val dreamSettingsStore = DreamSettingsStore(appContext)
     val dreamRepository = DreamRepository(DreamDatabase.get(appContext).dreamDao())
