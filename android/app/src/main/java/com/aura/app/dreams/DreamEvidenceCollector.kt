@@ -46,9 +46,12 @@ class DreamEvidenceCollector(
             automationRepository.runs(spec.id, RunsPerAutomation)
                 .filter { it.updatedAt in window.startMillis until window.endMillis }
                 .forEach { run ->
-                    val failedStep = if (run.status == AutomationRunStatus.Failed) {
+                    val failedStep = if (run.status in failureStatuses) {
                         automationRepository.stepRuns(run.id)
-                            .lastOrNull { it.status == AutomationRunStatus.Failed }
+                            .lastOrNull {
+                                it.status == AutomationRunStatus.Failed ||
+                                    it.status == AutomationRunStatus.Running
+                            }
                     } else {
                         null
                     }
@@ -63,7 +66,7 @@ class DreamEvidenceCollector(
         observations: List<AutomationObservation>,
         settings: DreamSettings
     ): List<DreamSignal> {
-        val failed = observations.filter { it.run.status == AutomationRunStatus.Failed }
+        val failed = observations.filter { it.run.status in failureStatuses }
         return failed.groupBy { observation ->
             val failureKind = DreamPrivacyPolicy.classifyAutomationFailure(
                 observation.failedStep?.message ?: observation.run.message
@@ -273,6 +276,7 @@ class DreamEvidenceCollector(
     )
 
     private companion object {
+        val failureStatuses = setOf(AutomationRunStatus.Failed, AutomationRunStatus.OutcomeUnknown)
         const val MaxSignals = 500
         const val MaxAutomations = 100
         const val RunsPerAutomation = 20

@@ -22,7 +22,8 @@ data class SessionState(
     val homeSettingsPrompted: Boolean = false,
     val wallpaperUri: String? = null,
     val interactionMode: String = "eyes",
-    val appMode: String = "launcher"
+    val appMode: String = "launcher",
+    val serviceMode: String = "local"
 ) {
     val isLoggedIn: Boolean = !accessToken.isNullOrBlank()
 }
@@ -31,7 +32,17 @@ interface AuthTokenStore {
     suspend fun accessToken(): String?
     suspend fun refreshToken(): String?
     suspend fun setTokens(accessToken: String?, refreshToken: String?)
+    suspend fun setAuthenticatedSession(
+        accessToken: String,
+        refreshToken: String?,
+        serviceMode: String
+    ) {
+        setTokens(accessToken, refreshToken)
+        setServiceMode(serviceMode)
+    }
     suspend fun clearTokens()
+    suspend fun serviceMode(): String = "local"
+    suspend fun setServiceMode(mode: String) = Unit
 }
 
 class SessionStore(private val context: Context) : AuthTokenStore {
@@ -45,6 +56,7 @@ class SessionStore(private val context: Context) : AuthTokenStore {
     private val wallpaperUriKey = stringPreferencesKey("wallpaper_uri")
     private val interactionModeKey = stringPreferencesKey("interaction_mode")
     private val appModeKey = stringPreferencesKey("app_mode")
+    private val serviceModeKey = stringPreferencesKey("service_mode")
 
     val state: Flow<SessionState> = context.sessionDataStore.data.map { prefs ->
         val access = tokenCodec.decode(prefs[accessTokenKey] ?: "")
@@ -60,7 +72,11 @@ class SessionStore(private val context: Context) : AuthTokenStore {
             homeSettingsPrompted = prefs[homeSettingsPromptedKey] ?: false,
             wallpaperUri = prefs[wallpaperUriKey],
             interactionMode = prefs[interactionModeKey] ?: "eyes",
-            appMode = prefs[appModeKey] ?: "launcher"
+            // Aura is a Home launcher. Keep reading the legacy preference store so old
+            // installs migrate without losing any neighboring settings, but do not
+            // resurrect the retired normal/overlay product modes.
+            appMode = "launcher",
+            serviceMode = prefs[serviceModeKey] ?: "local"
         )
     }
 
@@ -86,13 +102,43 @@ class SessionStore(private val context: Context) : AuthTokenStore {
                     prefs[refreshTokenKey] = tokenCodec.encode(refreshToken)
                 }
                 prefs[guestModeKey] = false
-                prefs[onboardingKey] = true
             }
         }
     }
 
+    override suspend fun setAuthenticatedSession(
+        accessToken: String,
+        refreshToken: String?,
+        serviceMode: String
+    ) {
+        require(accessToken.isNotBlank()) { "Access token is required" }
+        context.sessionDataStore.edit { prefs ->
+            prefs[accessTokenKey] = tokenCodec.encode(accessToken)
+            if (refreshToken.isNullOrBlank()) {
+                prefs.remove(refreshTokenKey)
+            } else {
+                prefs[refreshTokenKey] = tokenCodec.encode(refreshToken)
+            }
+            prefs[serviceModeKey] = normalizeServiceMode(serviceMode)
+            prefs[guestModeKey] = false
+        }
+    }
+
     override suspend fun clearTokens() {
-        setTokens(null, null)
+        context.sessionDataStore.edit { prefs ->
+            prefs.remove(accessTokenKey)
+            prefs.remove(refreshTokenKey)
+            prefs[serviceModeKey] = "local"
+            prefs[guestModeKey] = true
+        }
+    }
+
+    override suspend fun serviceMode(): String = state.first().serviceMode
+
+    override suspend fun setServiceMode(mode: String) {
+        context.sessionDataStore.edit { prefs ->
+            prefs[serviceModeKey] = normalizeServiceMode(mode)
+        }
     }
 
     suspend fun setBackgroundListeningEnabled(enabled: Boolean) {
@@ -131,7 +177,10 @@ class SessionStore(private val context: Context) : AuthTokenStore {
 
     suspend fun setAppMode(mode: String) {
         context.sessionDataStore.edit { prefs ->
-            prefs[appModeKey] = mode
+            prefs[appModeKey] = "launcher"
         }
     }
+
+    private fun normalizeServiceMode(mode: String): String =
+        if (mode == "managed") "managed" else "local"
 }
