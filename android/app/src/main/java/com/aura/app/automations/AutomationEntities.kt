@@ -75,3 +75,19 @@ data class AutomationStepRunEntity(
     val startedAt: Long,
     val completedAt: Long? = null
 )
+
+@Entity(
+    tableName = "automation_events",
+    indices = [Index(value = ["automationId", "createdAt"])]
+)
+data class AutomationEventEntity(
+    @PrimaryKey val deliveryId: String,
+    val automationId: String?,
+    val eventType: String,
+    val occurredAt: Long,
+    val valuesJson: String,
+    val status: String,
+    val message: String,
+    val createdAt: Long,
+    val updatedAt: Long
+)

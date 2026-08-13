@@ -38,13 +38,51 @@ interface AutomationDao {
     @Query("DELETE FROM automation_runs WHERE automationId = :automationId")
     suspend fun deleteRuns(automationId: String)
 
+    @Query("DELETE FROM automation_events WHERE automationId = :automationId")
+    suspend fun deleteEvents(automationId: String)
+
     @Transaction
     suspend fun deleteAutomationData(automationId: String) {
         deleteStepRuns(automationId)
         deleteRuns(automationId)
         deleteRunLogs(automationId)
+        deleteEvents(automationId)
         deleteAutomation(automationId)
     }
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertEvent(entity: AutomationEventEntity): Long
+
+    @Query("SELECT * FROM automation_events WHERE deliveryId = :deliveryId LIMIT 1")
+    suspend fun event(deliveryId: String): AutomationEventEntity?
+
+    @Query(
+        "UPDATE automation_events SET status = 'running', message = :message, updatedAt = :updatedAt " +
+            "WHERE deliveryId = :deliveryId AND status = 'queued'"
+    )
+    suspend fun claimEvent(deliveryId: String, message: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE automation_events SET status = :status, message = :message, updatedAt = :updatedAt " +
+            "WHERE deliveryId = :deliveryId"
+    )
+    suspend fun settleEvent(deliveryId: String, status: String, message: String, updatedAt: Long)
+
+    @Query("SELECT deliveryId FROM automation_events WHERE status = 'running'")
+    suspend fun runningEventIds(): List<String>
+
+    @Query(
+        """
+        DELETE FROM automation_events
+        WHERE automationId = :automationId AND status IN ('succeeded', 'failed') AND deliveryId IN (
+            SELECT deliveryId FROM automation_events
+            WHERE automationId = :automationId AND status IN ('succeeded', 'failed')
+            ORDER BY updatedAt DESC, deliveryId DESC
+            LIMIT -1 OFFSET :retainCount
+        )
+        """
+    )
+    suspend fun pruneEvents(automationId: String, retainCount: Int)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRunLog(entity: AutomationRunLogEntity)
