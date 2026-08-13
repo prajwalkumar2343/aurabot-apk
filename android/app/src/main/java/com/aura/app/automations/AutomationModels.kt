@@ -148,6 +148,18 @@ data class AutomationStepRunRecord(
     val completedAt: Long? = null
 )
 
+data class AutomationEventRecord(
+    val deliveryId: String,
+    val automationId: String?,
+    val eventType: String,
+    val occurredAt: Long,
+    val values: Map<String, String>,
+    val status: String,
+    val message: String,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
 object AutomationTriggerTypes {
     const val Geofence = "geofence"
     const val Schedule = "schedule"
@@ -168,24 +180,6 @@ object AutomationActionTypes {
     const val DraftMessage = "draft_message"
     const val EtaMessage = "eta_message"
     const val DirectSms = "direct_sms"
-    const val OpenApp = "open_app"
-    const val WaitForApp = "wait_for_app"
-    const val TapText = "tap_text"
-    const val TapBounds = "tap_bounds"
-    const val TypeText = "type_text"
-    const val WaitForText = "wait_for_text"
-    const val WaitForTarget = "wait_for_target"
-    const val WaitUntilGone = "wait_until_gone"
-    const val WaitForIdle = "wait_for_idle"
-    const val TapTarget = "tap_target"
-    const val LongPressTarget = "long_press_target"
-    const val ClearText = "clear_text"
-    const val Scroll = "scroll"
-    const val ScrollUntilTarget = "scroll_until_target"
-    const val Swipe = "swipe"
-    const val InspectScreen = "inspect_screen"
-    const val PressBack = "press_back"
-    const val PressHome = "press_home"
 }
 
 object AutomationActionTypeSets {
@@ -195,29 +189,37 @@ object AutomationActionTypeSets {
         AutomationActionTypes.DirectSms
     )
 
-    val CrossApp = setOf(
-        AutomationActionTypes.OpenApp,
-        AutomationActionTypes.WaitForApp,
-        AutomationActionTypes.TapText,
-        AutomationActionTypes.TapBounds,
-        AutomationActionTypes.TypeText,
-        AutomationActionTypes.WaitForText,
-        AutomationActionTypes.WaitForTarget,
-        AutomationActionTypes.WaitUntilGone,
-        AutomationActionTypes.WaitForIdle,
-        AutomationActionTypes.TapTarget,
-        AutomationActionTypes.LongPressTarget,
-        AutomationActionTypes.ClearText,
-        AutomationActionTypes.Scroll,
-        AutomationActionTypes.ScrollUntilTarget,
-        AutomationActionTypes.Swipe,
-        AutomationActionTypes.InspectScreen,
-        AutomationActionTypes.PressBack,
-        AutomationActionTypes.PressHome
-    )
-
-    val All = setOf(AutomationActionTypes.Notify) + Message + CrossApp
+    val All = setOf(AutomationActionTypes.Notify) + Message
 }
+
+/** Compatibility-only action names from versions that used the privileged service. */
+object RetiredAutomationActionTypes {
+    val All = setOf(
+        "open_app",
+        "wait_for_app",
+        "tap_text",
+        "tap_bounds",
+        "type_text",
+        "wait_for_text",
+        "wait_for_target",
+        "wait_until_gone",
+        "wait_for_idle",
+        "tap_target",
+        "long_press_target",
+        "clear_text",
+        "scroll",
+        "scroll_until_target",
+        "swipe",
+        "inspect_screen",
+        "press_back",
+        "press_home"
+    )
+}
+
+fun AutomationSpec.hasRetiredAutomationActions(): Boolean =
+    (actions + flow?.steps.orEmpty().mapNotNull { it.action }).any {
+        it.type in RetiredAutomationActionTypes.All
+    }
 
 object AutomationActionMetadata {
     const val PackageName = "packageName"
@@ -276,5 +278,13 @@ object AutomationRunStatus {
     const val Waiting = "waiting"
     const val Success = "success"
     const val Skipped = "skipped"
+    const val Failed = "failed"
+    const val OutcomeUnknown = "outcome_unknown"
+}
+
+object AutomationEventStatus {
+    const val Queued = "queued"
+    const val Running = "running"
+    const val Succeeded = "succeeded"
     const val Failed = "failed"
 }
