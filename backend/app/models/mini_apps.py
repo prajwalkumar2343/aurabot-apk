@@ -126,7 +126,7 @@ class MiniAppRecordOut(StrictModel):
 class MiniAppBuildIn(StrictModel):
     prompt: str = Field(max_length=8000)
     provider: str = "gemini"
-    api_key: str
+    api_key: str = ""
     model: str
     runtime: Optional[str] = None
 
@@ -140,7 +140,7 @@ class MiniAppRevisionIn(StrictModel):
     currentBundle: MiniAppBundle
     recordSample: list[dict[str, object]] = Field(default_factory=list, max_length=8)
     provider: str = "gemini"
-    api_key: str
+    api_key: str = ""
     model: str
     runtime: Optional[str] = None
 
@@ -155,7 +155,7 @@ class MiniAppWidgetBuildIn(StrictModel):
     miniApp: MiniAppBundle
     instruction: str = Field(default="", max_length=1000)
     provider: str = "gemini"
-    api_key: str
+    api_key: str = ""
     model: str
 
 
