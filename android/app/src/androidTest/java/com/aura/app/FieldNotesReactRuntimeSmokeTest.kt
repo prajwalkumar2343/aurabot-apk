@@ -1,6 +1,7 @@
 package com.aura.app
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -19,6 +20,8 @@ import androidx.test.espresso.web.webdriver.DriverAtoms.webClick
 import androidx.test.espresso.web.webdriver.DriverAtoms.webKeys
 import androidx.test.espresso.web.webdriver.Locator
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.aura.app.session.SessionStore
+import kotlinx.coroutines.runBlocking
 import org.hamcrest.CoreMatchers.containsString
 import org.hamcrest.CoreMatchers.not
 import org.junit.Before
@@ -33,7 +36,13 @@ class FieldNotesReactRuntimeSmokeTest {
 
     @Before
     fun resetMiniAppStorage() {
-        ApplicationProvider.getApplicationContext<Context>().deleteDatabase("aura_mini_apps.db")
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase("aura_mini_apps.db")
+        runBlocking {
+            SessionStore(context).setOnboardingComplete(true)
+            SessionStore(context).setHomeSettingsPrompted(true)
+            SessionStore(context).setAppMode("normal")
+        }
     }
 
     @Test
@@ -89,13 +98,19 @@ class FieldNotesReactRuntimeSmokeTest {
     }
 
     private fun waitForWebText(text: String) {
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            runCatching {
+        val deadline = SystemClock.elapsedRealtime() + 20_000
+        var lastFailure: AssertionError? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
                 onWebView()
                     .withElement(findElement(Locator.TAG_NAME, "body"))
                     .check(webMatches(getText(), containsString(text)))
-                true
-            }.getOrDefault(false)
+                return
+            } catch (failure: AssertionError) {
+                lastFailure = failure
+                SystemClock.sleep(100)
+            }
         }
+        throw lastFailure ?: AssertionError("WebView did not display '$text'")
     }
 }
