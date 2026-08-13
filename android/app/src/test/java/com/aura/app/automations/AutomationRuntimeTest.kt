@@ -10,12 +10,66 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import com.google.gson.Gson
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutomationRuntimeTest {
+    @Test
+    fun restoreTriggersQuarantinesLegacyCrossAppAutomationBeforeRearming() = runTest {
+        val dao = RuntimeFakeAutomationDao()
+        val legacy = AutomationSpec(
+            id = "legacy-cross-app",
+            name = "Legacy cross-app rule",
+            enabled = true,
+            trigger = AutomationTrigger(
+                type = AutomationTriggerTypes.Schedule,
+                schedule = ScheduleTrigger(mode = "daily", localTime = "09:00")
+            ),
+            actions = listOf(AutomationAction(type = "open_app"))
+        )
+        dao.upsertAutomation(
+            AutomationEntity(
+                id = legacy.id,
+                name = legacy.name,
+                description = legacy.description,
+                enabled = true,
+                specJson = Gson().toJson(legacy),
+                createdAt = 1_000L,
+                updatedAt = 1_000L
+            )
+        )
+        val repository = AutomationRepository(dao, clock = { 2_000L })
+        val run = repository.createRun(
+            automationId = legacy.id,
+            eventType = AutomationEvents.ScheduleTick,
+            values = emptyMap(),
+            status = AutomationRunStatus.Waiting
+        )
+        val schedules = RecordingScheduleScheduler()
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(
+            repository = repository,
+            geofenceRegistrar = RecordingGeofenceRegistrar(),
+            scheduleScheduler = schedules,
+            flowContinuationScheduler = continuations
+        )
+
+        runtime.restoreTriggers()
+
+        assertFalse(repository.get(legacy.id)?.enabled == true)
+        assertEquals(AutomationRunStatus.Skipped, repository.getRun(run.id)?.status)
+        assertTrue(legacy.id in schedules.cancelledExplicitly)
+        assertTrue(run.id in continuations.cancelled)
+        assertTrue(
+            repository.logs(legacy.id).any {
+                it.message == "Cross-app UI automation was removed; this run was not resumed"
+            }
+        )
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun restoreTriggersSerializesConcurrentRestores() = runTest {
@@ -838,7 +892,22 @@ class AutomationRuntimeTest {
         val geofences = RecordingGeofenceRegistrar()
         val schedules = RecordingScheduleScheduler()
         val continuations = RecordingRuntimeFlowContinuationScheduler()
-        val runtime = AutomationRuntime(repository, geofences, schedules, continuations, clock = { 1_000L })
+        val approvals = mutableListOf<AutomationCheckpointRequest>()
+        val notifier = object : AutomationCheckpointNotifier {
+            override fun present(request: AutomationCheckpointRequest) {
+                approvals += request
+            }
+
+            override fun cancel(runId: String) = Unit
+        }
+        val runtime = AutomationRuntime(
+            repository,
+            geofences,
+            schedules,
+            continuations,
+            clock = { 1_000L },
+            checkpointNotifier = notifier
+        )
         val saved = repository.upsert(checkpointFlowSpec())
         val checkpointStep = saved.flow?.steps?.first() ?: error("checkpoint step missing")
         val run = waitingRun(repository, saved, checkpointStep)
@@ -848,6 +917,8 @@ class AutomationRuntimeTest {
         assertEquals(AutomationRunStatus.Waiting, repository.getRun(run.id)?.status)
         assertTrue(run.id in continuations.cancelled)
         assertFalse(run.id in continuations.scheduled)
+        assertEquals(run.id, approvals.single().runId)
+        assertEquals(saved.name, approvals.single().automationName)
     }
 
     @Test
@@ -871,6 +942,57 @@ class AutomationRuntimeTest {
 
         assertEquals(AutomationRunStatus.Failed, repository.getRun(run.id)?.status)
         assertEquals("Automation run was interrupted before completion", repository.getRun(run.id)?.message)
+        assertTrue(run.id in continuations.cancelled)
+        assertEquals(null, repository.activeRun(saved.id))
+    }
+
+    @Test
+    fun restoreMarksInterruptedIrreversibleStepOutcomeUnknown() = runTest {
+        val repository = AutomationRepository(RuntimeFakeAutomationDao(), clock = { 1_000L })
+        val continuations = RecordingRuntimeFlowContinuationScheduler()
+        val runtime = AutomationRuntime(
+            repository,
+            RecordingGeofenceRegistrar(),
+            RecordingScheduleScheduler(),
+            continuations,
+            clock = { 1_000L }
+        )
+        val saved = repository.upsert(
+            AutomationSpec(
+                id = "direct-sms-flow",
+                name = "Direct SMS flow",
+                trigger = AutomationTrigger(type = AutomationTriggerTypes.Manual),
+                flow = AutomationFlow(
+                    steps = listOf(
+                        AutomationFlowStep(id = "confirm", type = AutomationFlowStepTypes.Checkpoint),
+                        AutomationFlowStep(
+                            id = "send",
+                            type = AutomationFlowStepTypes.Action,
+                            action = AutomationAction(
+                                type = AutomationActionTypes.DirectSms,
+                                messageTemplate = "On my way",
+                                recipientAddress = "+15555550123",
+                                requireConfirmation = false
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val run = repository.createRun(saved.id, AutomationEvents.Manual, emptyMap())
+        repository.startStep(
+            runId = run.id,
+            automationId = saved.id,
+            step = saved.flow?.steps?.last() ?: error("send step missing"),
+            stepIndex = 1,
+            attempt = 1
+        )
+
+        runtime.restoreTriggers()
+
+        val restored = repository.getRun(run.id)
+        assertEquals(AutomationRunStatus.OutcomeUnknown, restored?.status)
+        assertTrue(restored?.message.orEmpty().contains("verify the external result"))
         assertTrue(run.id in continuations.cancelled)
         assertEquals(null, repository.activeRun(saved.id))
     }
@@ -1111,6 +1233,7 @@ private class ReleasableRuntimeActionExecutor : AutomationActionExecutor {
 private class RuntimeFakeAutomationDao : AutomationDao {
     private val automations = linkedMapOf<String, AutomationEntity>()
     private val logs = mutableListOf<AutomationRunLogEntity>()
+    private val events = linkedMapOf<String, AutomationEventEntity>()
     var listStarted: CompletableDeferred<Unit>? = null
     var listGate: CompletableDeferred<Unit>? = null
     var maxConcurrentListCalls = 0
@@ -1167,6 +1290,44 @@ private class RuntimeFakeAutomationDao : AutomationDao {
         runs.entries.removeAll { it.value.automationId == automationId }
     }
 
+    override suspend fun deleteEvents(automationId: String) {
+        events.entries.removeAll { it.value.automationId == automationId }
+    }
+
+    override suspend fun insertEvent(entity: AutomationEventEntity): Long {
+        if (entity.deliveryId in events) return -1L
+        events[entity.deliveryId] = entity
+        return 1L
+    }
+
+    override suspend fun event(deliveryId: String): AutomationEventEntity? = events[deliveryId]
+
+    override suspend fun claimEvent(deliveryId: String, message: String, updatedAt: Long): Int {
+        val event = events[deliveryId]?.takeIf { it.status == AutomationEventStatus.Queued } ?: return 0
+        events[deliveryId] = event.copy(status = AutomationEventStatus.Running, message = message, updatedAt = updatedAt)
+        return 1
+    }
+
+    override suspend fun settleEvent(deliveryId: String, status: String, message: String, updatedAt: Long) {
+        events[deliveryId]?.let { events[deliveryId] = it.copy(status = status, message = message, updatedAt = updatedAt) }
+    }
+
+    override suspend fun runningEventIds(): List<String> =
+        events.values.filter { it.status == AutomationEventStatus.Running }.map { it.deliveryId }
+
+    override suspend fun pruneEvents(automationId: String, retainCount: Int) {
+        val retained = events.values
+            .filter { it.automationId == automationId && it.status in setOf(AutomationEventStatus.Succeeded, AutomationEventStatus.Failed) }
+            .sortedWith(compareByDescending<AutomationEventEntity> { it.updatedAt }.thenByDescending { it.deliveryId })
+            .take(retainCount)
+            .mapTo(mutableSetOf()) { it.deliveryId }
+        events.entries.removeAll {
+            it.value.automationId == automationId &&
+                it.value.status in setOf(AutomationEventStatus.Succeeded, AutomationEventStatus.Failed) &&
+                it.key !in retained
+        }
+    }
+
     override suspend fun insertRunLog(entity: AutomationRunLogEntity) {
         logs += entity
     }
@@ -1212,6 +1373,7 @@ private class RuntimeFakeAutomationDao : AutomationDao {
         runs.values.filter { it.automationId == automationId }.sortedByDescending { it.updatedAt }.take(limit)
 
     override suspend fun insertStepRun(entity: AutomationStepRunEntity) {
+        stepRuns.removeAll { it.id == entity.id }
         stepRuns += entity
     }
 
